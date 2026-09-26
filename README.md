@@ -207,9 +207,17 @@ php artisan test                  # 75 tests, 310 assertions
 ./vendor/bin/pint                 # code style
 ```
 
-> **`php artisan test` runs against `hrms_laravel`** (set in `phpunit.xml`) and uses
-> `RefreshDatabase`, which issues `migrate:fresh` on first run. Re-run
-> `php artisan db:seed` afterwards to restore local seed data.
+> **Two databases — development vs testing**
+>
+> | Purpose | Database | Configured in |
+> |---|---|---|
+> | Development | `hrms_laravel` | `backend/.env` |
+> | Testing | `hrms_testing` | `backend/phpunit.xml` |
+>
+> `RefreshDatabase` runs `migrate:fresh` (drops every table), so tests are pointed at
+> `hrms_testing` to keep local data safe. Running `php artisan test` does **not** wipe
+> `hrms_laravel` — no re-seed needed afterwards. See
+> [`docs/DATABASE.md`](docs/DATABASE.md) §"Development vs testing database".
 
 ### Frontend
 

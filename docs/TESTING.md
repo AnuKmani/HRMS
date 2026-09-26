@@ -29,14 +29,33 @@ where most tests belong. UI tests confirm rendering, not business logic.
 
 | Concern | Approach |
 |---|---|
-| Database | **Separate test database**, or `RefreshDatabase` with MariaDB |
+| Database | **`hrms_testing`** — separate schema, reset by `RefreshDatabase` |
 | Filesystem | `storage/framework/testing` / fake disk |
 | Network | HTTP calls faked in Flutter tests |
 | FCM | Fake notification channel |
 | Queue | `QUEUE_CONNECTION=sync` in tests, or `Bus::fake()` |
 | External API | Http fake — never hit a real service |
 
-`phpunit.xml` must point at a **test** database. Tests must never touch real data.
+`phpunit.xml` points at a **test** database. Tests must never touch real data.
+
+### The two databases
+
+| Purpose | Database | Configured in |
+|---|---|---|
+| Development | `hrms_laravel` | `backend/.env` → `DB_DATABASE` |
+| Testing | `hrms_testing` | `backend/phpunit.xml` → `<env name="DB_DATABASE">` |
+
+`RefreshDatabase` runs `migrate:fresh`, which **drops every table**. Pointing that at
+`hrms_laravel` would destroy local data on every `php artisan test`, so only
+`DB_DATABASE` is overridden in `phpunit.xml` — host, port and credentials still come
+from `.env`, keeping secrets out of git.
+
+```bash
+php artisan test      # hrms_testing only — hrms_laravel untouched
+```
+
+`hrms_testing` is disposable and rebuilt from migrations each run. See
+[`DATABASE.md`](DATABASE.md) §"Development vs testing database".
 
 ---
 

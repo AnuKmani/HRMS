@@ -22,10 +22,21 @@
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="CACHE_STORE" value="array"/>
-        <!-- Tests run against the same permitted development database.
-             RefreshDatabase issues migrate:fresh, so re-seed afterwards. -->
+        <!--
+            TESTS RUN AGAINST A DEDICATED DATABASE.
+
+            RefreshDatabase issues `migrate:fresh`, which DROPS every table.
+            Pointing that at the development database (hrms_laravel) would wipe
+            local data on every test run, so tests use `hrms_testing` instead.
+
+            Only DB_DATABASE is overridden here: DB_HOST / DB_PORT /
+            DB_USERNAME / DB_PASSWORD are inherited from .env, so no
+            credentials are committed to git.
+
+            See docs/DATABASE.md §"Development vs testing database".
+        -->
         <env name="DB_CONNECTION" value="mysql"/>
-        <env name="DB_DATABASE" value="hrms_laravel"/>
+        <env name="DB_DATABASE" value="hrms_testing"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="QUEUE_CONNECTION" value="sync"/>

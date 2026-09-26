@@ -406,10 +406,24 @@ late-arrival escalation, sick-certificate deadline, certificate-required thresho
 notification reminder offset, daily digest time, document expiry warning, default
 working hours (JSON), date format, currency.
 
-> **Caveat:** cache invalidation hangs off Eloquent model events, so settings must be
-> written through the `Setting` model (`$setting->update(...)`, `updateOrCreate`).
-> A raw `DB::table('settings')->update(...)` will bypass it and leave a stale cache
-> until something else flushes it. This is asserted in `SettingsTest`.
+> **Rule — all settings writes go through the model.** Cache invalidation hangs off
+> Eloquent `saved`/`deleted` events registered in `AppServiceProvider`, so every write
+> **must** use the `Setting` model: `$setting->update(...)`, `Setting::create(...)`,
+> `Setting::updateOrCreate(...)`. A raw `DB::table('settings')->update(...)` or
+> `Setting::query()->update(...)` (mass update on an unhydrated model) bypasses those
+> events and leaves a stale cache until something else flushes it.
+>
+> **Convention confirmed across the codebase** — the only write paths are:
+>
+> | Writer | Style | Invalidation |
+> |---|---|---|
+> | `SettingSeeder` | `Setting::query()->updateOrCreate(...)` | ✅ model events + explicit `refresh()` |
+> | `SettingFactory` / tests | `Setting::create(...)`, `->first()->update(...)` | ✅ model events |
+> | Application code | `SettingsService` (read-only) | n/a — reads never write |
+>
+> There is **no** `DB::table('settings')` call anywhere in `app/`, `database/` or
+> `tests/`. `SettingsTest` asserts the cache actually refreshes after a write, so a
+> future regression to a bypassing write style fails the suite.
 
 **How this differs from hard-coding:** a grace period of 10 minutes written in source
 requires a code change, a review, a deploy and a restart on every environment. Stored

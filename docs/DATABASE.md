@@ -16,8 +16,40 @@
 | Host | `127.0.0.1` |
 | Port | `3306` |
 | Database | `hrms_laravel` |
-| Username | `hrms_app` — scoped to `hrms_laravel` only, never `root` |
+| Username | `hrms_app` — scoped to `hrms_laravel` + `hrms_testing` only, never `root` |
 | Password | `DB_PASSWORD` in `backend/.env` (git-ignored, never committed) |
+
+### Development vs testing database
+
+Two separate databases. **Tests must never touch the development one.**
+
+| Purpose | Database | Set by | Used for |
+|---|---|---|---|
+| **Development** | `hrms_laravel` | `backend/.env` → `DB_DATABASE` | `artisan serve`, tinker, migrations, local data |
+| **Testing** | `hrms_testing` | `backend/phpunit.xml` → `<env name="DB_DATABASE">` | `php artisan test` |
+
+**Why the separation is mandatory:** `RefreshDatabase` issues `migrate:fresh`, which
+**drops every table** in the connected database. Before this was split, running the test
+suite silently wiped local development data and required a re-seed afterwards.
+
+```bash
+php artisan test          # touches hrms_testing only
+php artisan migrate       # touches hrms_laravel only
+```
+
+Rules that keep this safe:
+
+- `phpunit.xml` overrides **only** `DB_DATABASE`. `DB_HOST`, `DB_PORT`, `DB_USERNAME`
+  and `DB_PASSWORD` are inherited from `.env`, so **no credentials are committed**.
+- `.env` always points at `hrms_laravel`. Never point it at `hrms_testing`.
+- `hrms_app` holds **schema-level privileges on exactly these two databases** and
+  `USAGE` globally — no `GRANT ... ON *.*`.
+- Databases `hrms`, `hrms_corruption_probe` and every other schema on this server
+  belong to unrelated projects and are **never** granted to `hrms_app`, never
+  migrated, never dropped.
+
+`hrms_testing` is disposable: it is recreated from the migrations on every test run
+and holds no data worth keeping.
 
 ---
 
@@ -580,5 +612,6 @@ assert the exact vocabulary:
 `salary_slips`, `salary_certificate_requests`, `loans`, `loan_installments`,
 `expenses`, `expense_receipts`, `device_tokens`.
 
-> **Current state:** only `hrms_laravel` is used. Other databases on this machine
-> belong to previous, unrelated projects and are left untouched.
+> **Current state:** only `hrms_laravel` (development) and `hrms_testing` (automated
+> tests) are used. Other databases on this machine belong to previous, unrelated
+> projects and are left untouched. See §"Development vs testing database".
