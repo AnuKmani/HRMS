@@ -1,0 +1,186 @@
+# =====================================================================
+# HRMS - Root .gitignore
+# Monorepo: Laravel REST API (backend/) + Flutter app (mobile/)
+# =====================================================================
+
+# ---------------------------------------------------------------------
+# 1. SECRETS - NEVER COMMIT THESE (highest priority)
+# ---------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Laravel encryption key
+/backend/.env
+
+# ---------------------------------------------------------------------
+# Firebase / Google credentials - NEVER COMMIT THESE
+# Patterns use **/ (or no path at all) so the file is ignored at ANY
+# depth in the repo, wherever it is dropped.
+# ---------------------------------------------------------------------
+# Android client config
+**/google-services.json
+
+# iOS client config
+**/GoogleService-Info.plist
+
+# Server-side Firebase Admin SDK / service-account keys
+*-firebase-adminsdk-*.json
+*firebase-adminsdk*.json
+service-account*.json
+*service-account*.json
+firebase-admin*.json
+firebase-service-account.json
+
+# Signing keystores & certificates (Android release signing)
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+*.ppk
+
+# iOS provisioning / signing
+*.mobileprovision
+*.certSigningRequest
+
+# VS Code / IDE signing notes
+*.secrets.json
+secrets/
+private/
+
+# ---------------------------------------------------------------------
+# 2. LARAVEL / PHP (backend/)
+# ---------------------------------------------------------------------
+/backend/vendor/
+/backend/node_modules/
+/backend/public/hot
+/backend/public/storage
+/backend/storage/*.key
+/backend/storage/pail.log
+/backend/storage/logs/*.log
+/backend/storage/framework/cache/data/*
+/backend/storage/framework/sessions/*
+/backend/storage/framework/testing/*
+/backend/storage/framework/views/*
+/backend/storage/app/private/*
+!/backend/storage/app/.gitignore
+/backend/bootstrap/cache/*.php
+/backend/bootstrap/cache/*.json
+/phpunit.xml
+.phpunit.result.cache
+.phpunit.cache/
+/coverage/
+/build/
+
+# ---------------------------------------------------------------------
+# 3. FLUTTER / DART (mobile/)
+# ---------------------------------------------------------------------
+mobile/.dart_tool/
+mobile/.packages
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/build/
+mobile/.pub-cache/
+mobile/.pub/
+# NOTE: mobile/pubspec.lock is intentionally NOT ignored.
+# Flutter apps (unlike packages) commit the lockfile for reproducible builds.
+mobile/.metadata
+mobile/ios/Pods/
+mobile/ios/.symlinks/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/app/debug/
+mobile/android/app/profile/
+mobile/android/app/release/
+mobile/**/GeneratedPluginRegistrant.*
+mobile/**/gradle-wrapper.jar
+mobile/android/key.properties
+mobile/ios/Flutter/Flutter.framework
+mobile/ios/Flutter/Flutter.podspec
+mobile/ios/Flutter/Generated.xcconfig
+mobile/ios/Flutter/flutter_export_environment.sh
+mobile/ios/Flutter/App.framework
+mobile/ios/Flutter/app.ios_dSYM.zip
+mobile/windows/flutter/ephemeral/
+mobile/linux/flutter/ephemeral/
+mobile/macos/Flutter/ephemeral/
+mobile/.fvm/
+
+# ---------------------------------------------------------------------
+# 4. TOOL CHAINS (installed on F:, but never committed if mirrored)
+# ---------------------------------------------------------------------
+flutter/
+android-sdk/
+jdk/
+gradle-cache/
+pub-cache/
+tools/
+
+# ---------------------------------------------------------------------
+# 5. NODE / BUILD TOOLING
+# ---------------------------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+/dist/
+/.next/
+/.nuxt/
+/.output/
+
+# ---------------------------------------------------------------------
+# 6. EDITOR & OS
+# ---------------------------------------------------------------------
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+$RECYCLE.BIN/
+
+# ---------------------------------------------------------------------
+# 7. DATABASE DUMPS & BACKUPS (never commit real data)
+# ---------------------------------------------------------------------
+*.sql
+*.sql.gz
+*.sqlite
+*.sqlite3
+*.db
+dumps/
+backups/
+
+# ---------------------------------------------------------------------
+# 8. LOGS & DEBUG
+# ---------------------------------------------------------------------
+*.log
+logs/
+npm-debug.log
+yarn-debug.log
+*.pid
+*.seed
+*.pid.lock
+
+# ---------------------------------------------------------------------
+# 9. MISC
+# ---------------------------------------------------------------------
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+cache/
+.tmp/
+temp/
