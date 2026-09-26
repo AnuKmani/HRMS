@@ -1,9 +1,10 @@
 # Database Design
 
-> **Status:** Phase 1 — Foundation. The HRMS business tables defined below have **not**
-> been created yet — only Laravel's base tables (`users`, `cache`, `jobs`, `sessions`,
-> `password_reset_tokens`, `personal_access_tokens`) currently exist.
-> This document will be updated with the actual migration list as Phase 2 is implemented.
+> **Status:** Phase 2 — Core schema implemented. Laravel's base tables plus 10 Phase 2
+> migrations now exist: `settings`, `departments`, `designations`, `shifts`, `projects`,
+> `employees`, `sites`, `employee_site_assignments` and the `spatie/laravel-permission`
+> RBAC tables. Tables for later phases (`attendances`, `leave_requests`, `payrolls`, …)
+> are **design only** and have not been created.
 
 **DBMS:** MariaDB 10.4.28 (XAMPP)
 **Charset:** `utf8mb4` / collation `utf8mb4_unicode_ci`
@@ -78,12 +79,20 @@ document types are *configurable by HR*. An `ENUM` requires a schema change to a
 ```
 departments 1 ──── * employees * ──── 1 designations
                               │
-                              ├── 1 ──── 1 users
+                              ├── 1 ──── 1 users (nullable)
                               │
                               ├── * ──── 1 reporting_manager (self FK)
                               │
-                              └── * ──── 1 photo (private storage path)
+                              └── └── * ──── 1 photo (private storage path)
 ```
+
+**Implemented ✅** — `departments`, `designations` and `employees` exist. Names are
+stored **structured** (`first_name`, `middle_name`, `last_name`) rather than as a
+single `full_name`, so records sort correctly by surname and print correctly on
+contracts; `Employee::$full_name` and `$initials` accessors compose them on demand.
+
+Sensitive documents are deliberately **not** columns on `employees` — `photo_path`
+is a private-storage path, and everything else belongs to `employee_documents` (Phase 10).
 
 ---
 
@@ -100,6 +109,15 @@ departments 1 ──── * employees * ──── 1 designations
 #### Why assignments are a separate table
 
 The requirement is explicit: *do not simply overwrite the employee's previous site.*
+
+**Implemented ✅** — migration `2026_09_27_000008`, model
+`App\Models\EmployeeSiteAssignment`. Three integrity guarantees are enforced by the
+schema and verified by `AssignmentHistoryTest`:
+
+1. `RESTRICT` on all three FKs — you cannot hard-delete an employee, project or site
+   that has assignment history.
+2. No `deleted_at` — assignments are immutable history, not master data.
+3. `end()` closes a row (`status = 'ended'`, `end_date = today`) instead of deleting it.
 
 ```
 employee_site_assignments
@@ -121,8 +139,17 @@ employee_site_assignments
 sites
   latitude          DECIMAL(10,7)   -- never hard-coded
   longitude         DECIMAL(10,7)
-  geofence_radius   INT (metres)    -- configurable per site by HR/Admin
+  geofence_radius   DECIMAL(8,2)    -- configurable per site by HR/Admin
 ```
+
+`DECIMAL`, not `FLOAT`: binary floating point rounds unpredictably, which matters
+when a decision ("was this check-in inside the geofence?") hinges on centimetres.
+
+A site may also point at a `working_hours_setting_id` row in `settings` rather
+than copying hours into its own columns — configuration is referenced, not duplicated.
+
+**Implemented ✅** — migration `2026_09_27_000007_create_sites_table`, model
+`App\Models\Site`, tested by `ProjectSiteRelationshipTest`.
 
 ---
 
@@ -193,7 +220,7 @@ only if a requirement for multiple location pings per punch emerges.
 | `leave_requests` | Request with dates, reason, status (Draft/Pending/Approved/Rejected/Cancelled/LOP), approval route snapshot |
 | `leave_documents` | Medical certificate and other attachments |
 
-**Sick leave rule (configurable, default 2 days):**
+**Sick leave rule (configurable, default 3 days):**
 
 ```
 Employee submits sick leave
@@ -241,32 +268,56 @@ marked LOP, approved loans, approved expenses.
 
 ## 3. Relationship Summary
 
+**Implemented (Phase 2) — solid lines exist in the database today:**
+
 ```
-users ── 1:1 ── employees ──*── departments
-                        │              │
-                        │              └── designations
+users ── 1:0..1 ── employees ──*── departments ──*── designations
                         │
                         ├──*── employee_site_assignments *── projects *── sites
-                        │                                              │
-                        │                                              └── shifts
-                        │
-                        ├──*── attendances *── sites
-                        ├──*── site_visits  *── sites
-                        ├──*── site_activity_reports *── sites
-                        ├──*── timesheets
-                        ├──*── overtime_requests
-                        ├──*── leave_requests *── leave_types
-                        │                        └── leave_balances
-                        ├──*── payrolls *── payroll_items
-                        ├──*── salary_slips
-                        ├──*── salary_certificate_requests
-                        ├──*── loans *── loan_installments
-                        ├──*── expenses *── expense_receipts
-                        ├──*── employee_documents
-                        ├──*── employee_trainings *── trainings
-                        ├──*── asset_assignments *── assets
-                        └──*── notifications
+                        │                                    │            │
+                        │                                    │            ├── shifts
+                        │                                    │            └── settings (working hours)
+                        │                                    └── project_manager ─┐
+                        ├─── reporting_manager (self FK)                          │
+                        └─── primary_site / primary_project ──────────────────────┘
+
+users ──*── roles ──*── permissions          (spatie/laravel-permission)
+settings  (standalone typed key/value store)
 ```
+
+**Circular-reference note:** `employees.primary_project_id → projects` and
+`projects.project_manager_id → employees` are mutually referential, as are
+`employees.primary_site_id → sites` and `sites.site_manager_id → employees`. Both
+pairs are created across two migrations (see §6) to avoid a circular dependency
+at schema-creation time. They are *not* an architectural loop — one side is a
+"current placement" pointer, the other is a staffed-role pointer.
+
+**Designed but not yet created (Phases 5–12):**
+
+```
+employees ──*── attendances *── sites
+           ├──*── site_visits  *── sites
+           ├──*── site_activity_reports *── sites
+           ├──*── timesheets
+           ├──*── overtime_requests
+           ├──*── leave_requests *── leave_types
+           │                        └── leave_balances
+           ├──*── payrolls *── payroll_items
+           ├──*── salary_slips
+           ├──*── salary_certificate_requests
+           ├──*── loans *── loan_installments
+           ├──*── expenses *── expense_receipts
+           ├──*── employee_documents
+           ├──*── employee_trainings *── trainings
+           ├──*── asset_assignments *── assets
+           └──*── notifications
+```
+
+**Relationships deliberately *not* added:** there is no
+`employees.many-to-many sites` pivot, no `departments → projects`, and no
+`designations → sites`. The append-only `employee_site_assignments` table is the
+single source of truth for placement, so a second path would only create a way
+for the two to disagree.
 
 ---
 
@@ -291,15 +342,27 @@ verified with `DB::enableQueryLog()` during testing.
 
 ## 5. Seed Data (Phase 2)
 
-| Seeded | Count |
-|---|---|
-| Roles | 10 |
-| Permissions | ~40 (see §Permissions in ARCHITECTURE) |
-| Departments / Designations | Sample set |
-| Settings | All configurable defaults |
-| Leave types | Annual, Sick, Emergency, Unpaid, Other |
-| Shifts | General, Morning, Evening, Night |
-| Demo projects + sites (with real coordinates) | 2–3 |
+All counts below are **live and verified** against `hrms_laravel` after
+`php artisan migrate:fresh --seed`.
+
+| Seeded | Count | Seeder |
+|---|---|---|
+| Roles | 10 | `RoleSeeder` |
+| Permissions | 39 | `PermissionSeeder` |
+| Role → permission grants | 163 | `RolePermissionSeeder` |
+| Settings | 12 | `SettingSeeder` |
+| Shifts | 4 — General, Morning, Evening, Night | `DevelopmentDataSeeder` |
+| Departments | 4 *(development sample)* | `DevelopmentDataSeeder` |
+| Designations | 8 *(development sample)* | `DevelopmentDataSeeder` |
+
+Not yet seeded (later phases): leave types, demo projects/sites.
+
+> ⚠️ `DevelopmentDataSeeder` contains **sample structure only**. It creates no
+> employees, users, salaries or assignments. Every row it writes is labelled
+> *"Development sample data."* in its `description`.
+>
+> All five seeders are **idempotent** (`firstOrCreate` / `updateOrCreate`), so
+> `php artisan db:seed` can be re-run safely without duplicating rows.
 
 ---
 
@@ -307,11 +370,215 @@ verified with `DB::enableQueryLog()` during testing.
 
 | Phase | Migrations | Status |
 |---|---|---|
-| 1 | *(none — foundation only)* | ⬜ |
-| 2 | Core schema | ⬜ |
+| 1 | `0001_01_01_*` framework tables + `2026_09_26_170015` Sanctum tokens | ✅ |
+| 2 | Core schema — 10 migrations, see below | ✅ |
 | 3 | Auth + Sanctum | ⬜ |
-| 4 | Employees / Projects / Sites | ⬜ |
+| 4 | Employees / Projects / Sites *(controllers & routes)* | ⬜ |
 | 5 | Attendance | ⬜ |
 
-> **Current state:** the database has **not** been created yet. Existing databases on this
-> machine belong to a previous, unrelated project and are left untouched.
+### Phase 2 migrations (all `Ran`)
+
+| # | Migration | Creates |
+|---|---|---|
+| 1 | `2026_09_26_185514_create_permission_tables` | `roles`, `permissions`, `model_has_roles`, `model_has_permissions`, `role_has_permissions` |
+| 2 | `2026_09_27_000001_create_settings_table` | `settings` |
+| 3 | `2026_09_27_000002_create_departments_table` | `departments` |
+| 4 | `2026_09_27_000003_create_designations_table` | `designations` |
+| 5 | `2026_09_27_000004_create_shifts_table` | `shifts` |
+| 6 | `2026_09_27_000005_create_projects_table` | `projects` |
+| 7 | `2026_09_27_000006_create_employees_table` | `employees` |
+| 8 | `2026_09_27_000007_create_sites_table` | `sites` |
+| 9 | `2026_09_27_000008_create_employee_site_assignments_table` | `employee_site_assignments` |
+| 10 | `2026_09_27_000009_add_deferred_foreign_keys` | FKs deferred to break circular refs |
+
+**23 tables** total in `hrms_laravel` (14 migrations + 9 framework/RBAC tables).
+
+### Why two foreign keys are "deferred"
+
+Two relationships are circular and cannot be declared while their target table
+is still being created:
+
+```
+employees.primary_project_id ──→ projects      (employees created after projects)
+projects.project_manager_id  ──→ employees     (projects created before employees)
+
+employees.primary_site_id    ──→ sites         (employees created before sites)
+sites.site_manager_id        ──→ employees     (sites created after employees)
+```
+
+Migration `2026_09_27_000009_add_deferred_foreign_keys` adds the two
+*employee-side* constraints (`employees.primary_site_id`, `projects.project_manager_id`)
+after both tables exist. The reverse direction was already declarable, so no
+constraint is missing — `information_schema` confirms **21 foreign keys** in total.
+
+---
+
+## 7. Foreign Key & Cascade Policy
+
+Every cascade choice is deliberate. **No historical HR record is ever destroyed
+by a cascade.**
+
+| Relationship | ON DELETE | Reasoning |
+|---|---|---|
+| `employee_site_assignments` → `employees` / `projects` / `sites` | **RESTRICT** | Append-only history. Hard-deleting a project or site that has assignment history is blocked outright. |
+| `sites` → `projects` | **RESTRICT** | A site cannot exist without its project. |
+| `employees.reporting_manager_id` → `employees` | `SET NULL` | Clearing a reporting line must never delete the report. |
+| `employees.project_manager_id` / `project_manager_id` → `employees` | `SET NULL` | Manager removed → reference cleared, project survives. |
+| `employees.department_id` / `designation_id` | `SET NULL` | Org structure is reorganised often; employees must survive. |
+| `employees.user_id` → `users` | `SET NULL` | The HR record outlives the login account. |
+| `sites.site_manager_id` / `site_supervisor_id` | `SET NULL` | Staffing changes, not data deletion. |
+| `sites.working_hours_setting_id` → `settings` | `SET NULL` | Config reference, falls back to the global default. |
+| `roles`/`permissions` pivot tables | `CASCADE` | RBAC pivots are derived data, safe to rebuild. |
+
+**Soft deletes** (`deleted_at`) are used on master data where recoverability
+matters: `departments`, `designations`, `employees`, `projects`, `sites`, `shifts`.
+`employee_site_assignments` and `settings` are **not** soft-deleted — assignments
+are immutable history, settings are a small config table.
+
+> **Note:** a *soft* delete does not fire any FK rule, so references stay intact
+> and the record can be restored. Only `forceDelete()` triggers `SET NULL` /
+> `RESTRICT`. Both behaviours are covered by tests.
+
+---
+
+## 8. Implemented Indexes
+
+| Table | Index | Purpose |
+|---|---|---|
+| `settings` | `UNIQUE (key)` | Config lookups, no duplicate keys |
+| `settings` | `(group)` | Settings screen grouping |
+| `departments` | `UNIQUE (code)` | Short stable reference |
+| `designations` | `UNIQUE (code)` | Short stable reference |
+| `designations` | `(department_id, status)` | "Active titles in this dept" |
+| `employees` | `UNIQUE (employee_code)` | Business key |
+| `employees` | `UNIQUE (email)` | Login / contact identity |
+| `employees` | `UNIQUE (user_id)` | Enforces 1:1 with `users` |
+| `employees` | `(department_id, employment_status)` | Headcount reports |
+| `employees` | `(joining_date)` | Join-date ranges |
+| `projects` | `UNIQUE (code)` | Short stable reference |
+| `projects` | `(status)` | Portfolio filters |
+| `sites` | `UNIQUE (code)` | Short stable reference |
+| `sites` | `(project_id, status)` | Sites per project |
+| `shifts` | `UNIQUE (code)` | Short stable reference |
+| `shifts` | `(crosses_midnight)` | Overnight-shift duration queries |
+| `employee_site_assignments` | `(employee_id, status)` | Find a person's current site |
+| `employee_site_assignments` | `(site_id, start_date)` | Who was on this site, when |
+
+Composite indexes were chosen for the two filters that appear together most
+often in HR reports: *department × status* and *site × start date*.
+
+**N+1 prevention:** all list endpoints eager-load their relations via `with()`, and are
+verified with `DB::enableQueryLog()` during testing.
+
+---
+
+## 9. Phase 2 Tables — Full Column Reference
+
+```
+settings
+  id              BIGINT PK
+  key             VARCHAR(120) UNIQUE      -- "attendance.grace_period_minutes"
+  value           TEXT NULL                -- raw; typed via Setting::castValue()
+  type            VARCHAR(20)              -- string|integer|boolean|decimal|json|date|time
+  group           VARCHAR(40) INDEX        -- attendance|leave|notification|working_hours|system
+  label           VARCHAR(150)
+  description     VARCHAR(500) NULL
+  is_editable     TINYINT(1)
+  created_at, updated_at
+
+departments
+  id, name VARCHAR(120), code VARCHAR(30) UNIQUE, description VARCHAR(500) NULL,
+  status VARCHAR(20) DEFAULT 'active', created_at, updated_at, deleted_at
+
+designations
+  id, department_id FK→departments NULL ON DELETE SET NULL, name, code UNIQUE,
+  description NULL, status, created_at, updated_at, deleted_at
+
+shifts
+  id, name, code UNIQUE,
+  start_time TIME, end_time TIME,
+  crosses_midnight TINYINT(1) INDEX   -- derived: end <= start
+  break_duration SMALLINT (minutes), grace_period SMALLINT (minutes),
+  minimum_working_hours DECIMAL(4,2), overtime_threshold DECIMAL(4,2),
+  status, created_at, updated_at, deleted_at
+
+projects
+  id, name, code UNIQUE, client NULL, description NULL, location NULL,
+  project_manager_id FK→employees NULL,   -- FK added by deferred migration
+  start_date DATE NULL, end_date DATE NULL, status DEFAULT 'planned',
+  created_at, updated_at, deleted_at
+
+employees
+  id, user_id FK→users UNIQUE NULL, employee_code UNIQUE,
+  first_name, middle_name NULL, last_name, photo_path NULL,
+  email UNIQUE, phone NULL,
+  date_of_birth DATE NULL, nationality NULL, address NULL,
+  emergency_contact_name / _phone / _relation NULL,
+  joining_date DATE,
+  department_id FK NULL, designation_id FK NULL,
+  employment_type VARCHAR(20) DEFAULT 'permanent',
+  reporting_manager_id FK→employees NULL,
+  primary_project_id FK→projects NULL,
+  primary_site_id FK→sites NULL,         -- FK added by deferred migration
+  salary DECIMAL(12,2) NULL,
+  employment_status VARCHAR(20) DEFAULT 'active',
+  created_at, updated_at, deleted_at
+
+sites
+  id, project_id FK→projects RESTRICT, name, code UNIQUE, address NULL,
+  latitude DECIMAL(10,7) NULL, longitude DECIMAL(10,7) NULL,
+  geofence_radius DECIMAL(8,2) NULL,      -- metres, per site
+  site_manager_id FK NULL, site_supervisor_id FK NULL,
+  working_hours_setting_id FK→settings NULL,
+  shift_id FK→shifts NULL,
+  status DEFAULT 'active', created_at, updated_at, deleted_at
+
+employee_site_assignments               -- append-only, NO deleted_at
+  id, employee_id FK RESTRICT, project_id FK RESTRICT, site_id FK RESTRICT,
+  assignment_type VARCHAR(20) DEFAULT 'primary',   -- primary|temporary|additional
+  start_date DATE, end_date DATE NULL,
+  status VARCHAR(20) DEFAULT 'active',             -- active|ended|cancelled
+  created_by FK→users NULL, created_at, updated_at
+```
+
+### Status vocabularies
+
+These are **fixed, app-enforced** enumerations (PHP constants on each model),
+not MySQL `ENUM`, so adding a value never needs a schema change and the tests
+assert the exact vocabulary:
+
+| Table | Column | Values |
+|---|---|---|
+| `employees` | `employment_status` | `active`, `inactive`, `resigned`, `terminated`, `on_leave` |
+| `employees` | `employment_type` | `permanent`, `contract`, `probation`, `internship`, `part_time` |
+| `projects` | `status` | `planned`, `active`, `on_hold`, `completed`, `cancelled` |
+| `employee_site_assignments` | `assignment_type` | `primary`, `temporary`, `additional` |
+| `employee_site_assignments` | `status` | `active`, `ended`, `cancelled` |
+| `departments`, `designations`, `shifts`, `sites` | `status` | `active`, `inactive` |
+
+### Numeric type choices
+
+| Column | Type | Why |
+|---|---|---|
+| `latitude` / `longitude` | `DECIMAL(10,7)` | ~1.1 cm precision. `FLOAT` is binary and rounds unpredictably at a geofence boundary. |
+| `geofence_radius` | `DECIMAL(8,2)` | Fractional metres allowed; still bounded. |
+| `salary` | `DECIMAL(12,2)` | Money — never `FLOAT`. |
+| `minimum_working_hours`, `overtime_threshold` | `DECIMAL(4,2)` | Fractional hours without float drift. |
+| `break_duration`, `grace_period` | `SMALLINT` | Whole minutes; bounded to 65 535. |
+| `start_time`, `end_time` | `TIME` | Clock times, not instants — no timezone/DST drift. |
+
+---
+
+## 10. Not Yet Created (Future Phases)
+
+`audit_logs`, `notifications`, `notification_preferences`, `employee_documents`,
+`employee_onboarding`, `trainings`, `employee_trainings`, `assets`,
+`asset_assignments`, `holidays`, `attendances`, `site_visits`,
+`site_activity_reports`, `site_report_photos`, `daily_site_reports`,
+`timesheets`, `overtime_requests`, `leave_types`, `leave_balances`,
+`leave_requests`, `leave_documents`, `payrolls`, `payroll_items`,
+`salary_slips`, `salary_certificate_requests`, `loans`, `loan_installments`,
+`expenses`, `expense_receipts`, `device_tokens`.
+
+> **Current state:** only `hrms_laravel` is used. Other databases on this machine
+> belong to previous, unrelated projects and are left untouched.

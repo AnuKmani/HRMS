@@ -2,22 +2,25 @@
 
 namespace Database\Seeders;
 
-use App\Models\User;
-// use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
 {
     /**
      * Seed the application's database.
+     *
+     * Order matters: permissions must exist before roles can be granted them.
+     * `DevelopmentDataSeeder` is sample structure only — it creates no
+     * employees, users or salaries.
      */
     public function run(): void
     {
-        // User::factory(10)->create();
-
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
+        $this->call([
+            RoleSeeder::class,
+            PermissionSeeder::class,
+            RolePermissionSeeder::class,
+            SettingSeeder::class,
+            DevelopmentDataSeeder::class,
         ]);
     }
 }

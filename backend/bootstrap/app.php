@@ -3,6 +3,9 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Spatie\Permission\Middleware\PermissionMiddleware;
+use Spatie\Permission\Middleware\RoleMiddleware;
+use Spatie\Permission\Middleware\RoleOrPermissionMiddleware;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -25,6 +28,18 @@ return Application::configure(basePath: dirname(__DIR__))
         // NOTE: statefulApi() is deliberately NOT called here. That would
         // enable Sanctum's cookie/SPA authentication; this project uses
         // bearer tokens issued to the Flutter app instead.
+
+        // spatie/laravel-permission does not register these aliases itself on
+        // Laravel 11+, so wire them up explicitly. Routes then enforce
+        // authorization server-side:
+        //
+        //     Route::get(...)->middleware('permission:employees.view');
+        //     Route::post(...)->middleware('role:HR Admin|Super Admin');
+        $middleware->alias([
+            'role' => RoleMiddleware::class,
+            'permission' => PermissionMiddleware::class,
+            'role_or_permission' => RoleOrPermissionMiddleware::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         $exceptions->shouldRenderJsonWhen(

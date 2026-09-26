@@ -48,19 +48,54 @@ Two layers, both mandatory:
 
 ### 3.1 Permission layer (`spatie/laravel-permission`)
 
-10 roles with granular permissions:
+**Implemented in Phase 2 ✅** — `spatie/laravel-permission` **^6.25**, 10 roles,
+39 permissions, 163 grants.
+
+> **Version pin matters:** v7/v8 of this package require PHP `^8.3`. This environment
+> runs **PHP 8.2.4**, so Composer correctly resolves to **6.25.0** (supports Laravel
+> 8–13, PHP `^8.0`). Upgrading PHP to 8.3+ before bumping the package.
+
+Every permission is `resource.action`, lowercase:
 
 ```
-employees.view       employees.create      employees.update      employees.delete
-attendance.view      attendance.manage
-leave.view           leave.approve
-payroll.view         payroll.manage
-projects.manage      sites.manage
-timesheet.approve    overtime.approve
-expenses.approve     documents.manage
-reports.view         audit.view
-notifications.manage settings.manage
+dashboard.view
+employees.view        employees.create     employees.update     employees.delete
+departments.view      departments.manage
+designations.view     designations.manage
+attendance.view       attendance.manage
+leave.view            leave.request        leave.approve        leave.manage
+payroll.view          payroll.manage
+projects.view         projects.manage
+sites.view            sites.manage
+shifts.view           shifts.manage
+assignments.view      assignments.manage
+reports.view          reports.export
+documents.view        documents.manage
+expenses.view         expenses.approve     expenses.manage
+settings.view         settings.manage
+roles.view            roles.manage
+users.view            users.manage
+audit.view
 ```
+
+| | |
+|---|---|
+| Roles | Super Admin, HR Admin, HR Executive, Payroll Admin, Project Manager, Site Engineer, Site Supervisor, Finance, Management, Employee |
+| Super Admin | Holds `['*']` — resolved from the catalogue at seed time, so new permissions are picked up automatically |
+| All other roles | Explicit allow-list; anything absent is **denied** |
+| Source of truth | `PermissionSeeder::PERMISSIONS` (catalogue) + `RolePermissionSeeder::MAP` (grants) |
+| Enforcement | Middleware aliases `permission`, `role`, `role_or_permission` registered in `bootstrap/app.php` |
+
+**Enforcement is server-side only.** The Flutter UI hiding a button is a usability
+convenience, never a control. Example:
+
+```php
+Route::middleware(['auth:sanctum', 'permission:payroll.manage'])
+    ->get('/payroll/runs', [PayrollController::class, 'index']);
+```
+
+Verified by `RbacTest`: an authorized user gets `200`, a user with the wrong role gets
+`403`, and an unauthenticated caller gets `401` — before any controller code runs.
 
 ### 3.2 Resource layer (Policies)
 
@@ -77,7 +112,12 @@ Permissions answer *"may this role do X?"*. Policies answer *"may this user do X
 > **Hiding a button in Flutter is not authorization.** Every rule must also be enforced
 > in Laravel. The Flutter UI hides controls only for usability.
 
-**Status:** ⬜ Phase 3–4
+**Status:** ✅ Permission layer live (Phase 2) · ⬜ Policies Phase 3–4
+
+> **Scope note:** permissions are a *coarse gate*. `Employee` holds `attendance.view`
+> so it can open the screen at all — restricting results to the employee's own rows is
+> the **Policy's** job and is not yet wired to any route. No resource routes exist yet,
+> so until Phase 4 no employee data is reachable at all.
 
 ---
 

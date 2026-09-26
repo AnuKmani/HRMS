@@ -163,6 +163,86 @@ Two complementary layers:
 
 Route middleware checks the permission; the Policy checks the ownership/scope.
 
+**Implemented in Phase 2 ✅**
+
+- Package: `spatie/laravel-permission` **^6.25** (v6 is the line that supports
+  PHP `^8.2` + Laravel 12; v7/v8 require PHP 8.3+ and will not install here).
+- Aliases registered in `bootstrap/app.php`, because spatie does not register them
+  itself on Laravel 11+:
+
+  ```php
+  $middleware->alias([
+      'role'                => RoleMiddleware::class,
+      'permission'          => PermissionMiddleware::class,
+      'role_or_permission'  => RoleOrPermissionMiddleware::class,
+  ]);
+  ```
+
+- Usage — **always enforced server-side, never trusted from Flutter**:
+
+  ```php
+  Route::middleware(['auth:sanctum', 'permission:payroll.manage'])
+      ->get('/payroll/runs', [PayrollController::class, 'index']);
+
+  Route::middleware(['role:HR Admin|Super Admin'])
+      ->post('/employees', [EmployeeController::class, 'store']);
+  ```
+
+- Or per-method / in code: `$user->can('employees.view')`,
+  `$this->authorize('update', $employee)`.
+
+#### The two layers answer different questions
+
+| Layer | Question it answers | Example |
+|---|---|---|
+| **Permission** (middleware) | *May this kind of user touch this module at all?* | Does this role have `attendance.manage`? |
+| **Policy** (Eloquent) | *May this specific user touch this specific row?* | Is it **their own** attendance record? |
+
+A permission is therefore a **coarse gate**, not a data filter. The `Employee` role
+holds `attendance.view` so it can open the attendance screen at all — row scoping to
+their own records is the Policy's job (Phase 4). Never use a permission alone to
+decide *which* rows to return.
+
+#### Roles and permissions
+
+| | |
+|---|---|
+| Roles | 10 — Super Admin, HR Admin, HR Executive, Payroll Admin, Project Manager, Site Engineer, Site Supervisor, Finance, Management, Employee |
+| Permissions | 39, all named `resource.action` (lowercase) |
+| Grants | 163 rows in `role_has_permissions` |
+| Seeders | `RoleSeeder` → `PermissionSeeder` → `RolePermissionSeeder` (order matters) |
+
+Permission catalogue lives in one place — `PermissionSeeder::PERMISSIONS`, grouped by
+module. Adding a module means adding a line there; nothing else needs the full list.
+
+```
+dashboard    dashboard.view
+employees    employees.view | .create | .update | .delete
+departments  departments.view | .manage
+designations designations.view | .manage
+attendance   attendance.view | .manage
+leave        leave.view | .request | .approve | .manage
+payroll      payroll.view | .manage
+projects     projects.view | .manage
+sites        sites.view | .manage
+shifts       shifts.view | .manage
+assignments  assignments.view | .manage
+reports      reports.view | .export
+documents    documents.view | .manage
+expenses     expenses.view | .approve | .manage
+settings     settings.view | .manage
+roles        roles.view | .manage
+users        users.view | .manage
+audit        audit.view
+```
+
+**Super Admin** holds `['*']` — every permission, resolved from the catalogue at seed
+time rather than hard-coded, so a newly added permission is granted automatically.
+Every other role is an explicit allow-list: anything absent is **denied**. The mapping
+is `RolePermissionSeeder::MAP`, and `RbacTest` asserts both directions (Super Admin has
+all 39; `Employee` is denied `payroll.manage`, `employees.delete`, `attendance.manage`,
+`leave.approve`, `audit.view`).
+
 ---
 
 ## 4. Frontend Architecture (Flutter)
@@ -277,11 +357,64 @@ and detecting missing check-outs becomes significantly harder.
 The *current* site is resolved by finding the open-dated row; previous assignments are
 never overwritten. This directly satisfies the requirement to maintain assignment history.
 
+**Implemented in Phase 2 ✅** — schema enforces it, not just convention:
+
+- all three FKs are `RESTRICT`, so hard-deleting an employee, project or site that has
+  assignment history throws rather than erasing it;
+- the table has **no `deleted_at`** — it is history, not master data;
+- `EmployeeSiteAssignment::end()` closes a row in place (`status='ended'`,
+  `end_date=today`) instead of deleting it;
+- `Employee::currentSiteAssignment` is a `hasOne(...)->latestOfMany('start_date')`
+  scoped to `status='active'`.
+
+`AssignmentHistoryTest::moving_site_appends_history_instead_of_overwriting` moves an
+employee from Site A to Site B and asserts **both** rows survive with distinct
+`site_id`s and correct statuses.
+
 ### 5.3 A `settings` table is mandatory
 
 Working hours, grace period, overtime threshold, geofence radius, sick-certificate
 deadline, leave rules and approval workflows must all be changeable by an authorized
 user without a code deploy.
+
+**Implemented in Phase 2 ✅** — table `settings`, model `App\Models\Setting`,
+accessor `App\Services\SettingsService`.
+
+Business rules are **read, never hard-coded**. Inject the service and ask for the key:
+
+```php
+public function __construct(private readonly SettingsService $settings) {}
+
+$grace = $this->settings->minutes('attendance.grace_period_minutes', 10);
+$days  = $this->settings->int('leave.sick_certificate_deadline_days', 3);
+$hours = $this->settings->json('working_hours.default');
+```
+
+The defaults in the second argument are a **fallback for a missing row**, not the
+source of truth — `SettingSeeder` owns the shipped values.
+
+| Property | Design |
+|---|---|
+| `key` | Dotted namespace, `UNIQUE` — `attendance.grace_period_minutes` |
+| `type` | `string \| integer \| boolean \| decimal \| json \| date \| time` — `Setting::castValue()` returns the right PHP type, so no caller casts |
+| `group` | `attendance`, `leave`, `notification`, `working_hours`, `system` — renders an admin screen without bespoke grouping code |
+| `is_editable` | Distinguishes operator-tunable rules from system-owned values |
+| Caching | `Cache::rememberForever`, flushed by `saved`/`deleted` model events |
+
+Seeded rules (12 rows): grace period, overtime threshold, default geofence radius,
+late-arrival escalation, sick-certificate deadline, certificate-required threshold,
+notification reminder offset, daily digest time, document expiry warning, default
+working hours (JSON), date format, currency.
+
+> **Caveat:** cache invalidation hangs off Eloquent model events, so settings must be
+> written through the `Setting` model (`$setting->update(...)`, `updateOrCreate`).
+> A raw `DB::table('settings')->update(...)` will bypass it and leave a stale cache
+> until something else flushes it. This is asserted in `SettingsTest`.
+
+**How this differs from hard-coding:** a grace period of 10 minutes written in source
+requires a code change, a review, a deploy and a restart on every environment. Stored
+in `settings`, HR changes it once, immediately, and it is auditable and testable
+against a non-default value.
 
 ### 5.4 Offline sync uses client-generated idempotency keys
 
@@ -337,3 +470,4 @@ The following are explicitly **out of scope** unless later requested:
 | Date | Change |
 |---|---|
 | Phase 1 | Initial architecture — system overview, layering, key decisions |
+| Phase 2 | RBAC implemented (spatie ^6.25, 10 roles / 39 permissions, middleware aliases); `settings` table + `SettingsService`; append-only assignments; core schema (14 migrations, 23 tables) |

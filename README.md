@@ -166,6 +166,12 @@ Access is controlled by **roles** *and* **granular permissions**. Hiding a butto
 
 Example permissions: `employees.view`, `employees.create`, `attendance.manage`, `leave.approve`, `payroll.manage`, `sites.manage`, `audit.view`.
 
+**Implemented (Phase 2):** 39 permissions, all named `resource.action`, seeded by
+`RoleSeeder` + `PermissionSeeder` + `RolePermissionSeeder`. Super Admin holds every
+permission; each other role is an explicit allow-list, so anything absent is denied.
+See [`docs/SECURITY.md`](docs/SECURITY.md) §3.1 for the full catalogue and the
+middleware used to enforce it server-side.
+
 ---
 
 ## 6. Getting Started
@@ -192,9 +198,18 @@ composer install
 cp .env.example .env
 php artisan key:generate
 # configure DB_* in .env
-php artisan migrate --seed
+php artisan migrate --seed        # creates 23 tables + RBAC/settings seed data
 php artisan serve          # http://127.0.0.1:8000
 ```
+
+```bash
+php artisan test                  # 75 tests, 310 assertions
+./vendor/bin/pint                 # code style
+```
+
+> **`php artisan test` runs against `hrms_laravel`** (set in `phpunit.xml`) and uses
+> `RefreshDatabase`, which issues `migrate:fresh` on first run. Re-run
+> `php artisan db:seed` afterwards to restore local seed data.
 
 ### Frontend
 
@@ -223,7 +238,7 @@ flutter run                # with a device or emulator connected
 
 ## 8. Current Status
 
-### ✅ Phase 1 — Foundation (IN PROGRESS)
+### ✅ Phase 1 — Foundation (COMPLETE)
 
 | Step | Status |
 |---|---|
@@ -236,26 +251,48 @@ flutter run                # with a device or emulator connected
 | `docs/` documentation set | ✅ Complete |
 | MariaDB database + dedicated `hrms_app` user | ✅ Complete |
 | Laravel 12 API skeleton + Sanctum (`/api/v1/`) | ✅ Complete |
-| Flutter toolchain install (on `F:`) | ⬜ Not started |
-| Flutter project skeleton | ⬜ Not started |
+| Flutter toolchain install (on `F:`) | ✅ Complete |
+| Flutter project skeleton (`mobile/`) | ✅ Complete |
+
+### ✅ Phase 2 — Core database schema + RBAC (COMPLETE)
+
+| Deliverable | Status |
+|---|---|
+| `spatie/laravel-permission` **^6.25** (the release line compatible with PHP 8.2 + Laravel 12) | ✅ |
+| 10 roles · 39 permissions · 163 role-permission grants | ✅ |
+| Middleware aliases `permission` / `role` / `role_or_permission` registered | ✅ |
+| `settings` table + `SettingsService` — 12 seeded business rules | ✅ |
+| `departments`, `designations` | ✅ |
+| `employees` — structured names, 5-value status vocabulary, unique constraints | ✅ |
+| `projects`, `sites` — DECIMAL geofence, per-site radius, status vocabularies | ✅ |
+| `shifts` — overnight `crosses_midnight` handling + duration maths | ✅ |
+| `employee_site_assignments` — append-only, `RESTRICT` FKs | ✅ |
+| Seeders: roles, permissions, role mappings, settings, dev structure | ✅ |
+| **10 migrations · 23 tables · all `Ran`** | ✅ |
+| Tests: **75 passed (310 assertions)** | ✅ |
+| Docs updated: `DATABASE.md`, `ARCHITECTURE.md`, `SECURITY.md` | ✅ |
+
+> **Deliberately not built in Phase 2:** attendance, leave, payroll, expenses,
+> documents, notifications, authentication endpoints, and Flutter feature screens —
+> these belong to Phases 3–12.
 
 ### Planned Phases
 
-| Phase | Scope |
-|---|---|
-| **1b** | Flutter toolchain + Flutter project skeleton |
-| **2** | Core database schema + seeders (roles, permissions, settings) |
-| **3** | Authentication (Sanctum) + Flutter auth feature |
-| **4** | Employees, Projects, Sites, Assignments (first vertical slice) |
-| **5** | Attendance: geofence, selfie, check-in/out, audit |
-| **6** | Offline synchronization |
-| **7** | Site visits, movement timeline, activity & daily reports |
-| **8** | Shifts, timesheets, overtime |
-| **9** | Leave, balances, sick-cert → LOP automation |
-| **10** | Holidays, documents + expiry, onboarding, training, assets |
-| **11** | Payroll, salary slips, certificates, loans, expenses |
-| **12** | FCM notifications, dashboards, reports & exports |
-| **13** | Testing, security audit, deployment, backups |
+| Phase | Scope | Status |
+|---|---|---|
+| **1b** | Flutter toolchain + Flutter project skeleton | ✅ Done |
+| **2** | Core database schema + seeders (roles, permissions, settings) | ✅ Done |
+| **3** | Authentication (Sanctum) + Flutter auth feature | ⬜ Next |
+| **4** | Employees, Projects, Sites, Assignments (first vertical slice) | ⬜ |
+| **5** | Attendance: geofence, selfie, check-in/out, audit | ⬜ |
+| **6** | Offline synchronization | ⬜ |
+| **7** | Site visits, movement timeline, activity & daily reports | ⬜ |
+| **8** | Shifts, timesheets, overtime | ⬜ |
+| **9** | Leave, balances, sick-cert → LOP automation | ⬜ |
+| **10** | Holidays, documents + expiry, onboarding, training, assets | ⬜ |
+| **11** | Payroll, salary slips, certificates, loans, expenses | ⬜ |
+| **12** | FCM notifications, dashboards, reports & exports | ⬜ |
+| **13** | Testing, security audit, deployment, backups | ⬜ |
 
 ---
 
