@@ -1,10 +1,12 @@
 # Database Design
 
-> **Status:** Phase 2 — Core schema implemented. Laravel's base tables plus 10 Phase 2
-> migrations now exist: `settings`, `departments`, `designations`, `shifts`, `projects`,
-> `employees`, `sites`, `employee_site_assignments` and the `spatie/laravel-permission`
-> RBAC tables. Tables for later phases (`attendances`, `leave_requests`, `payrolls`, …)
-> are **design only** and have not been created.
+> **Status:** Phase 3 — core schema plus the auth addition. Laravel's base tables plus 10
+> Phase 2 migrations and the Phase 3 `users.status` column now exist: `settings`,
+> `departments`, `designations`, `shifts`, `projects`, `employees`, `sites`,
+> `employee_site_assignments` and the `spatie/laravel-permission` RBAC tables.
+> Tables for later phases (`attendances`, `leave_requests`, `payrolls`, …)
+> are **design only** and have not been created. `hrms_testing` mirrors this
+> schema for the test suite.
 
 **DBMS:** MariaDB 10.4.28 (XAMPP)
 **Charset:** `utf8mb4` / collation `utf8mb4_unicode_ci`
@@ -404,7 +406,7 @@ Not yet seeded (later phases): leave types, demo projects/sites.
 |---|---|---|
 | 1 | `0001_01_01_*` framework tables + `2026_09_26_170015` Sanctum tokens | ✅ |
 | 2 | Core schema — 10 migrations, see below | ✅ |
-| 3 | Auth + Sanctum | ⬜ |
+| 3 | `2026_09_27_000010` — `users.status` (indexed `active`/`inactive`) | ✅ |
 | 4 | Employees / Projects / Sites *(controllers & routes)* | ⬜ |
 | 5 | Attendance | ⬜ |
 

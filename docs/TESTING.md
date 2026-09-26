@@ -1,7 +1,8 @@
 # Testing
 
-> **Status:** Phase 1 — Foundation. No tests exist yet. This document defines the test
-> strategy, priorities and how to run each suite as phases are delivered.
+> **Status:** Phase 3 — auth covered end to end. Backend **120 passed (517
+> assertions)**, Flutter **43 passed**. This document defines the strategy for
+> the modules still to come (Phases 4–12).
 
 ---
 
@@ -61,19 +62,38 @@ php artisan test      # hrms_testing only — hrms_laravel untouched
 
 ## 3. Backend Test Matrix
 
-### 3.1 Authentication
+### 3.1 Authentication ✅ (Phase 3 — `AuthenticationTest`, `PasswordResetTest`, `ApiErrorHandlingTest`)
 
-| Test | Expectation |
-|---|---|
-| Valid credentials | `200`, returns token + user + permissions |
-| Invalid password | `401` |
-| Unknown email | `401` (does not reveal whether the user exists) |
-| Missing fields | `422` |
-| Logout | token revoked, subsequent request → `401` |
-| Expired/invalid token | `401` |
-| Forgot password | reset token issued, token single-use |
-| Rate limiting | 7th login attempt in a minute → `429` |
-| Change password wrong current | `422` |
+| Test | Expectation | Covered by |
+|---|---|---|
+| Valid credentials | `200`, returns token + user + permissions | `AuthenticationTest::test_login_returns_a_token_and_the_authenticated_user` |
+| Response leaks nothing | No password hash in the response; only a hash stored, never the plain token | `…never_contains_a_password_hash`, `…plain_text_token_is_never_stored` |
+| Invalid password | `401` | `…identical_answer_for_unknown_email_and_wrong_password` |
+| Unknown email | `401` (identical body — no account-existence oracle) | same test |
+| Missing fields | `422` | `…rejects_missing_credentials_with_a_422` |
+| Deactivated account | `401` **with** the correct password | `…deactivated_account_cannot_sign_in_even_with_correct_password` |
+| Device naming | Default when omitted; same device replaces its previous token | `…defaults_the_device_name…`, `…replaces_the_previous_token_for_the_same_device` |
+| `GET /auth/me` | `200` with roles + permissions; works with no employee record | `…me_returns_the_authenticated_user`, `…me_works_without_an_employee_record` |
+| Missing / garbage / revoked token | `401`, same envelope | `…me_requires_a_bearer_token`, `…me_rejects_a_garbage_token`, `…me_rejects_a_token_that_was_signed_out` |
+| Logout | Token revoked, next request → `401` | `…me_rejects_a_token_that_was_signed_out` |
+| Change password wrong current | `422` with `current_password` field error | `…change_password_rejects_an_incorrect_current_password` |
+| Change password weak/unconfirmed | `422` | `…change_password_rejects_a_weak_or_unconfirmed_password` |
+| Change password effect | Persists new hash, signs every **other** device out | `…persists_the_new_one`, `…signs_every_other_device_out` |
+| Sessions list | Devices + timestamps, **no token hash** | `…sessions_lists_devices_without_exposing_the_token_hash` |
+| Revoke a session | That device is signed out | `…revoking_a_session_signs_that_device_out` |
+| Revoke someone else's session | `404` (not `403` — a 403 would confirm it exists) | `…a_session_belonging_to_another_account_cannot_be_revoked` |
+| Rate limiting | 6th login attempt in a minute → `429`; limits read from config | `ApiErrorHandlingTest::test_repeated_login_attempts_return_a_429_envelope`, `…throttle_is_configured_rather_than_hard_coded` |
+| Forgot password (disabled) | `501` with an honest message | `PasswordResetTest::test_forgot_password_reports_that_it_is_not_available_yet` |
+| Forgot password address oracle | Identical answer for known and unknown | `…answers_identically_for_known_and_unknown_addresses` |
+| Reset password | Swaps password, kills every session | `…reset_password_swaps_the_password_and_kills_every_session` |
+| Reset bad token | Rejected without touching the account | `…reset_password_rejects_a_bad_token_without_touching_the_account` |
+| Validation before feature flag | `422` still wins over `501` | `…validation_still_runs_before_the_enabled_check` |
+
+### 3.1a Error envelope (shared) ✅ `ApiErrorHandlingTest`
+
+`401`, `403`, `404` (unknown route *and* missing record), `405`, `422`, `429`,
+`500` — each asserted to be a well-formed envelope, and the `500` case asserted
+to contain **no** SQL, stack trace, model class or internal path.
 
 ### 3.2 Authorization (highest priority)
 
@@ -219,40 +239,66 @@ Use `Queue::fake()` / `Notification::fake()` and `Carbon::setTestNow()`.
 
 ## 5. Flutter Test Matrix
 
-### 5.1 Unit
+### 5.1 Unit ✅ (Phase 3)
 
-| Target | Tests |
+| Target | Tests | File |
+|---|---|---|
+| `ApiException` envelope parsing | 401/422 read as the server wrote them; `Retry-After` parsed; timeout **never** blames the user; a non-envelope body is never shown as prose | `test/core/network/api_exception_test.dart` |
+| `AuthController` state machine | initial status, restore outcomes (accepted / rejected / unreachable / empty), login success + failure paths, 422 field map, throttle wait, `dismissFeedback`, logout (server ok / unreachable / no session), session-rejected broadcast | `test/features/auth/auth_controller_test.dart` |
+| Validators | empty form says what is missing; the typed credentials are what reaches the API | `test/features/auth/login_screen_test.dart` |
+| Models | Auth models parse exactly the fields the API returns (`AuthUser`, `EmployeeBrief`) | exercised through the repository/controller tests above |
+
+**Two non-obvious guarantees worth keeping under test:**
+
+- *Restore asks the server **once**.* `AuthController` may be read by the
+  router, the splash screen and the session-rejected listener in the same
+  frame; `build()` must not fan out a request per reader.
+- *A rejection is announced once.* If the server drops a token, both the Dio
+  interceptor and the controller can notice. The sign-in form's own message
+  must survive.
+
+### 5.2 Widget ✅ (Phase 3 — Login)
+
+| Screen | States verified |
 |---|---|
-| Models | `fromJson` / `toJson` round-trip, null handling |
-| Repository | offline → local, online → network, sync marks status |
-| Providers | state transitions loading → data / error |
-| Validators | form rules |
-| Haversine util | matches backend result |
+| Login | empty/invalid submit, success → home, 401 as **one banner with no field marked**, 422 with `forceErrorText` under the named field, 429 with countdown, password masked until asked for, editing clears a superseded message |
+| Splash | holds `/` while restoring — `advance()` pumps instead of `pumpAndSettle()`, because the restoring spinner is intentionally endless |
+| Attendance / Leave list / all screens | ⬜ Phase 4 onward |
 
-### 5.2 Widget
+> **Don't read `TextFormField.obscureText`** — it is not public. Read the
+> widget's own `TextField.obscureText` field instead.
+>
+> **Avoid `pumpAndSettle`** anywhere the splash spinner is visible: it never
+> settles. Eight × 100 ms pumps (`advance()`) is enough for any transition in
+> this feature.
 
-| Screen | States to verify |
-|---|---|
-| Login | loading, success, validation errors, 401, 429, network error |
-| Attendance | empty, loading, checked-in, checked-out, **offline pending**, error |
-| Leave list | empty, loaded, pagination, error |
-| All screens | loading / error / empty / data all render |
-
-### 5.3 Behavioural
+### 5.3 Behavioural ✅ (Phase 3 — `test/app_test.dart`)
 
 | Behaviour | Expectation |
 |---|---|
-| 401 response | navigates to login, token cleared |
-| 403 response | shows "not authorized", **does not log out** |
-| 422 response | messages appear on the correct fields |
-| Network loss | offline message, action queued |
-| Sync | badge changes pending → synced |
-| Permission hidden | HR control absent for an Employee user |
+| Nothing stored | lands on the sign-in form |
+| Stored token, server accepts | straight to `/home` |
+| Stored token, server says `401` | discards it, back to `/login` |
+| Server unreachable during restore | **keeps** the token — an offline launch must not sign someone out |
+| Signed in, visiting `/` or `/login` | redirected to `/home` |
+| Not signed in, visiting `/home` | redirected to `/login` — and back again if it tries to leave |
+| Submitting the form | navigates to `/home` with **no** explicit `Navigator` call from the screen |
+| Signing out | returns to the form |
+| Token revoked elsewhere (401 mid-session) | returns the user to the form |
+| 403 response | shows "not authorized", **does not log out** | ⬜ Phase 4 |
+| Network loss / offline queue | offline message, action queued | ⬜ Phase 6 |
+| Permission hidden | HR control absent for an Employee user | ⬜ Phase 4 |
 
 ### 5.4 What NOT to test in Flutter
 
 Business rules (geofence acceptance, balance calculation, payroll maths) are tested in
 Laravel. Flutter tests confirm **rendering and state handling** only.
+
+**Doubles, not sockets.** Every Flutter test runs against
+`test/support/fakes.dart` — `InMemoryTokenStore`, `FixedDeviceIdentity`,
+`FakeAuthRepository`. `flutter_secure_storage` talks to the platform keychain
+over a method channel, and `ApiAuthRepository` would need a live server;
+neither has anything useful to say inside a widget test.
 
 ---
 
@@ -326,20 +372,24 @@ vendor/bin/phpunit --filter=GeofenceTest
 ```bash
 cd mobile
 
-flutter test                    # all tests
-flutter test test/attendance    # one folder
-flutter test --coverage         # coverage report at coverage/lcov.info
+flutter test                          # all tests
+flutter test test/features/auth       # one folder
+flutter test test/app_test.dart       # one file
+flutter test --coverage               # coverage report at coverage/lcov.info
 ```
+
+> There is no device or backend behind any of these. The suites run against
+> fakes in `test/support/fakes.dart`, so they stay green while a server is
+> stopped — which is exactly when a regression shows up.
 
 ### Static analysis (run before every commit)
 ```bash
 cd backend
 ./vendor/bin/pint --test          # Laravel code style
-./vendor/bin/phpstan analyse      # if installed
+composer validate                 # composer.json integrity
 
 cd mobile
 flutter analyze                   # must report no issues
-dart format --set-exit-if-changed lib
 ```
 
 ---
@@ -380,6 +430,9 @@ A phase is complete only when:
 | Item | Status |
 |---|---|
 | Test strategy (this document) | ✅ Written |
-| Backend test suite | ⬜ Phase 3 onward |
-| Flutter test suite | ⬜ Phase 1b onward (smoke), Phase 3 onward (real) |
+| Development/testing database split (`hrms_laravel` vs `hrms_testing`) | ✅ Phase 2 safety cleanup |
+| Backend test suite | ✅ **120 passed (517 assertions)** — 75 from Phase 2 + 45 Phase 3 |
+| Flutter test suite | ✅ **43 passed** |
+| `flutter analyze` / `pint --test` / `composer validate` clean | ✅ |
 | CI pipeline running tests on every commit | ⬜ |
+| Coverage measurement (needs xdebug/pcov) | ⬜ |

@@ -20,18 +20,30 @@ relevant to them.
 
 ## 2. Signing In
 
-> ⬜ Phase 3
+> ✅ Phase 3 — sign-in, session restore and sign-out. Forgot-password arrives with the UI in Phase 4+.
 
-1. Open the app
+1. Open the app — it restores your session automatically if you already signed in
 2. Enter your work email and password
-3. Tap **Log In**
-4. If you have logged in before on this device, your session is remembered securely
+3. Tap **Sign In**
+4. If the password is wrong you get one message for both a bad password and an
+   unknown address; nothing tells you which one it was
+5. Too many attempts shows how many seconds to wait before trying again
 
-**First-time / forgot password:** tap *Forgot Password* → enter your email → follow the
-link sent to you → set a new password. The link expires (default 60 minutes).
+Your session is remembered in the device's secure key storage. It survives the
+app being closed and the phone going offline — an unreachable server will **not**
+sign you out. Signing out, or an administrator disabling your account, does.
+
+**Multiple devices:** each sign-in replaces that device's previous session, so
+no one accumulates sessions they cannot see. You can review and revoke them
+from *Settings → Sessions* (Phase 4 UI); changing your password from any device
+immediately signs out every other one.
+
+**Forgot password:** *not available yet.* The API exists but deliberately
+answers "not available" until a mail server can actually deliver the link —
+contact your administrator for a reset in the meantime.
 
 **Security:** your password is never stored in plain text, and your session token is kept
-in your device's secure key storage. If you suspect any issue, log out — this revokes
+in your device's secure key storage. If you suspect any issue, sign out — this revokes
 your token immediately.
 
 ---

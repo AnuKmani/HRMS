@@ -1,7 +1,8 @@
 # Security
 
-> **Status:** Phase 1 — Foundation. This document defines the security requirements the
-> system must meet. Individual controls are implemented in later phases and marked below.
+> **Status:** Phase 3 — authentication, rate limiting and the password policy are
+> live and tested. File storage, transport hardening and audit logging remain
+> phased ahead (§4, §5, §8). Individual controls are marked with their phase below.
 
 ---
 
@@ -25,20 +26,49 @@
 
 | Requirement | Implementation | Status |
 |---|---|---|
-| Token-based auth | **Laravel Sanctum** personal access tokens | ⬜ Phase 3 |
-| One token per device | Separate token rows, individually revocable | ⬜ Phase 3 |
-| Logout revokes token | `token->delete()` on the current device only | ⬜ Phase 3 |
-| Password hashing | `bcrypt` (cost 12) / `argon2id` — never plaintext | ⬜ Phase 3 |
-| Forgot / reset password | Signed, expiring reset link | ⬜ Phase 3 |
-| Change password | Requires current password | ⬜ Phase 3 |
-| Session listing | User can view and revoke other devices | ⬜ Phase 3 |
-| Rate limiting on login | `6/min/IP` → HTTP 429 | ⬜ Phase 3 |
-| Lockout after failures | Throttling + audit log | ⬜ Phase 3 |
+| Token-based auth | **Laravel Sanctum** personal access tokens, `auth:sanctum` on every route | ✅ Phase 3 |
+| One token per device | Token rows named by `device_name`; login deletes an existing row of that name before creating the next | ✅ Phase 3 |
+| Logout revokes token | `$token->delete()` on the token **this request presented** — other devices untouched | ✅ Phase 3 |
+| Password hashing | `bcrypt`, `BCRYPT_ROUNDS=12` (4 in tests for speed) — never plaintext | ✅ Phase 3 |
+| No account enumeration | One identical `401` for unknown address and wrong password; `forgot-password` has no `exists:` rule | ✅ Phase 3 |
+| Deactivated accounts | `status` checked **after** the password verifies → `401` | ✅ Phase 3 |
+| Forgot / reset password | Signed, expiring, single-use link — **answers 501 until a mailer can really deliver** | ✅ Built · ⬜ Delivery gated |
+| Change password | Requires current password; deletes every *other* token | ✅ Phase 3 |
+| Session listing | `GET /auth/sessions` + `DELETE /auth/sessions/{id}` (own account only, 404 otherwise) | ✅ Phase 3 |
+| Rate limiting on login | `5 / min / IP` → `429` + `Retry-After` | ✅ Phase 3 |
+| Lockout after failures | **Deliberately not implemented** — see below | ✅ Decided |
+
+**Why there is no account lockout.** A lockout is a denial-of-service anyone
+can aim at a known address: flood one email and its owner cannot sign in.
+Throttling per IP slows the machine doing the guessing without giving an
+attacker a lever over someone else's account. Audit logging of login attempts
+(§8) is the complementary control and arrives with Phase 5.
+
+**Why password reset answers 501.** `MAIL_MAILER=log` writes the link to a
+file nobody reads. Returning `200` would tell a user a reset email is on its
+way when none is — worse than an honest "not available". Set
+`PASSWORD_RESET_ENABLED=true` only alongside a mailer that delivers; the
+endpoint, broker and tests are already in place.
+
+**Known caveat — offline logout.** `AuthController.logout()` swallows a
+network failure and signs out locally anyway: the stored token is deleted and
+the app returns to `/login`. If the server was unreachable, the *remote*
+session therefore survives until it expires or is revoked from
+`GET /auth/sessions`. There is deliberately no retry queue. A queued request
+would have to carry the very token whose purpose is to delete itself — holding
+it past the moment of sign-out keeps alive a credential the user believes is
+dead, and a "revoke later" job that never runs because the device stays
+offline is worse than an honest, immediate local sign-out. On a lost or shared
+device, changing the password from another session is the real fix: it
+deletes every other token.
 
 **Never stored:** passwords in plain text, tokens in logs, tokens in `shared_preferences`.
 
-**Flutter side:** token lives in `flutter_secure_storage` (iOS Keychain / Android
-Keystore). It is never written to plain preferences, never logged, never displayed.
+**Flutter side:** token lives in `flutter_secure_storage` (iOS Keychain /
+Android Keystore) under a single fixed key, never written to plain
+preferences, never logged, never displayed. The device name sent at login is a
+random per-install id — it distinguishes installs without carrying anything
+about the account.
 
 ---
 
@@ -112,7 +142,7 @@ Permissions answer *"may this role do X?"*. Policies answer *"may this user do X
 > **Hiding a button in Flutter is not authorization.** Every rule must also be enforced
 > in Laravel. The Flutter UI hides controls only for usability.
 
-**Status:** ✅ Permission layer live (Phase 2) · ⬜ Policies Phase 3–4
+**Status:** ✅ Permission layer live (Phase 2) · ✅ Permission-gated routes since Phase 3 · ⬜ Policies (row-level ownership) Phase 4
 
 > **Scope note:** permissions are a *coarse gate*. `Employee` holds `attendance.view`
 > so it can open the screen at all — restricting results to the employee's own rows is
@@ -185,21 +215,32 @@ No file is ever reachable by guessing a path.
 | Over-posting | FormRequest validation on every write endpoint |
 | CSRF | Stateless token API — CSRF applies only if session auth is used on web routes |
 
-**Status:** ⬜ Phase 3 onward — validation is mandatory on every endpoint
+**Status:** ✅ Auth endpoints since Phase 3 (`LoginRequest`, `ChangePasswordRequest`,
+`PasswordResetRequest`), mass assignment closed on every model · ⬜ one Form
+Request per write endpoint as modules land from Phase 4
 
 ---
 
 ## 7. Rate Limiting
 
-| Scope | Limit | On breach |
-|---|---|---|
-| `POST /auth/login` | 6 / min / IP | `429` + `Retry-After` |
-| `POST /auth/forgot-password` | 3 / min | `429` |
-| Attendance endpoints | 30 / min | `429` |
-| General API | 60 / min | `429` |
-| Exports (PDF/Excel) | 10 / min | `429` |
+Numbers live in `backend/config/rate_limiting.php` and are read from `.env`, so
+tightening a limit is a config change — never a hunt through routes for a
+literal.
 
-**Status:** ⬜ Phase 3
+| Scope | Limit | Key | Status |
+|---|---|---|---|
+| `POST /auth/login` | 5 / min | client IP | ✅ Phase 3 |
+| `POST /auth/forgot-password` · `POST /auth/reset-password` | 5 / 15 min | client IP | ✅ Phase 3 |
+| Attendance endpoints | 30 / min | client IP | ⬜ Phase 5 |
+| General API | 60 / min | client IP | ⬜ Planned |
+| Exports (PDF/Excel) | 10 / min | client IP | ⬜ Phase 12 |
+
+On breach → `429` in the standard envelope with `Retry-After`, rendered by the
+exception handler rather than by a per-limiter `Limit::response()` callback, so
+the header survives and the body keeps its shape.
+
+**Keyed by IP, never by email.** See §2 — keying by email hands any attacker a
+lockout weapon aimed at a chosen victim.
 
 ---
 
@@ -253,20 +294,25 @@ All blocked by the root `.gitignore`.
 - Firebase Admin SDK credentials live on the **server**, never inside the mobile app
 - The mobile app contains only the public Firebase config (safe to ship in the APK)
 
-**Status:** ✅ `.gitignore` in place · ⬜ `.env.example` in Phase 1a Laravel step
+**Status:** ✅ `.gitignore` in place · ✅ `.env.example` with placeholders only —
+including the Phase 3 keys (`PASSWORD_RESET_ENABLED`, `LOGIN_RATE_LIMIT_*`,
+`PASSWORD_RESET_RATE_LIMIT_*`, `BCRYPT_ROUNDS`)
 
 ---
 
 ## 10. Device & App Security (Flutter)
 
-| Control | Detail |
-|---|---|
-| Token storage | Keychain / Keystore, never plain storage |
-| Screenshotting of sensitive screens | Consider `flutter_windowsecure` for salary screens |
-| Certificate pinning | Optional, for high-security deployments |
-| Debug logging | Disabled in release builds |
-| Root/jailbreak detection | Optional, warn-only (not a substitute for server-side auth) |
-| App permissions | Request only at the moment of use, with clear explanation |
+| Control | Detail | Status |
+|---|---|---|
+| Token storage | `flutter_secure_storage` → Keychain / Keystore, single fixed key, never plain storage | ✅ Phase 3 |
+| Base URL | Baked in with `--dart-define` — no runtime setting that could repoint the app at an attacker's server | ✅ Phase 3 |
+| Credentials in UI | Password masked by default; never logged, never placed in `AuthState` | ✅ Phase 3 |
+| Session invalidation | Any request presenting a rejected token drops the local session and returns to `/login` | ✅ Phase 3 |
+| Screenshotting of sensitive screens | Consider `flutter_windowsecure` for salary screens | ⬜ Phase 11 |
+| Certificate pinning | Optional, for high-security deployments | ⬜ Optional |
+| Debug logging | Disabled in release builds | ⬜ Phase 13 |
+| Root/jailbreak detection | Optional, warn-only (not a substitute for server-side auth) | ⬜ Optional |
+| App permissions | Request only at the moment of use, with clear explanation | ⬜ Phase 5 |
 
 ---
 
@@ -300,16 +346,25 @@ only as long as the business/retention policy requires.
 
 ## 12. Password Policy
 
-| Rule | Value |
-|---|---|
-| Minimum length | 10 characters |
-| Complexity | At least one letter and one number |
-| Hashing | `bcrypt` cost 12 (or `argon2id`) |
-| History | Prevent reuse of last 5 |
-| Reset link expiry | Configurable, default 60 minutes |
-| Delivery | One-time signed token, invalidated on use |
+Enforced by `Password::min(8)->letters()->numbers()` on both
+`change-password` and `reset-password`.
 
-**Status:** ⬜ Phase 3
+| Rule | Value | Status |
+|---|---|---|
+| Minimum length | 8 characters | ✅ Phase 3 |
+| Complexity | At least one letter and one number | ✅ Phase 3 |
+| Confirmation | `password_confirmation` must match | ✅ Phase 3 |
+| Hashing | `bcrypt` cost 12 (`BCRYPT_ROUNDS=12`) | ✅ Phase 3 |
+| Current-password proof | Required on change; compared with `Hash::check` | ✅ Phase 3 |
+| Reset link expiry | 60 minutes, invalidated on use | ✅ Phase 3 |
+| Reset delivery | One-time signed token via password broker | ✅ Built · ⬜ gated (§2) |
+| History — prevent reuse of last 5 | Not yet enforced | ⬜ Planned |
+
+> The 8-character minimum with letters + numbers is deliberately not a
+> special-character maze: rules users work around with `Password1!` produce
+> weaker secrets than rules they can actually satisfy. Coverage lives in
+> `AuthenticationTest` and `PasswordResetTest`; revisit the rule once password
+> history lands.
 
 ---
 
@@ -318,9 +373,10 @@ only as long as the business/retention policy requires.
 | Phase | Controls delivered |
 |---|---|
 | 1 | `.gitignore` secret blocking, private-storage plan |
-| 3 | Sanctum auth, rate limiting, password policy, login audit |
+| 2 | RBAC (roles, permissions, middleware), settings as the single config authority |
+| 3 | Sanctum auth, one-token-per-device, rate limiting, password policy, session revocation, response-envelope exception handling. **Login audit deferred to Phase 5** with §8 |
 | 4 | Policies on employees/projects/sites, form requests |
-| 5 | Geofence server validation, selfie private storage + upload validation, attendance audit |
+| 5 | Geofence server validation, selfie private storage + upload validation, attendance audit, login audit |
 | 6 | Offline sync idempotency, server re-validation of offline GPS |
 | 9 | Leave approval audit, LOP conversion audit |
 | 10 | Document private storage, signed URLs, expiry jobs |

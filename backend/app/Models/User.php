@@ -17,6 +17,23 @@ class User extends Authenticatable
     use HasApiTokens, HasFactory, HasRoles, Notifiable;
 
     /**
+     * Whether this login may be used at all.
+     *
+     * Independent of Employee::STATUSES on purpose: employment status is an
+     * HR fact about a person, account status is an operational switch on the
+     * credential. Disabling a compromised account must not rewrite the HR
+     * record, and a resigned employee's record must survive account closure.
+     */
+    public const STATUS_ACTIVE = 'active';
+
+    public const STATUS_INACTIVE = 'inactive';
+
+    public const STATUSES = [
+        self::STATUS_ACTIVE,
+        self::STATUS_INACTIVE,
+    ];
+
+    /**
      * The attributes that are mass assignable.
      *
      * @var list<string>
@@ -25,6 +42,7 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'status',
     ];
 
     /**
@@ -57,5 +75,17 @@ class User extends Authenticatable
     public function employee(): HasOne
     {
         return $this->hasOne(Employee::class);
+    }
+
+    /**
+     * May this credential still be exchanged for a token?
+     *
+     * Checked *after* the password verifies, so a disabled account can be
+     * told why it was refused without revealing account existence to someone
+     * who does not know the password.
+     */
+    public function canLogIn(): bool
+    {
+        return $this->status === self::STATUS_ACTIVE;
     }
 }

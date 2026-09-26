@@ -1,7 +1,8 @@
 # Architecture
 
-> **Status:** Phase 1 — Foundation. This document is written incrementally as each phase is
-> implemented. Sections marked ⬜ are planned but not yet built.
+> **Status:** Phase 3 — backend authentication and the Flutter auth foundation are
+> implemented and documented as built. Sections marked ⬜ are planned but not yet
+> built.
 
 ---
 
@@ -137,12 +138,26 @@ Controller makes them untestable and un-reusable from a Job or a Scheduler comma
 {
     "success": false,
     "message": "Unauthenticated.",
-    "errors": null
+    "errors": {}
 }
 ```
 
-A single base `ApiResponse` resource emits this shape so it is consistent across every
-endpoint.
+`App\Http\Responses\ApiResponse` is the only place this shape is built — no
+controller, exception renderer or rate limiter formats JSON by hand. Two
+invariants the client relies on:
+
+- `data` is **always a JSON object**, never `[]`. When there is nothing to
+  report it is emitted from `(object) []`, so Flutter can treat it as a map
+  without a null or type check.
+- `errors` is **always a JSON object**. It is `{}` unless the failure is
+  per-field, in which case it is Laravel's `field: [messages]` map.
+
+**Implemented in Phase 3 ✅**
+
+The validation example above is what Laravel's `ValidationException` produces;
+`errors` values are arrays of messages, which `apiExceptionFrom()` in
+`mobile/lib/core/network/api_exception.dart` flattens to the first message per
+field.
 
 ### 3.5 Authentication
 
@@ -151,6 +166,27 @@ endpoint.
 - Token abilities used for coarse scoping
 - Logout revokes the current token
 - Never log tokens or passwords
+
+**Implemented in Phase 3 ✅**
+
+| Property | How | Why |
+|---|---|---|
+| Stateless | `Hash::check()` against the stored hash, not `Auth::attempt()` | `attempt()` logs the user into the *web* guard and writes a session row — meaningless for a token API |
+| Enumeration-proof | One identical `401` for unknown address and wrong password | A `422` here would confirm which addresses are registered |
+| Deactivated account | Checked **after** the password verifies, `401` with an explicit message | Checking first would let anyone discover which accounts are deactivated |
+| One token per device | `device_name` from the client; login deletes an existing token with that name before creating the next | Signing in twice on the same handset replaces its session rather than orphaning a row nobody can revoke |
+| Token returned once | Plain token appears only in the login response | Sanctum stores a SHA-256 hash, so it cannot be recovered later |
+| Session restore | `GET /auth/me` on launch; `401` discards the token, anything else keeps it | An unreachable network must not look like being signed out |
+
+Endpoints: `POST /auth/login|logout|change-password|forgot-password|reset-password`,
+`GET /auth/me|auth/sessions`, `DELETE /auth/sessions/{id}`, `GET /roles`.
+See [`API_DOCUMENTATION.md`](API_DOCUMENTATION.md) §2.1.
+
+> `forgot-password` / `reset-password` are built and validated but answer
+> **501** until a real mailer is configured (`PASSWORD_RESET_ENABLED=false` by
+> default). `MAIL_MAILER=log` cannot actually deliver a link, and returning a
+> success the user could never act on would be a lie. See
+> [`SECURITY.md`](SECURITY.md) §2.
 
 ### 3.6 Authorization
 
@@ -320,6 +356,36 @@ lib/
 │
 └── main.dart
 ```
+
+**What Phase 3 actually created** — `core/router/` is an addition to the list
+above (GoRouter lives with the rest of the cross-cutting plumbing), and the
+auth feature is deliberately flat:
+
+```
+mobile/lib/
+├── core/
+│   ├── config/app_config.dart        # --dart-define base URL
+│   ├── network/api_client.dart       # Dio, bearer interceptor, session-rejected stream
+│   ├── network/api_exception.dart    # envelope → ApiException
+│   ├── router/app_router.dart        # GoRouter + refreshListenable guard
+│   ├── storage/token_store.dart      # flutter_secure_storage
+│   └── storage/device_identity.dart  # stable per-install device name
+├── features/
+│   ├── auth/
+│   │   ├── auth_models.dart          # AuthUser, EmployeeBrief, LoginResult
+│   │   ├── auth_repository.dart      # AuthRepository + ApiAuthRepository
+│   │   ├── auth_state.dart           # AuthStatus + AuthState
+│   │   ├── auth_controller.dart      # Notifier<AuthState>
+│   │   ├── login_screen.dart
+│   │   └── splash_screen.dart
+│   └── home/home_screen.dart         # Phase 4 landing spot
+└── main.dart
+```
+
+Five files do not justify four directories. `data/`, `providers/` and
+`presentation/` appear once a feature grows local sources — the offline queue
+in Phase 6 is the point where `attendance/` should adopt the full shape below,
+and `auth/` should follow when forgot-password UI lands.
 
 Each feature folder follows the same internal shape:
 

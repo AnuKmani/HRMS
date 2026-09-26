@@ -111,23 +111,36 @@ Selfies, passports, Emirates IDs, visas, contracts and salary documents are stor
 ```
 HRMS/
 │
-├── mobile/                  # Flutter application (not yet created)
-│   └── lib/
-│       ├── core/            # config, constants, errors, network, storage, utils, widgets
-│       └── features/        # auth, dashboard, employees, attendance, site_visits,
-│                            # projects, sites, leave, timesheet, overtime, payroll,
-│                            # documents, expenses, loans, training, assets, notifications
+├── mobile/                  # Flutter application
+│   ├── lib/
+│   │   ├── core/            # config, network, router, storage
+│   │   │   ├── config/      #   app_config.dart (--dart-define base URL)
+│   │   │   ├── network/     #   api_client.dart, api_exception.dart
+│   │   │   ├── router/      #   app_router.dart (GoRouter + auth guard)
+│   │   │   └── storage/     #   token_store.dart, device_identity.dart
+│   │   ├── features/
+│   │   │   ├── auth/        #   models, repository, controller, login, splash
+│   │   │   └── home/        #   phase-4 landing spot
+│   │   ├── app.dart         # MaterialApp.router
+│   │   └── main.dart        # ProviderScope + runApp
+│   └── test/                # fakes/, app_test.dart, feature + unit tests
 │
-├── backend/                 # Laravel REST API (not yet created)
+├── backend/                 # Laravel REST API
 │   ├── app/
-│   │   ├── Http/            # Controllers, FormRequests, Resources
+│   │   ├── Http/
+│   │   │   ├── Controllers/Api/V1/   # AuthController, RoleController
+│   │   │   ├── Requests/             # Form Requests (auth so far)
+│   │   │   ├── Resources/            # UserResource, EmployeeBriefResource, RoleResource
+│   │   │   └── Responses/            # ApiResponse — the response envelope
 │   │   ├── Models/          # Eloquent models
 │   │   ├── Services/        # Business logic (geofence, leave, payroll)
-│   │   ├── Policies/        # Authorization
+│   │   ├── Policies/        # Authorization (Phase 4)
 │   │   ├── Jobs/            # Queued work
 │   │   └── Notifications/   # FCM + database notifications
+│   ├── config/rate_limiting.php   # login + password-reset limits
 │   ├── database/migrations/
-│   └── routes/api.php
+│   ├── routes/api.php
+│   └── tests/               # Feature + Unit (120 tests)
 │
 ├── docs/                    # Project documentation
 │   ├── ARCHITECTURE.md
@@ -203,7 +216,7 @@ php artisan serve          # http://127.0.0.1:8000
 ```
 
 ```bash
-php artisan test                  # 75 tests, 310 assertions
+php artisan test                  # 120 tests, 517 assertions
 ./vendor/bin/pint                 # code style
 ```
 
@@ -221,11 +234,28 @@ php artisan test                  # 75 tests, 310 assertions
 
 ### Frontend
 
+Start the API first (see **Backend** above), then in a second terminal:
+
 ```bash
 cd mobile
 flutter pub get
-flutter run                # with a device or emulator connected
+
+# Default base URL is http://10.0.2.2:8000/api/v1 — that is how the Android
+# emulator reaches the host machine, so `flutter run` needs no arguments there.
+flutter run
+
+# On a physical device (or any backend not on this machine):
+flutter run --dart-define=API_BASE_URL=http://192.168.1.20:8000/api/v1
 ```
+
+```bash
+flutter analyze              # must report no issues
+flutter test                 # 43 tests, no device or server required
+```
+
+> The base URL is compiled in with `--dart-define`. There is no config file to
+> leak and no runtime setting that could repoint a device at an attacker's
+> server.
 
 ---
 
@@ -284,13 +314,58 @@ flutter run                # with a device or emulator connected
 > documents, notifications, authentication endpoints, and Flutter feature screens —
 > these belong to Phases 3–12.
 
+### ✅ Phase 3 — Authentication + Flutter auth foundation (COMPLETE)
+
+**Backend**
+
+| Deliverable | Status |
+|---|---|
+| `POST /auth/login` — Sanctum bearer token, explicit `Hash::check` (stateless, no session row) | ✅ |
+| `GET /auth/me` · `POST /auth/logout` · `POST /auth/change-password` | ✅ |
+| `GET /auth/sessions` · `DELETE /auth/sessions/{id}` — device management | ✅ |
+| `POST /auth/forgot-password` · `POST /auth/reset-password` — **501 until a real mailer is configured** | ✅ |
+| `GET /roles` gated by `permission:roles.view` | ✅ |
+| `users.status` column (indexed) — deactivated accounts cannot sign in | ✅ |
+| Response envelope built in one place: `App\Http\Responses\ApiResponse`; `data` and `errors` always JSON **objects** | ✅ |
+| Exception rendering ordered most-specific-first, each branch guarded by `$request->is('api/*')` | ✅ |
+| Rate limiting — `login` 5/min/IP · `password_reset` 5/15min/IP, numbers in `config/rate_limiting.php` | ✅ |
+| Form Requests + API Resources (`UserResource`, `EmployeeBriefResource`, `RoleResource`) | ✅ |
+| Generic user resource carries **no** salary or private HR data | ✅ |
+| Tests: **120 passed (517 assertions)** · `pint --test` clean · `composer validate` valid | ✅ |
+
+**Flutter**
+
+| Deliverable | Status |
+|---|---|
+| Riverpod 3 `Notifier` auth controller — `restoring / unauthenticated / authenticating / authenticated / failed` | ✅ |
+| Dio client — bearer interceptor, envelope → `ApiException`, `Retry-After` parsing | ✅ |
+| `flutter_secure_storage` token store + per-install device identity | ✅ |
+| GoRouter guard driven by `refreshListenable` — the router is never rebuilt on auth change | ✅ |
+| Splash (`/`, session restore), login screen, home placeholder | ✅ |
+| Server 422 field errors drawn with `forceErrorText`; local validators stay local | ✅ |
+| `flutter analyze` clean · `flutter test` **43 passed** | ✅ |
+
+> **Deliberately not built in Phase 3:** employee CRUD, attendance, leave,
+> payroll, documents, expenses, notifications and the real dashboard — Phases
+> 4–12. Password-reset emails are implemented and tested but answer **501**
+> until `PASSWORD_RESET_ENABLED=true` alongside a mailer that can actually
+> deliver; `MAIL_MAILER=log` writes the link where nobody would read it, and
+> claiming success would be a lie. See [`docs/SECURITY.md`](docs/SECURITY.md) §2.
+>
+> **Known caveat:** `logout()` swallows a network failure and signs out locally
+> anyway. The stored token is cleared, but until the server is reachable again
+> the remote session still exists — there is no retry queue, because
+> re-sending a token whose purpose is to delete itself has no safe home to
+> live in. Covered honestly in [`docs/SECURITY.md`](docs/SECURITY.md) §2.
+
 ### Planned Phases
 
 | Phase | Scope | Status |
 |---|---|---|
 | **1b** | Flutter toolchain + Flutter project skeleton | ✅ Done |
 | **2** | Core database schema + seeders (roles, permissions, settings) | ✅ Done |
-| **3** | Authentication (Sanctum) + Flutter auth feature | ⬜ Next |
+| **3** | Authentication (Sanctum) + Flutter auth feature | ✅ Done |
+| **4** | Employees, Projects, Sites, Assignments (first vertical slice) | ⬜ Next |
 | **4** | Employees, Projects, Sites, Assignments (first vertical slice) | ⬜ |
 | **5** | Attendance: geofence, selfie, check-in/out, audit | ⬜ |
 | **6** | Offline synchronization | ⬜ |

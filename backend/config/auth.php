@@ -1,5 +1,7 @@
 <?php
 
+use App\Models\User;
+
 return [
 
     /*
@@ -62,7 +64,7 @@ return [
     'providers' => [
         'users' => [
             'driver' => 'eloquent',
-            'model' => env('AUTH_MODEL', App\Models\User::class),
+            'model' => env('AUTH_MODEL', User::class),
         ],
 
         // 'users' => [
@@ -97,6 +99,26 @@ return [
             'expire' => 60,
             'throttle' => 60,
         ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Self-service password reset
+    |--------------------------------------------------------------------------
+    |
+    | The forgot-password and reset-password endpoints are implemented and
+    | routed, but they only answer 200/202 once this is true.
+    |
+    | Leave it false while the application's mailer cannot actually deliver
+    | (MAIL_MAILER=log only files the message into storage/logs). Answering
+    | "check your inbox" when nothing was sent would be misleading, so the
+    | routes return 501 instead. Flip this to true together with a real
+    | mailer in .env.
+    |
+    */
+
+    'password_reset' => [
+        'enabled' => (bool) env('PASSWORD_RESET_ENABLED', false),
     ],
 
     /*

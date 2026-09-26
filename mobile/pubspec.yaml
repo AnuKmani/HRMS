@@ -35,6 +35,15 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
 
+  # Phase 3 — auth foundation. Riverpod for state, Dio for HTTP, GoRouter for
+  # routing + guard redirects, flutter_secure_storage for the bearer token.
+  # pubspec.lock pins the exact resolved versions; the carets follow the same
+  # convention as cupertino_icons above.
+  flutter_riverpod: ^3.4.3
+  dio: ^5.11.1
+  go_router: ^18.0.1
+  flutter_secure_storage: ^11.2.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

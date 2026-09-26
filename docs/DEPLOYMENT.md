@@ -81,9 +81,32 @@ CACHE_STORE=redis              # or database
 FILESYSTEM_DISK=private        # private storage for sensitive files
 
 SANCTUM_STATELESS=true
+
+# --- Phase 3: authentication -------------------------------------------------
+BCRYPT_ROUNDS=12                  # cost of the password hash; 4 is for tests only
+LOGIN_RATE_LIMIT_MAX_ATTEMPTS=5
+LOGIN_RATE_LIMIT_DECAY_MINUTES=1
+PASSWORD_RESET_RATE_LIMIT_MAX_ATTEMPTS=5
+PASSWORD_RESET_RATE_LIMIT_DECAY_MINUTES=15
+
+# Password reset stays OFF until a mailer below can genuinely deliver.
+# MAIL_MAILER=log writes the link into a log file nobody reads, and telling a
+# user "email sent" when none was would be a lie.
+PASSWORD_RESET_ENABLED=false
+MAIL_MAILER=smtp
+MAIL_HOST=smtp.example.com
+MAIL_PORT=587
+MAIL_USERNAME=<smtp user>
+MAIL_PASSWORD=<smtp password>
+MAIL_ENCRYPTION=tls
 ```
 
 **Critical:** `APP_DEBUG=false` in production. A debug page can leak env secrets.
+
+**Critical:** only flip `PASSWORD_RESET_ENABLED=true` in the same commit as a
+`MAIL_MAILER` that has been verified to deliver. The endpoint answers `501`
+while it is `false`, and `config:cache` bakes the value in — changing it needs
+a `php artisan config:clear`.
 
 ### 3.2 Post-deploy commands
 
@@ -370,8 +393,10 @@ curl -s https://api.example.com/api/v1/health
 | Item | Status |
 |---|---|
 | This document (target architecture + runbook) | ✅ Written |
+| Phase 3 auth environment variables documented in §3.1 | ✅ |
 | Server provisioning | ⬜ |
 | CI/CD pipeline | ⬜ |
 | SSL certificate | ⬜ |
+| Password reset enabled (needs a delivering mailer) | ⬜ |
 | Backup script implemented | ⬜ |
 | Restore tested | ⬜ |

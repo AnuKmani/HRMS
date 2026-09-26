@@ -56,9 +56,14 @@ additive changes do not.
 {
     "success": false,
     "message": "Unauthenticated.",
-    "errors": null
+    "errors": {}
 }
 ```
+
+`errors` is **always a JSON object** — `{}` when there is nothing
+field-specific to say. Flutter can therefore read it as a map without a null
+check. (Status `0` in the table below is not an HTTP status: it is the code the
+client assigns when no response arrived at all.)
 
 ### 1.6 Status codes
 
@@ -66,7 +71,7 @@ additive changes do not.
 |---|---|---|
 | `200` | OK | Parse `data` |
 | `201` | Created | Parse `data`, refresh list |
-| `401` | Token expired / invalid | Attempt refresh → else force re-login |
+| `401` | Token expired / invalid | Clear the stored token, return to login. There is no refresh token in this API — a dead session is re-established by signing in again |
 | `403` | Authenticated but not permitted | Show "not authorized" state, do **not** log out |
 | `404` | Not found | Show empty / not-found state |
 | `422` | Validation failed | Map `errors` onto form fields |
@@ -102,27 +107,172 @@ GET /api/v1/attendance?from=2026-09-01&to=2026-09-30&site_id=4&status=late
 
 ```
 Authorization: Bearer <sanctum-token>
+Accept: application/json
 ```
 
 Tokens are issued at login and stored in **secure storage** (Keychain / Keystore) —
 never in plain preferences.
 
+Behaviour that holds across every authenticated endpoint:
+
+- The token is returned **once**, by `POST /auth/login`. Sanctum stores only a
+  SHA-256 hash, so no later response can include it again.
+- One token per `device_name`. Signing in with a name that already exists
+  deletes the old token first, so a handset never accumulates sessions it
+  cannot see.
+- Any request presenting a rejected token gets `401` in the standard envelope.
+  A client should treat that as "this session is over", clear its stored token,
+  and return to `/login` — not as a transient error worth retrying.
+- A `403` is **not** a session failure. The token is still good; the user
+  simply lacks the permission. Signing them out would be wrong.
+
 ---
 
-## 2. Planned Endpoints
+## 2. Endpoints
 
-### 2.1 Authentication
+> **Implemented:** §2.1 (Phase 3). Everything from §2.2 onward arrives with
+> Phases 4–12 and is listed here as the contract to build against.
 
-| Method | Path | Notes |
-|---|---|---|
-| POST | `/auth/login` | Returns token + user profile + permissions |
-| POST | `/auth/logout` | Revokes current token |
-| GET | `/auth/me` | Current user, roles, permissions |
-| POST | `/auth/forgot-password` | Sends reset link |
-| POST | `/auth/reset-password` | Token + new password |
-| POST | `/auth/change-password` | Requires current password |
-| GET | `/auth/sessions` | List active device tokens |
-| DELETE | `/auth/sessions/{id}` | Revoke a specific device |
+### 2.1 Authentication ✅ (Phase 3)
+
+| Method | Path | Gate | Notes |
+|---|---|---|---|
+| POST | `/auth/login` | `throttle:login` | Token + user profile + permissions |
+| POST | `/auth/logout` | `auth:sanctum` | Revokes the token this request presented |
+| GET | `/auth/me` | `auth:sanctum` | Current user, roles, permissions |
+| GET | `/auth/sessions` | `auth:sanctum` | List this account's device tokens |
+| DELETE | `/auth/sessions/{id}` | `auth:sanctum` | Revoke a specific device |
+| POST | `/auth/change-password` | `auth:sanctum` | Requires current password; signs other devices out |
+| POST | `/auth/forgot-password` | `throttle:password_reset` | **501** until a mailer is configured |
+| POST | `/auth/reset-password` | `throttle:password_reset` | **501** until a mailer is configured |
+| GET | `/roles` | `permission:roles.view` | Read-only role → permission map |
+
+#### `POST /auth/login`
+
+```json
+{
+    "email": "ada@example.com",
+    "password": "…",
+    "device_name": "android 9f3c1a2b7d4e5f60"
+}
+```
+
+`device_name` is optional (`max:190`). Omitting it yields the server default
+`API client`, which means every install shares one token slot — send a stable
+per-install value, as `SecureDeviceIdentity` in the app does.
+
+**200**
+
+```json
+{
+    "success": true,
+    "message": "Signed in successfully.",
+    "data": {
+        "token": "1|…",
+        "token_type": "Bearer",
+        "expires_at": null,
+        "user": {
+            "id": 7,
+            "name": "Ada Lovelace",
+            "email": "ada@example.com",
+            "status": "active",
+            "roles": ["Employee"],
+            "permissions": ["attendance.view"],
+            "employee": {
+                "id": 12,
+                "employee_code": "EMP-0012",
+                "full_name": "Ada Lovelace",
+                "photo_path": null,
+                "department": "Engineering",
+                "designation": "Staff Engineer",
+                "employment_type": "permanent",
+                "employment_status": "active"
+            }
+        }
+    }
+}
+```
+
+`expires_at` is `null` for a token that does not expire, which is what the API
+issues today — treat it as "no automatic logout", not as an error.
+
+**401** — identical body for unknown address, wrong password, and a
+deactivated account's *shape* of failure. The password is verified first, then
+`status`, so the response never confirms that an address exists:
+
+```json
+{ "success": false, "message": "The email or password you entered is incorrect.", "errors": {} }
+```
+
+**422** — shape only (`email:rfc`, `password` required and `≤255`,
+`device_name` optional). Whether the credentials are *correct* is never
+validated here, because a 422 would be an account-existence oracle.
+
+**429** — see §3.
+
+#### `GET /auth/me`
+
+`data` is the `user` object above. Use it to restore a session on launch: a
+`401` means the stored token is dead and must be discarded; anything else
+(network, 500) means "could not ask", and the token should be kept.
+
+#### `POST /auth/logout`
+
+Deletes only the token this request carried. Other devices stay signed in.
+`data` is `{}`.
+
+#### `POST /auth/change-password`
+
+```json
+{ "current_password": "…", "password": "…", "password_confirmation": "…" }
+```
+
+`422` with `current_password: ["The current password you entered is incorrect."]`
+when the proof fails. On success every **other** token for the account is
+deleted — changing a password ends the sessions it was meant to end.
+
+#### `POST /auth/forgot-password` · `POST /auth/reset-password`
+
+Built, validated and routed, but answered **501** with an honest message until
+`PASSWORD_RESET_ENABLED=true` *and* a mailer that can actually deliver are
+configured. `MAIL_MAILER=log` writes the link to a log file nobody reads, so
+returning `200` would tell the user a reset is on its way when none is.
+`forgot-password` deliberately has no `exists:users.email` rule — the endpoint
+answers identically for known and unknown addresses.
+
+#### `GET /auth/sessions` · `DELETE /auth/sessions/{id}`
+
+`GET` answers `message: "Active sessions."` with `data` as a **JSON array** —
+the one place where `data` is not an object, because a list of devices is a
+list:
+
+```json
+{
+    "id": 41,
+    "device": "android 9f3c1a2b7d4e5f60",
+    "is_current": true,
+    "last_used_at": "2026-09-27T09:14:02.000000Z",
+    "created_at": "2026-09-27T08:02:11.000000Z",
+    "expires_at": null
+}
+```
+
+Identifiers and timestamps only — never the stored hash. `DELETE` answers
+`"Session revoked."` and only ever touches a token belonging to the caller's
+own account; another user's session id is a **404**, not a 403, because a 403
+would confirm that the token exists somewhere.
+
+#### `GET /roles`
+
+```json
+{
+    "success": true,
+    "message": "All roles.",
+    "data": [
+        { "name": "HR Executive", "guard_name": "web", "permissions": ["employees.create", "…"] }
+    ]
+}
+```
 
 ### 2.2 Employees
 
@@ -290,15 +440,30 @@ Export formats: `format=csv|xlsx|pdf`
 
 ## 3. Rate Limiting
 
-| Scope | Limit |
-|---|---|
-| `POST /auth/login` | 6 / minute / IP |
-| `POST /auth/forgot-password` | 3 / minute |
-| Attendance endpoints | 30 / minute |
-| General API | 60 / minute |
-| Exports (PDF/Excel) | 10 / minute |
+Limits live in `backend/config/rate_limiting.php` (which reads `.env`) and are
+attached at the route as `throttle:{name}`. Never inline a number in a route.
 
-Exceeded → **HTTP 429** with `Retry-After` header.
+| Scope | Limit | Key | Status |
+|---|---|---|---|
+| `POST /auth/login` | **5 / minute** | client IP | ✅ Phase 3 |
+| `POST /auth/forgot-password`, `POST /auth/reset-password` | **5 / 15 minutes** | client IP | ✅ Phase 3 |
+| Attendance endpoints | 30 / minute | — | ⬜ Phase 5 |
+| General API | 60 / minute | — | ⬜ Planned |
+| Exports (PDF/Excel) | 10 / minute | — | ⬜ Phase 12 |
+
+Exceeded → **HTTP 429** in the standard envelope, with a `Retry-After` header.
+
+**Why client IP and not email.** Keying login by `email` would let anyone with
+a connection flood one address and lock its real owner out of their own
+account — a denial-of-service handed to the attacker for free. Keying by IP
+throttles the machine actually doing the guessing. The trade-off is that a
+shared NAT (an office, a café) shares one bucket; 5 attempts per minute is low
+enough that this is felt rarely and high enough that it is not a support
+burden.
+
+**Client handling:** the Flutter client reads `Retry-After` into
+`ApiException.retryAfter` and shows the wait on the sign-in form rather than
+letting the user tap into the same wall repeatedly.
 
 ---
 
@@ -336,7 +501,14 @@ Server behaviour for each action:
 | Area | Status |
 |---|---|
 | Conventions (this document) | ✅ Defined |
-| All endpoints | ⬜ Not implemented — Phase 3 onward |
+| §2.1 Authentication | ✅ Phase 3 |
+| §2.2–§2.12 Everything else | ⬜ Phase 4 onward |
+| Rate limiting — auth routes | ✅ Phase 3 |
+| Rate limiting — remaining scopes | ⬜ As their modules land |
+
+Backend proof: `php artisan test` → **120 passed (517 assertions)**, covering
+`AuthenticationTest`, `AuthorizationTest`, `PasswordResetTest` and
+`ApiErrorHandlingTest`.
 
 > To explore a running API later, use Laravel's generated OpenAPI/Swagger UI or
 > a tool such as Postman.

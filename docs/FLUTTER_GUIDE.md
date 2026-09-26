@@ -148,6 +148,62 @@ return attendance.when(
 **Key idea:** the widget does not know or care whether the data came from the network,
 the offline database, or a cache. That decision lives in the Repository.
 
+**As implemented in Phase 3 — `Notifier` for a state machine.** `FutureProvider`
+models *a value that will arrive*; auth needs *a status the whole app keys off*,
+including transitions where nothing is loading. That is `Notifier`:
+
+```dart
+// features/auth/auth_controller.dart
+final authControllerProvider =
+    NotifierProvider<AuthController, AuthState>(AuthController.new);
+
+class AuthController extends Notifier<AuthState> {
+  @override
+  AuthState build() {
+    _repository   = ref.watch(authRepositoryProvider);
+    _tokenStore   = ref.watch(tokenStoreProvider);
+    _deviceIdentity = ref.watch(deviceIdentityProvider);
+
+    // The HTTP layer announcing that a token we sent was rejected.
+    _sessionSubscription = ref
+        .watch(apiClientProvider)
+        .sessionRejected
+        .listen((_) => signOutLocally());
+
+    ref.onDispose(() => _sessionSubscription?.cancel());
+    return AuthState.restoring();          // build() must be synchronous
+  }
+
+  Future<bool> login({required String email, required String password}) async {
+    state = const AuthState(status: AuthStatus.authenticating);
+    try {
+      final result = await _repository.login(/* … */);
+      await _tokenStore.write(result.token);
+      state = AuthState(status: AuthStatus.authenticated, user: result.user);
+      return true;
+    } on ApiException catch (failure) {
+      state = AuthState(status: AuthStatus.failed, message: failure.message,
+                        errors: failure.errors, retryAfter: failure.retryAfter);
+      return false;
+    }
+  }
+}
+```
+
+Three habits worth keeping:
+
+- **Every transition writes a whole new `AuthState`.** No partially updated
+  object where `user` belongs to one status and `status` says another.
+- **`build()` returns synchronously.** Asynchronous work starts after it and
+  writes `state` when it lands — which is exactly what `AuthState.restoring()`
+  exists for.
+- **Methods called from a button never throw.** `login()` returns `bool` and
+  puts every failure into `state`, because an unhandled exception there would
+  leave the form spinning with no way to find out why.
+
+A provider that never changes shape (`tokenStoreProvider`, `apiClientProvider`)
+stays a plain `Provider` — see `core/`.
+
 ---
 
 ## 5. Repository = the seam between UI and data
@@ -187,6 +243,28 @@ class AttendanceRepositoryImpl implements AttendanceRepository {
 **Why this matters for offline:** when you add offline support you change *this class*.
 The screen and the provider stay untouched.
 
+**As implemented in Phase 3 — the interface comes first.** `AuthRepository` is
+abstract and the provider binds the real one, so every auth test substitutes an
+in-memory implementation: no socket, no timing, no flake.
+
+```dart
+// features/auth/auth_repository.dart
+abstract class AuthRepository {
+  Future<LoginResult> login({required String email, required String password,
+                             required String deviceName});
+  Future<AuthUser> me();
+  Future<void> logout();
+}
+
+final authRepositoryProvider = Provider<AuthRepository>(
+  (ref) => ApiAuthRepository(ref.watch(apiClientProvider)),
+);
+```
+
+The controller, the screens and the router never learn that a `Dio` exists.
+The same seam later holds the offline queue: `AuthRepository` grows a second
+implementation, and nothing above it changes.
+
 ---
 
 ## 6. Dio + interceptors = the API client
@@ -194,32 +272,39 @@ The screen and the provider stay untouched.
 **What it is:** an HTTP client with pluggable middleware (like Laravel middleware, but
 for outgoing requests).
 
+`mobile/lib/core/network/api_client.dart` — one interceptor, three jobs:
+
 ```dart
-class AuthInterceptor extends Interceptor {
-  @override
-  void onRequest(RequestOptions options, RequestInterceptorHandler handler) async {
-    final token = await secureStorage.read(key: 'auth_token');
-    if (token != null) {
+InterceptorsWrapper(
+  onRequest: (options, handler) async {
+    final token = await tokenStore.read();
+    if (token != null && token.isNotEmpty) {
       options.headers['Authorization'] = 'Bearer $token';
+      options.extra[_taggedToken] = true;   // "this request carried a token"
     }
     handler.next(options);
-  }
-
-  @override
-  void onError(DioException err, ErrorInterceptorHandler handler) async {
-    if (err.response?.statusCode == 401) {
-      // token expired → attempt refresh or force re-login
+  },
+  onError: (failure, handler) {
+    final presented = failure.requestOptions.extra[_taggedToken] == true;
+    if (presented && failure.response?.statusCode == 401) {
+      _sessionRejected.add(null);           // a stored session just died
     }
-    handler.next(err);
-  }
-}
+    handler.next(failure);
+  },
+)
 ```
 
 **What it does:**
-- attaches the Sanctum token to every request
-- catches `401` centrally (one place, not 50 screens)
-- normalises `422` validation errors into a map the form can consume
-- applies timeouts and retry policy
+- attaches the Sanctum token to every request that should carry one
+- catches `401` centrally — **but only when a token was attached** (see below)
+- guarantees every failure leaves as `ApiException`, never a raw `DioException`
+- applies connect / receive timeouts
+
+**Why the `presented_token` tag matters.** A wrong password on the sign-in form
+comes back `401` too, and that request carried no token. Keying the broadcast
+off *"did we send a credential?"* rather than off the status code means a bad
+password can never be mistaken for an expired session — the app will not sign
+someone out because they mistyped.
 
 **Where it belongs:** `core/network/`.
 
@@ -227,32 +312,55 @@ class AuthInterceptor extends Interceptor {
 
 ## 7. The response envelope — one parser for everything
 
-Laravel returns `{success, message, data, errors}`. Parse it **once**:
+Laravel returns `{success, message, data, errors}`. Parse it **once**, in
+`core/network/api_client.dart` (success) and `core/network/api_exception.dart`
+(failure):
 
 ```dart
-class ApiResult<T> {
-  final bool success;
+/// success → data + message
+class ApiEnvelope {
   final String message;
-  final T? data;
-  final Map<String, List<String>>? errors;
+  final Object? data;
+}
+
+/// failure → one shape for every way a request can go wrong
+class ApiException implements Exception {
+  final int statusCode;              // 0 when no response arrived at all
+  final String message;              // safe to render verbatim
+  final Map<String, String> errors;  // field => message, {} when there is none
+  final Duration? retryAfter;        // parsed from Retry-After on 429
+
+  bool get isUnauthenticated => statusCode == 401;
+  bool get isValidation      => statusCode == 422;
+  bool get isRateLimited     => statusCode == 429;
 }
 ```
 
-Every repository returns either a typed `T` or a `Failure`. Screens never see raw JSON.
+`apiExceptionFrom(DioException)` copies the server's own message across when
+the body is a real envelope, and substitutes copy written in the app when it is
+not. That second half is the important one: a captive portal answering with
+HTML, a proxy returning an empty body, a timeout with no response at all — none
+of that should ever reach a screen as though it were a sentence.
 
-**Failure types** (`core/errors/`):
+Repositories return a typed model or throw `ApiException`. Screens never see
+raw JSON, and never see a `DioException`.
 
-| Type | Trigger | User sees |
+**Failure types:**
+
+| Trigger | `statusCode` | User sees |
 |---|---|---|
-| `NetworkFailure` | no internet / timeout | "No connection. Your record is saved and will sync." |
-| `AuthFailure` | 401 | force re-login |
-| `PermissionFailure` | 403 | "You don't have access to this." |
-| `ValidationFailure` | 422 | field-level messages |
-| `RateLimitFailure` | 429 | "Too many attempts. Try again shortly." |
-| `ServerFailure` | 500 | generic "Something went wrong" |
-| `NotFoundFailure` | 404 | empty / not-found state |
+| No internet / timeout / connection refused | `0` | "Could not reach the server. Check your connection and try again." |
+| `401` | `401` | force re-login (the router does this, not the screen) |
+| `403` | `403` | "not authorized" — **do not** log out |
+| `422` | `422` | banner `message` + `errors` under the named fields |
+| `429` | `429` | `message` + "You can try again in *N*s" from `retryAfter` |
+| `404` / `5xx` / non-envelope body | as received | "The server returned an unexpected response. Please try again." |
 
 Never show a raw exception to a user. Log it for developers instead.
+
+> Laravel's `errors` map is `field: [messages]`. `_fieldErrors()` flattens it
+> to the first message per field — one line under an input is what a form can
+> actually draw.
 
 ---
 
@@ -268,37 +376,81 @@ Never show a raw exception to a user. Log it for developers instead.
 **Never** store a password or token in `shared_preferences` — it is written as plain
 XML/plist on disk.
 
+**As implemented in Phase 3:** `core/storage/token_store.dart` wraps
+`FlutterSecureStorage` behind a `TokenStore` interface — one fixed key, so
+signing in overwrites rather than accumulates. Being an interface is what lets
+tests use an in-memory map: `flutter_secure_storage` talks to the platform
+keychain over a method channel, which has nothing to say inside a widget test.
+`core/storage/device_identity.dart` writes a random id **once** per install and
+reuses it forever, which is what makes "one token per device" hold across two
+handsets without either carrying anything about the account.
+
 ---
 
 ## 9. GoRouter = declarative navigation
 
-```dart
-final router = GoRouter(
-  initialPath: '/login',
-  redirect: (context, state) {
-    final auth = container.read(authProvider);
-    final loggedIn = auth.isAuthenticated;
-    final atLogin = state.matchedLocation == '/login';
+`mobile/lib/core/router/app_router.dart`:
 
-    if (!loggedIn && !atLogin) return '/login';
-    if (loggedIn && atLogin)   return '/dashboard';
-    return null;                    // no change
-  },
-  routes: [
-    GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
-    GoRoute(path: '/dashboard', builder: (_, __) => const DashboardScreen()),
-    StatefulShellRoute.indexedStack(       // bottom navigation shell
-      builder: (_, __, shell) => HomeShell(shell: shell),
-      branches: [ /* attendance, leave, payroll, more */ ],
-    ),
-  ],
-);
+```dart
+final routerProvider = Provider<GoRouter>((ref) {
+  // GoRouter re-runs its redirect whenever this notifies.
+  final authChanged = ValueNotifier<int>(0);
+
+  ref.listen(authControllerProvider, (_, _) => authChanged.value++);
+
+  final router = GoRouter(
+    initialLocation: '/',
+    refreshListenable: authChanged,      // ← the guard's trigger
+    redirect: (context, state) {
+      final auth = ref.read(authControllerProvider);
+      final location = state.matchedLocation;
+
+      // Answer not known yet — hold on the splash rather than guessing.
+      if (auth.status == AuthStatus.restoring) {
+        return location == '/' ? null : '/';
+      }
+      if (auth.isAuthenticated) {
+        return (location == '/' || location == '/login') ? '/home' : null;
+      }
+      return location == '/login' ? null : '/login';
+    },
+    routes: [
+      GoRoute(path: '/',      builder: (_, _) => const SplashScreen()),
+      GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
+      GoRoute(path: '/home',  builder: (_, _) => const HomeScreen()),
+    ],
+  );
+
+  ref.onDispose(() {
+    authChanged.dispose();
+    router.dispose();
+  });
+
+  return router;
+});
 ```
 
 **What it is:** URL-based routing with a central `redirect` — equivalent to Laravel
 route middleware, but for the client.
 **Why:** auth guards and role-based redirection live in one place instead of scattered
 `Navigator.push` calls.
+
+**Two decisions worth copying:**
+
+1. **Bump a notifier; never rebuild the router.** Recreating `GoRouter` on every
+   auth change would dispose the route on screen — and with it whatever the
+   user had already typed into the sign-in form. `refreshListenable` re-runs
+   `redirect` and touches nothing else.
+2. **No screen navigates on login or logout.** The controller writes
+   `AuthState`; the redirect notices. That is why `LoginScreen._submit()` has
+   nothing to do after `await login(...)` — success moves the user, failure is
+   already in the state the form draws.
+
+**Three statuses, three behaviours:** `restoring` holds everything on `/`;
+`authenticated` is pushed off the landing pages to `/home`; everything else
+(`unauthenticated`, `authenticating`, `failed`) is on `/login`. Treating
+`authenticating` as "not signed in" is what keeps the form from flickering to
+a dashboard and back while the request is in flight.
 
 **Role-based menus:** the shell builds its navigation items from the permissions the
 server returned at login. Hiding a menu is *convenience* — Laravel still enforces access.
@@ -348,6 +500,34 @@ returns `403` if the app is bypassed.
 
 ## 12. Project structure
 
+**As built after Phase 3:**
+
+```
+mobile/lib/
+├── core/
+│   ├── config/app_config.dart        # base URL from --dart-define
+│   ├── network/api_client.dart       # Dio + bearer interceptor + ApiEnvelope
+│   ├── network/api_exception.dart    # ApiException + envelope parsing
+│   ├── router/app_router.dart        # GoRouter + refreshListenable guard
+│   ├── storage/token_store.dart      # flutter_secure_storage (TokenStore)
+│   └── storage/device_identity.dart  # stable per-install device name
+│
+├── features/
+│   ├── auth/
+│   │   ├── auth_models.dart          # AuthUser, EmployeeBrief, LoginResult
+│   │   ├── auth_repository.dart      # AuthRepository (abstract) + Api impl
+│   │   ├── auth_state.dart           # AuthStatus + AuthState
+│   │   ├── auth_controller.dart      # Notifier<AuthState>
+│   │   ├── login_screen.dart
+│   │   └── splash_screen.dart
+│   └── home/home_screen.dart         # Phase 4 landing spot
+│
+├── app.dart                          # MaterialApp.router
+└── main.dart                         # ProviderScope + runApp
+```
+
+**Target shape once features carry real data:**
+
 ```
 mobile/lib/
 ├── core/
@@ -372,6 +552,10 @@ mobile/lib/
 └── main.dart
 ```
 
+`auth/` is flat because five files do not need four directories. The nested
+shape starts paying for itself when a feature gains a local data source — the
+offline queue in Phase 6 is that moment for `attendance/`.
+
 ---
 
 ## 13. Running the app
@@ -382,6 +566,28 @@ flutter pub get          # install dependencies (like composer install)
 flutter analyze          # static analysis — must be clean
 flutter test             # run tests
 flutter run              # build + install on a connected device/emulator
+```
+
+**Pointing the app at a backend:**
+
+```bash
+# Default — Android emulator reaching the host machine:
+#   http://10.0.2.2:8000/api/v1
+flutter run
+
+# Physical device, or a backend on another host:
+flutter run --dart-define=API_BASE_URL=http://192.168.1.20:8000/api/v1
+```
+
+`dart-define` values are baked into the binary at build time. There is no
+config file on disk to read, leak, or edit after the app ships — and no runtime
+setting that could repoint a device at an attacker's server.
+
+Start the API first:
+
+```bash
+cd backend
+php artisan serve        # http://127.0.0.1:8000
 ```
 
 **Useful:**
@@ -427,6 +633,14 @@ flutter build appbundle         # build an AAB for Play Store
 | Item | Status |
 |---|---|
 | This guide (concepts + patterns) | ✅ Written |
-| Flutter SDK install (on `F:`) | ⬜ Phase 1b |
-| Flutter project skeleton | ⬜ Phase 1b |
-| Feature implementation | ⬜ Phase 3 onward |
+| Flutter SDK install (on `F:`) | ✅ Phase 1b |
+| Flutter project skeleton | ✅ Phase 1b |
+| Packages: `flutter_riverpod` 3.4.3 · `dio` 5.11.1 · `go_router` 18.0.1 · `flutter_secure_storage` 11.2.0 | ✅ Phase 3 |
+| `core/` — config, network, storage, router | ✅ Phase 3 |
+| Auth feature — controller, repository, models, login + splash screens | ✅ Phase 3 |
+| Router guard (`refreshListenable`) + session restore | ✅ Phase 3 |
+| `flutter analyze` | ✅ clean |
+| `flutter test` | ✅ **43 passed** |
+| Local database (Drift) + offline queue | ⬜ Phase 6 |
+| Shared widgets (`core/widgets/`) | ⬜ With the first list screens |
+| Feature screens beyond auth | ⬜ Phase 4 onward |
