@@ -114,6 +114,20 @@ GEOFENCE_MAX_RADIUS_METRES=10000
 # => 'visibility'. A custom deployment that needs different lists edits that
 # file, and both the list queries and the policies read the same two arrays, so
 # narrowing a role narrows the collection and the single-record check together.
+
+# --- Phase 6: leave certificates --------------------------------------------
+# Private storage for medical certificates. Both live on the `local` disk
+# (storage/app/private) and are reachable only through
+# GET /api/v1/leave/{id}/certificate behind a policy — never a public path.
+# HRMS_CERTIFICATE_DIRECTORY=leave-certificates
+# HRMS_CERTIFICATE_MAX_KB=5120
+
+# How long a sick leave may go without a medical document before the scheduler
+# converts it to LOP. This one is deliberately NOT an env var: it is the
+# `settings` row `leave.sick_certificate_deadline_days` (default 2), read on
+# every use through SettingsService. There is no settings endpoint yet, so
+# it is changed with a row update rather than a config:clear. A leave type
+# with document_deadline_days > 0 wins over it.
 ```
 
 **Critical:** `APP_DEBUG=false` in production. A debug page can leak env secrets.
@@ -133,16 +147,36 @@ php artisan migrate --force
 php artisan storage:link        # only if any public disk is used
 ```
 
-**When the permission catalogue grows** (it did once, in Phase 4), re-run the two
-idempotent seeders rather than the whole `DatabaseSeeder`:
+**When the permission catalogue grows** (it has twice — Phase 4 and Phase 6),
+re-run the idempotent seeders rather than the whole `DatabaseSeeder`:
 
 ```bash
-php artisan db:seed --class=PermissionSeeder --force
-php artisan db:seed --class=RolePermissionSeeder --force
+php artisan db:seed --class=PermissionSeeder --force      # creates + retires
+php artisan db:seed --class=RolePermissionSeeder --force  # syncPermissions
+php artisan db:seed --class=RoleSeeder --force            # only for new roles
 ```
 
-Both are `firstOrCreate` / `syncPermissions`, so they add what is missing and
-change nothing else — no sample rows, no duplicated roles.
+All are `firstOrCreate` / `syncPermissions`, so they add what is missing and
+change nothing else — no sample rows, no duplicated roles. `PermissionSeeder`
+also runs `PermissionSeeder::RETIRED` (today: `leave.request`), which **deletes**
+permissions nothing references any more, so an upgraded database does not keep
+stale grants.
+
+**Phase 6 also added three configuration seeders** — run them on first deploy
+of this release:
+
+```bash
+php artisan db:seed --class=ApprovalWorkflowSeeder --force  # LEAVE-STD / LEAVE-FAST / OT-STD
+php artisan db:seed --class=LeaveTypeSeeder --force         # AL / SL / EL / UL / OTH
+php artisan db:seed --class=SettingSeeder --force           # adds leave.sick_certificate_deadline_days
+```
+
+Without them the API still starts, but `POST /leave` has no types to offer and
+`submit` has no workflow to materialise.
+
+`ApprovalWorkflowSeeder` is safe to re-run: each workflow is keyed by
+`(subject_type, code)`, and it only clears `is_default` when the definition
+being written asserts one — re-seeding cannot quietly strip the default away.
 
 ---
 
@@ -176,22 +210,30 @@ sudo systemctl restart hrms-worker
 > Workers are restarted regularly (`--max-time`) to avoid memory leaks in long-running
 > PHP processes.
 
+**Phase 6 made the worker load-bearing.** `EnforceSickCertificateDeadlines`
+implements `ShouldQueue`, so the scheduler only *dispatches* it — with no
+worker running, the conversion never happens and sick leave quietly keeps
+looking pending. On a single host set `QUEUE_CONNECTION=database` (the `jobs`
+table already exists) and let the unit above consume it. A missed conversion
+is recoverable: the job is idempotent and the next hourly run picks up
+whatever is past its deadline, so a worker outage *delays* LOP, it does not
+lose it.
+
 ---
 
 ## 5. Scheduler (cron)
 
 Business rules that **must** run server-side — never depend on the mobile app being open:
 
-| Job | Purpose | Default schedule |
-|---|---|---|
-| Sick certificate deadline | Convert missing-cert leave to **LOP** | Daily |
-| LOP conversion | Finalise pending LOP entries | Daily |
-| Document expiry reminders | Passport / visa / Emirates ID / certificates | Daily |
-| Training certificate expiry | Notify employee + HR | Daily |
-| Leave reminders | Pending approvals, upcoming leave | Daily |
-| Attendance reminders | Missing check-in / check-out | Daily |
-| Payroll processing | Monthly run | Monthly |
-| Notification dispatch | FCM delivery | Every minute |
+| Job | Purpose | Default schedule | Status |
+|---|---|---|---|
+| `EnforceSickCertificateDeadlines` | Convert leave past its certificate deadline to **LOP**, release the balance, dispatch `LeaveConvertedToLop` | **hourly at :17** (`hourlyAt(17)`) | ✅ Phase 6 |
+| Document expiry reminders | Passport / visa / Emirates ID / certificates | Daily | ⬜ Phase 9 |
+| Training certificate expiry | Notify employee + HR | Daily | ⬜ Phase 9 |
+| Leave reminders | Pending approvals, upcoming leave | Daily | ⬜ with notifications |
+| Attendance reminders | Missing check-in / check-out | Daily | ⬜ with notifications |
+| Payroll processing | Monthly run | Monthly | ⬜ Phase 10 |
+| Notification dispatch | FCM delivery | Every minute | ⬜ Phase 11 |
 
 **Cron entry** (`crontab -e` for the deploy user):
 
@@ -199,10 +241,36 @@ Business rules that **must** run server-side — never depend on the mobile app 
 * * * * * cd /var/www/hrms/backend && php artisan schedule:run >> /dev/null 2>&1
 ```
 
-Verify with:
+The entry must run **every minute** — `schedule:run` is the dispatcher, and
+Laravel's scheduler does the rest. Scheduling it daily instead would mean a
+job registered as `hourlyAt(17)` still fires, but only when the daily run
+happens to land in the right hour; on a VPS whose cron is the only clock, that
+is the difference between "converted at 17:17" and "converted whenever".
+
+Verify after deploy:
+
 ```bash
-php artisan schedule:list
+$ php artisan schedule:list
+17 * * * *  App\Jobs\EnforceSickCertificateDeadlines .... Next Due: 32 seconds from now
 ```
+
+Two guards are set in `routes/console.php` and are **not** visible in
+`schedule:list`, so check the file rather than the output:
+
+```php
+Schedule::job(new EnforceSickCertificateDeadlines)
+    ->hourlyAt(17)
+    ->withoutOverlapping(60)
+    ->onOneServer();
+```
+
+`withoutOverlapping(60)` protects against a cron entry that has not finished
+its previous minute; `onOneServer()` protects against two hosts sharing a
+database. A third guard lives in the job itself (`$uniqueFor = 3600`), and a
+*fourth* in the data (`certificate_checked_at`), so even all the locks being
+defeated converts nothing twice.
+
+**The schedule needs a queue worker too** — see §4.
 
 ---
 
@@ -256,13 +324,22 @@ server {
 
 ```
 backend/storage/app/private/
-├── selfies/                 attendance photos
-├── documents/employees/     passports, IDs, visas, contracts
-├── documents/payroll/       salary slips, certificates
-└── reports/                 generated PDFs
+├── attendance-selfies/{employeeId}/{uuid}.jpg   Phase 5, re-encoded by GD
+├── leave-certificates/{employeeId}/{uuid}.pdf   Phase 6, kept exactly as sent
+├── documents/employees/     passports, IDs, visas, contracts   ⬜ Phase 9
+├── documents/payroll/       salary slips, certificates         ⬜ Phase 10
+└── reports/                 generated PDFs                     ⬜ Phase 7
 ```
 
-Never inside the web root.
+Never inside the web root. Both live directories are reachable only through
+an authenticated route that runs a policy — `GET /attendance/{id}/selfie`
+and `GET /leave/{id}/certificate` — and both answer `Cache-Control: no-store`.
+No response body ever contains a filesystem path, so there is no URL to leak
+even if a JSON payload is logged somewhere.
+
+`selfie_directory` and `certificate_directory` come from `config/hrms.php`
+(`HRMS_SELFIE_DIRECTORY`, `HRMS_CERTIFICATE_DIRECTORY`) — change them there,
+not by moving the folders afterwards.
 
 ### 7.2 Backup strategy
 
@@ -421,6 +498,11 @@ curl -s https://api.example.com/api/v1/health
 | This document (target architecture + runbook) | ✅ Written |
 | Phase 3 auth environment variables documented in §3.1 | ✅ |
 | Phase 4 geofence + visibility config documented in §3.1 | ✅ |
+| Phase 5 selfie env keys (`HRMS_SELFIE_MAX_KB`, `HRMS_SELFIE_MAX_PIXELS`, `HRMS_SELFIE_JPEG_QUALITY`) | ⚠️ **documented but deliberately absent from `.env.example`** — the defaults in `config/hrms.php` are the answer until an operator needs to change them |
+| Phase 6 certificate env keys documented in §3.1 | ✅ |
+| Scheduler registration documented with real `schedule:list` output (§5) | ✅ |
+| Production cron line documented (§5) | ✅ `* * * * * cd … && php artisan schedule:run` |
+| Queue worker identified as required by the Phase 6 deadline job (§4) | ✅ |
 | Server provisioning | ⬜ |
 | CI/CD pipeline | ⬜ |
 | SSL certificate | ⬜ |

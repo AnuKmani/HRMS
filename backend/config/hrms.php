@@ -160,6 +160,24 @@ return [
         // 85 is visually lossless for a face and about a tenth the size of
         // 100 on a phone-camera frame.
         'selfie_jpeg_quality' => (int) env('HRMS_SELFIE_JPEG_QUALITY', 85),
+
+        /*
+        | Medical certificates for sick leave.
+        |
+        | Same rules as selfies — private disk, no public URL, server-minted
+        | filename, read back only through the leave policy — but a different
+        | answer to "what may arrive": a doctor's note is a document, so PDF
+        | and image types are all acceptable and nothing is re-encoded. What
+        | IS stripped is the client's filename, which never reaches the disk.
+        |
+        | Certificates are deliberately NOT merged into employee document
+        | management: that module does not exist yet, and bolting a medical
+        | file onto it now would mean designing a document store to hold one
+        | upload. See docs/SECURITY.md.
+        */
+        'certificate_directory' => (string) env('HRMS_CERTIFICATE_DIRECTORY', 'leave-certificates'),
+
+        'certificate_max_kilobytes' => (int) env('HRMS_CERTIFICATE_MAX_KB', 5120),
     ],
 
 ];

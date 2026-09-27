@@ -32,7 +32,12 @@ class RolePermissionSeeder extends Seeder
             'departments.view', 'departments.manage',
             'designations.view', 'designations.manage',
             'attendance.view', 'attendance.manage',
-            'leave.view', 'leave.request', 'leave.approve', 'leave.manage',
+            'approvals.view', 'approvals.manage',
+            'leave.view', 'leave.create', 'leave.approve', 'leave.manage',
+            'leave.balance.view', 'leave.balance.manage',
+            'holidays.manage',
+            'timesheets.view', 'timesheets.manage',
+            'overtime.view', 'overtime.create', 'overtime.approve', 'overtime.manage',
             'payroll.view',
             'projects.view',
             'sites.view',
@@ -53,7 +58,14 @@ class RolePermissionSeeder extends Seeder
             'departments.view',
             'designations.view',
             'attendance.view', 'attendance.manage',
-            'leave.view', 'leave.request', 'leave.approve',
+            'approvals.view',
+            // Reads and runs the calendar; does not define leave policy —
+            // `leave.manage` and `leave.balance.manage` stay with HR Admin.
+            'leave.view', 'leave.create', 'leave.approve',
+            'leave.balance.view',
+            'holidays.manage',
+            'timesheets.view', 'timesheets.manage',
+            'overtime.view', 'overtime.approve',
             'projects.view',
             'sites.view',
             'shifts.view',
@@ -68,7 +80,13 @@ class RolePermissionSeeder extends Seeder
             'employees.view',
             'employees.salary.view',
             'attendance.view',
-            'leave.view',
+            // Read-only on leave, timesheets and overtime: this role is the
+            // *consumer* of approved overtime and LOP days, never their
+            // approver — except on the final overtime step, where "HR /
+            // Payroll" is the sign-off that makes the minutes payable.
+            'leave.view', 'leave.balance.view',
+            'timesheets.view',
+            'overtime.view', 'overtime.approve',
             'payroll.view', 'payroll.manage',
             'expenses.view', 'expenses.manage',
             'reports.view', 'reports.export',
@@ -83,7 +101,11 @@ class RolePermissionSeeder extends Seeder
             'projects.view', 'projects.manage',
             'sites.view', 'sites.manage',
             'attendance.view',
-            'leave.view', 'leave.approve',
+            'approvals.view',
+            'leave.view', 'leave.create', 'leave.approve',
+            'leave.balance.view',
+            'timesheets.view',
+            'overtime.view', 'overtime.create', 'overtime.approve',
             'assignments.view', 'assignments.manage',
             'reports.view',
             'documents.view',
@@ -95,6 +117,10 @@ class RolePermissionSeeder extends Seeder
             'projects.view',
             'sites.view',
             'attendance.view',
+            'leave.view', 'leave.create',
+            'leave.balance.view',
+            'timesheets.view',
+            'overtime.view', 'overtime.create',
             'reports.view',
             'documents.view',
         ],
@@ -105,7 +131,16 @@ class RolePermissionSeeder extends Seeder
             'projects.view',
             'sites.view',
             'attendance.view', 'attendance.manage',
-            'leave.view', 'leave.request',
+            'approvals.view',
+            // A supervisor is the `reporting_manager` step on most chains, so
+            // they need `leave.approve` / `overtime.approve` to get past the
+            // route's coarse gate; the policy then asks whether they are the
+            // *current* approver. Any role used as an approver step needs one
+            // of these — see docs/SECURITY.md.
+            'leave.view', 'leave.create', 'leave.approve',
+            'leave.balance.view',
+            'timesheets.view', 'timesheets.manage',
+            'overtime.view', 'overtime.create', 'overtime.approve',
             'assignments.view', 'assignments.manage',
             'reports.view',
             'documents.view',
@@ -116,6 +151,11 @@ class RolePermissionSeeder extends Seeder
             'employees.view',
             'employees.salary.view',
             'payroll.view',
+            // The payroll preparation view: how many days were lost to pay,
+            // and what overtime is waiting to be paid. No approval rights.
+            'leave.view', 'leave.balance.view',
+            'timesheets.view',
+            'overtime.view',
             'expenses.view', 'expenses.approve', 'expenses.manage',
             'reports.view', 'reports.export',
             'documents.view',
@@ -128,7 +168,10 @@ class RolePermissionSeeder extends Seeder
             'projects.view',
             'sites.view',
             'attendance.view',
-            'leave.view',
+            'leave.view', 'leave.create', 'leave.approve',
+            'leave.balance.view',
+            'timesheets.view',
+            'overtime.view', 'overtime.approve',
             'payroll.view',
             'reports.view', 'reports.export',
             'documents.view',
@@ -146,7 +189,13 @@ class RolePermissionSeeder extends Seeder
             // this grant an employee could not read back the day they
             // themselves recorded.
             'attendance.view',
-            'leave.view', 'leave.request',
+            // The same shape for leave, timesheets and overtime: enough to
+            // ask, read your own and see your own pot — never `leave.approve`,
+            // because nobody signs off on their own absence.
+            'leave.view', 'leave.create',
+            'leave.balance.view',
+            'timesheets.view',
+            'overtime.view', 'overtime.create',
             'documents.view',
         ],
     ];

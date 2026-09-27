@@ -121,7 +121,9 @@ class RbacTest extends TestCase
             );
         }
 
-        $this->assertTrue($employee->hasPermissionTo('leave.request'));
+        $this->assertTrue($employee->hasPermissionTo('leave.create'));
+        $this->assertTrue($employee->hasPermissionTo('leave.balance.view'));
+        $this->assertFalse($employee->hasPermissionTo('leave.balance.manage'));
     }
 
     public function test_role_permission_grants_are_reproducible(): void

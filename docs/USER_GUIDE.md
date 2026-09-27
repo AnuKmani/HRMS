@@ -1,9 +1,10 @@
 # User Guide
 
-> **Status:** Phase 5 — sign-in, the organisation screens, and GPS attendance
-> with site visits exist and are usable. This guide describes the workflows
-> each role will have once the corresponding phase ships. Sections are marked
-> with the phase that delivers them; ✅ means it is in the app today.
+> **Status:** Phase 6 — sign-in, the organisation screens, GPS attendance with
+> site visits, and now **leave, the holiday calendar, timesheets and overtime**
+> exist and are usable. This guide describes the workflows each role will have
+> once the corresponding phase ships. Sections are marked with the phase that
+> delivers them; ✅ means it is in the app today.
 
 ---
 
@@ -50,8 +51,11 @@ your token immediately.
 ### 2.1 The home screen ✅ (Phase 4)
 
 After signing in you land on **Home**. It draws one tile per module your role may
-open — Employees, Departments, Designations, Projects, Sites — and nothing else.
-A role that cannot open a module is not shown a door it would be refused behind.
+open — Employees, Departments, Designations, Projects, Sites (Phase 4),
+Attendance (Phase 5), and since **Phase 6** Leave, Timesheets, Overtime and
+Holidays — and nothing else. A role that cannot open a module is not shown a
+door it would be refused behind. **Holidays is the one tile drawn for
+everyone**: reading the calendar is not a privilege anyone grants you.
 
 Every module follows the same three screens:
 
@@ -190,37 +194,69 @@ Record what was actually done on site:
 - Photos (multiple)
 - Remarks
 
-### 3.4 Applying for leave ⬜ Phase 9
+### 3.4 Applying for leave ✅ Phase 6
 
 1. Open **Leave**
-2. Check your balance — entitlement, used, pending, remaining
+2. Check your balance — entitlement, used, pending, remaining (the
+   **Balances** action in the app bar)
 3. Tap **Apply**
-4. Choose leave type, dates and reason
-5. Submit
+4. Choose leave type, dates and reason — the number of days is calculated by
+   the server from weekends and the holiday calendar, so the figure you see
+   is the figure that will be reserved
+5. Save as a **draft**, or **Submit** to start the approval chain
 
 **Statuses you will see:**
 
 | Status | Meaning |
 |---|---|
-| Draft | Saved, not submitted |
-| Pending | Waiting for approval |
+| Draft | Saved, not submitted — only you can edit or delete it |
+| Pending | Waiting for approval; the chain shows who has it now |
 | Approved | Accepted |
-| Rejected | Declined (reason provided) |
-| Cancelled | Withdrawn by you |
+| Rejected | Declined, with the approver's reason |
+| Cancelled | Withdrawn by you — the days go back into your balance |
 | LOP | Loss of pay — e.g. a sick certificate was not submitted in time |
 
-**Sick leave:** if you choose Sick Leave you may be required to upload a medical
-certificate. The deadline is shown when you apply (default **2 days**). If you miss it,
-the leave is converted to LOP automatically and both you and HR are notified.
+**While it is a draft:** Edit, Submit and Cancel.
+**While it is pending and it is yours:** Cancel only — you cannot approve your
+own request, even if you are also a manager.
+**While it is pending and you are the approver at the current step:** Approve
+or Reject. Reject asks for a reason. Approving one link in the chain does not
+approve the request — the chain simply moves to the next person, and they
+will find it waiting when they open their queue.
 
-### 3.5 Timesheet & overtime ⬜ Phase 8
+**Sick leave and the certificate.** If the leave type requires a medical
+certificate, the screen shows the deadline (default **2 days** after your last
+day) and a **Photograph and file** button that opens the **back camera** so you
+can capture the document directly — no file manager, no extra app. The
+original scan is kept as-is and is readable only by you, your approver and HR.
+Miss the deadline and the request becomes **LOP** automatically, server-side,
+with the reason recorded and the days released back to the paid leave type.
+You can see it happen under `Leave → status: LOP`.
 
-- View your recorded hours for the period
-- Request overtime with a reason
-- Track approval status: *Supervisor → Project Manager → HR / Payroll*
-- Only **approved** overtime is included in payroll
+### 3.5 Timesheet, overtime & holidays ✅ Phase 6
 
-### 3.6 Expenses ⬜ Phase 11
+**Timesheets** are built for you from your attendance — there is nothing to
+fill in:
+
+- View your recorded working hours per day, with overtime shown separately
+- Each day is `open`, `complete` or `incomplete` — a description of the day,
+  not something you sign off
+- Managers with `timesheets.manage` can regenerate a window from attendance
+  after a correction; doing it twice refreshes rather than duplicates
+
+**Overtime:**
+
+- Claim extra hours with a date, minutes and a reason
+- Track the approval chain: *Supervisor → Project Manager → HR / Payroll*
+- Only **approved** overtime is marked payroll-eligible — a rejected or
+  cancelled claim is never worth anything, whatever was typed
+- You may claim only for a day that has already happened
+
+**Holidays** are readable by everyone: public days, company days and the days
+your own site is closed. Only HR can add or retire one — there is no delete,
+because a day the year's leave maths already used cannot be quietly erased.
+
+### 3.6 Expenses ⬜ Phase 10
 
 1. Open **Expenses** → **New**
 2. Choose date, project, site, category and amount
@@ -229,7 +265,7 @@ the leave is converted to LOP automatically and both you and HR are notified.
 
 Track status: *Pending → Approved / Rejected*.
 
-### 3.7 Payslips & documents ⬜ Phase 11
+### 3.7 Payslips & documents ⬜ Phase 10
 
 - View and download **your own** salary slips (PDF)
 - Request a **salary certificate** for bank/visa purposes
@@ -237,7 +273,7 @@ Track status: *Pending → Approved / Rejected*.
 
 > You can only ever see your own salary information.
 
-### 3.8 Dashboard ⬜ Phase 12
+### 3.8 Dashboard ⬜ Phase 11
 
 - Today's attendance and current site
 - Check-in / check-out times and working hours
@@ -250,14 +286,15 @@ Track status: *Pending → Approved / Rejected*.
 
 ## 4. Site Supervisor
 
-> ✅ Phase 5 (attendance viewing) · ⬜ Phase 7–8 (site reports, overtime, timesheets)
+> ✅ Phase 5 (attendance viewing) · ✅ Phase 6 (overtime approval) · ⬜ Phase 7–8 (site reports)
 
 | Capability | Detail |
 |---|---|
 | **Daily site report** | Workforce categories, total manpower, work planned/completed, materials, equipment, safety observations, delays, issues, photos, remarks |
 | **Approve site activity reports** | Review reports from your team |
-| **Create / approve overtime** | First step in the overtime approval chain |
-| **Timesheet approval** | Verify hours for your team |
+| **Approve overtime** ✅ | First step in the overtime approval chain — only while your report has it waiting, never your own claim |
+| **Read your team's timesheets** ✅ | Working days and hours for the people and sites you run. There is no timesheet to approve: the row is derived from attendance |
+| **Approve leave** ✅ | If the standard chain names you as the supervisor step |
 | **View your site's attendance** ✅ | Who was on site, and when — restricted to the sites you run. You also see visits to your sites, and you cannot read a day recorded anywhere else |
 
 **Daily Site Report** can be exported as **PDF**.
@@ -266,7 +303,7 @@ Track status: *Pending → Approved / Rejected*.
 
 ## 5. Site Engineer
 
-> ⬜ Phase 7
+> ✅ Phase 6 (own leave, balances, timesheets, overtime) · ⬜ Phase 7 (site reports)
 
 Similar to Site Supervisor, focused on technical reporting:
 
@@ -274,12 +311,16 @@ Similar to Site Supervisor, focused on technical reporting:
 - Record materials, manpower and equipment
 - Flag issues and safety concerns
 - View site assignments for your project
+- Apply for leave and watch it move through the chain ✅
+- See your own working days and claim overtime ✅ — but **not** approve
+  either: this role holds no `leave.approve` or `overtime.approve`, so even
+  if a workflow were pointed at it, the route would refuse first
 
 ---
 
 ## 6. Project Manager
 
-> ✅ Phase 4 (project & site management) · ✅ Phase 5 (attendance & visits on your projects) · ⬜ Phase 12 (dashboard)
+> ✅ Phase 4 (project & site management) · ✅ Phase 5 (attendance & visits on your projects) · ⬜ Phase 11 (dashboard)
 
 **Dashboard:**
 - Projects and sites
@@ -291,7 +332,8 @@ Similar to Site Supervisor, focused on technical reporting:
 **Manage (live today):**
 - Project details and status (Planned / Active / On Hold / Completed / Cancelled)
 - Sites within your projects, including geofence radius
-- Approval of overtime for your projects
+- Approval of overtime for your projects ✅ — and of leave where the chain
+  names you as the step
 - **Attendance on the projects you manage** — every day recorded on your
   projects and their sites, with the GPS distance and the photograph where
   one was taken. A project's own days and nobody else's
@@ -304,7 +346,7 @@ Similar to Site Supervisor, focused on technical reporting:
 
 ## 7. HR Executive
 
-> ✅ Phase 4 (employees, departments, designations) · ✅ Phase 5 (attendance viewing) · ⬜ for documents, leave
+> ✅ Phase 4 (employees, departments, designations) · ✅ Phase 5 (attendance viewing) · ✅ Phase 6 (leave approval) · ⬜ for documents
 
 - Create and edit employee records
 - Manage departments and designations
@@ -313,7 +355,9 @@ Similar to Site Supervisor, focused on technical reporting:
 - Run onboarding and see missing documents
 - View attendance across the company — every employee, every day, with the
   GPS distance and the photograph, filtered by date, project, site or status
-- First-level leave approval (depending on configured workflow)
+- Leave approval (depending on configured workflow) — HR Admin is the last
+  step of the standard chain
+- Read leave balances for the people you may already see
 
 HR Executive may maintain the roster but **cannot delete an employee and cannot
 see anyone's salary** — those two are separate permissions held elsewhere.
@@ -322,7 +366,7 @@ see anyone's salary** — those two are separate permissions held elsewhere.
 
 ## 8. HR Admin
 
-> ✅ Phase 4 (employee management, site assignments) · ✅ Phase 5 (attendance viewing + configuration) · ⬜ Phase 9 (leave)
+> ✅ Phase 4 (employee management, site assignments) · ✅ Phase 5 (attendance viewing + configuration) · ✅ Phase 6 (leave types, balances, holidays, approval workflows)
 
 Everything an HR Executive can do, plus:
 
@@ -334,8 +378,9 @@ Everything an HR Executive can do, plus:
 | **Attendance override** | ⬜ **Not built yet.** Correcting an out-of-geofence or missing record is planned with a mandatory reason and an audit trail. Today the correct route is for the employee to re-check-in, or for you to note it with the record; nothing silently overwrites what happened |
 | **Configure geofence radius** | Per site, no code changes needed |
 | **Configure working rules** | Start time, grace period, minimum hours, overtime threshold |
-| **Leave approval & configuration** | Entitlement, carry-forward, max days, documents, workflow |
-| **Holiday calendars** | Public, company and site-specific holidays |
+| **Leave approval & configuration** ✅ | Leave types (paid or not, entitlement, carry-forward, per-request maximum, certificate requirement and deadline, negative balance allowed), the approval workflow each type uses, hand-correction of a balance, and reading every balance |
+| **Holiday calendars** ✅ | Public, company and site-specific days — add and retire by status (there is no delete) |
+| **Approval workflows** ✅ | Who must sign off what: supervisor, a named role, or anyone holding a permission. One default per subject (leave, overtime) |
 | **Shift management** | General, Morning, Evening, Night, Custom |
 | **Site assignments** | Assign temporarily or permanently — history preserved |
 | **Employee management** | Full CRUD with status changes |
@@ -345,7 +390,7 @@ Everything an HR Executive can do, plus:
 
 ## 9. Payroll Admin
 
-> ⬜ Phase 11
+> ⬜ Phase 10 (payroll) · ✅ Phase 6 (reads the inputs a run needs)
 
 - Run **monthly payroll** using approved attendance, overtime, leave and loan data
 - Manage basic salary, allowances, bonus, deductions, LOP, advances
@@ -355,24 +400,31 @@ Everything an HR Executive can do, plus:
 - Protects payroll data behind permissions
 
 **Payroll only uses approved data** — unapproved overtime or leave never enters a run.
+The two facts a run will read already exist and are maintained by Phase 6:
+`overtime_requests.payroll_eligible` (true only when a claim completed its
+chain) and `leave_requests.lop_days`. Nothing in Phase 6 computes money from
+either; that arithmetic belongs to the payroll phase.
 
 ---
 
 ## 10. Finance
 
-> ⬜ Phase 11
+> ⬜ Phase 10 (expenses, loans) · ✅ Phase 6 (payroll-preparation reads)
 
 - Review and approve **expenses**
 - Verify receipts
 - View loan and advance deductions for processing
 - Access financial reports (payroll summary, expense report)
-- No access to HR-only functions
+- Read **leave balances, working days and approved overtime** without
+  approving any of them — the view a payroll preparation needs ✅
+- No access to HR-only functions: this role holds no `leave.create`,
+  `leave.approve`, `holidays.manage` or `overtime.approve`
 
 ---
 
 ## 11. Management
 
-> ⬜ Phase 12
+> ⬜ Phase 11 (dashboards) · ✅ Phase 6 (leave and overtime approval)
 
 **Dashboard:**
 - Total workforce
@@ -383,13 +435,14 @@ Everything an HR Executive can do, plus:
 - Payroll summary
 - Project workforce breakdown
 
-Read-only — plus the ability to view any report.
+Read-only — plus the ability to view any report, plus **approve leave and
+overtime** where a configured workflow names this role as the current step ✅.
 
 ---
 
 ## 12. Super Admin
 
-> ✅ Phase 4 (every module screen, through `*` permissions) · ⬜ roles / users / settings UI
+> ✅ Phase 4 (every module screen, through `*` permissions) · ✅ Phase 6 (leave types, balances, holidays, approval workflows, timesheets, overtime) · ⬜ roles / users / settings UI
 
 - Full system access
 - Manage roles and permissions
@@ -404,11 +457,20 @@ Read-only — plus the ability to view any report.
 
 ## 13. Notifications
 
-> ⬜ Phase 12
+> ⬜ Phase 11 — **none of the rows below are delivered today.**
 
-You will be notified about:
+**Nothing in this application sends a notification yet.** No push (no FCM), no
+email, no in-app bell. Phase 6 added *hooks* rather than delivery: an LOP
+conversion dispatches a `LeaveConvertedToLop` event after commit, and an
+approval writes the next `approval_records` step — so the facts a
+notification would be built from are durable and queryable, but nothing is
+sent, and the "who receives it" column is a contract for the notifications
+phase rather than a description of behaviour.
 
-| Event | Who receives it |
+Until then, a pending request is visible to its approver by opening their
+queue, and a sick-leave deadline is visible on the request itself.
+
+| Event | Who receives it (planned) |
 |---|---|
 | Attendance reminder | Employee |
 | Leave submitted / approved / rejected | Employee + approver |
@@ -422,7 +484,7 @@ You will be notified about:
 | Overtime approval | Employee + approver |
 | Expense approval | Employee + approver |
 
-Notification preferences can be configured per user.
+Notification preferences can be configured per user (⬜ with this phase).
 
 ---
 
@@ -467,14 +529,25 @@ The menu you see is built from your role's permissions. For example:
 
 | Role | Sees |
 |---|---|
-| Employee | Own attendance, leave, payslips, documents |
-| Site Supervisor | Plus own site's team, reports, approvals |
-| Project Manager | Plus projects, sites, workforce, overtime approvals |
-| HR | Plus all employees, attendance, leave, documents, assignments |
-| Payroll | Plus payroll runs, payslips, loans |
+| Employee | Own attendance, own leave requests and balances, own timesheets, own overtime claims, the holiday calendar |
+| Site Supervisor | Plus their site's team, reports, overtime approval (their step), leave approval (their step) |
+| Project Manager | Plus projects, sites, workforce, overtime approvals, leave approvals |
+| HR | Plus all employees, attendance, leave, balances, holiday calendar editing, workflow configuration |
+| Payroll | Plus payroll runs, payslips, loans — and every **approved** overtime claim |
 | Finance | Plus expenses, loan deductions |
 | Management | Dashboards and reports |
 | Super Admin | Everything including settings and audit logs |
+
+Four things worth knowing about the new modules:
+
+- **Holidays need no permission to read.** Everyone sees the calendar;
+  only `holidays.manage` can add or retire a day.
+- **Timesheets are derived**, so there is nothing to approve. A manager who
+  corrected attendance regenerates the window instead.
+- **Nobody approves their own request** — not an ordinary employee, not a
+  manager, not even a Super Admin who happens to be the requester.
+- **Only the person the chain is currently waiting on may act.** An approver
+  further down sees the request but cannot sign for the step before theirs.
 
 If a function you expect is missing, it likely means your role does not have that
 permission — contact your administrator.
@@ -497,6 +570,11 @@ permission — contact your administrator.
 | "No connection" | Your record is queued on the device — tap **Sync now** when you have signal |
 | Sync shows a reason | Read it; it is shown and kept, not discarded. Move, fix the cause, then retry |
 | Notification not arriving | Check notification preferences and device notification settings |
+| "Attach the medical certificate." | The leave type requires one — use **Photograph and file** on the request |
+| "That file is not a PDF or an image a reader could open." | The scan is unreadable or not really a PDF/JPG/PNG. Re-photograph the document in good light |
+| "That certificate is too large." | Keep the scan under the configured limit (5 MB by default) |
+| Leave shows **LOP** | The certificate deadline passed. The conversion is server-side and final for that request — apply again or ask HR |
+| An approve button you cannot press | You are not the step the chain is waiting on, or it is your own request. Nobody approves their own |
 
 ---
 
@@ -511,8 +589,10 @@ permission — contact your administrator.
 | Offline sync | 5 | ✅ (manual **Sync now**; automatic background sync not built) |
 | Site visits & daily movement timeline | 5 | ✅ |
 | Site activity reports & PDF export | 7 | ⬜ |
-| Shifts, timesheets, overtime | 8 | ⬜ |
-| Leave & LOP | 9 | ⬜ |
-| Documents, training, assets | 10 | ⬜ |
-| Payroll, loans, expenses | 11 | ⬜ |
-| Notifications, dashboards, reports | 12 | ⬜ |
+| Shifts | 8 | ⬜ |
+| **Leave, balances & sick-cert → LOP** | **6** | ✅ |
+| **Timesheets & overtime** | **6** | ✅ |
+| **Holiday calendar** | **6** | ✅ |
+| Documents, training, assets | 9 | ⬜ |
+| Payroll, loans, expenses | 10 | ⬜ |
+| Notifications, dashboards, reports | 11 | ⬜ |

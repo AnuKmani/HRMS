@@ -68,6 +68,18 @@ class Site extends Model
         return $this->belongsTo(Shift::class);
     }
 
+    /**
+     * Days off that apply at this location only.
+     *
+     * Public and company holidays are deliberately NOT here — they have no
+     * site — and LeaveDayCalculator asks for all three scopes in one query
+     * rather than through this relation.
+     */
+    public function holidays(): HasMany
+    {
+        return $this->hasMany(Holiday::class);
+    }
+
     public function assignments(): HasMany
     {
         return $this->hasMany(EmployeeSiteAssignment::class);

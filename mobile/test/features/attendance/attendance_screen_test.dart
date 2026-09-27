@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/network/api_exception.dart';
 import 'package:mobile/features/attendance/data/device_location.dart';
-import 'package:mobile/features/attendance/data/selfie_camera.dart';
+import 'package:mobile/core/data/device_camera.dart';
 import 'package:mobile/features/attendance/presentation/attendance_screen.dart';
 
 import '../../support/attendance.dart';

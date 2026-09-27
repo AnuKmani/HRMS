@@ -4,9 +4,26 @@ import 'package:camera/camera.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// One camera per sheet, opened and closed by the capture flow.
+/// The device's cameras, as far as this app is concerned.
+///
+/// Lives in `core` rather than under `attendance` because two features need
+/// one: a check-in face and a photographed medical certificate are the same
+/// hardware problem with different subjects, and keeping the abstraction
+/// beside the first would make the second import across a feature boundary
+/// for what is really a device capability.
+///
+/// One camera per sheet, opened and closed by the flow that shows it.
 final selfieCameraProvider = Provider<SelfieCamera>(
   (ref) => DeviceSelfieCamera(),
+);
+
+/// The rear camera, for photographing a document rather than a face.
+///
+/// A separate provider rather than a parameter at each call site: the lens a
+/// flow needs is a property of the flow, and every caller of a certificate
+/// sheet wants the same answer without having to state it.
+final documentCameraProvider = Provider<SelfieCamera>(
+  (ref) => DeviceSelfieCamera(lens: CameraLensDirection.back),
 );
 
 /// Why the camera is not showing a picture, in the cases a person can fix.
@@ -27,7 +44,7 @@ enum CameraStatus {
   unavailable,
 }
 
-/// The front-facing camera, as far as this app is concerned.
+/// A camera, as far as a screen is concerned.
 ///
 /// An interface because a widget test cannot have a camera: the whole
 /// flow — permission, no hardware, a camera that fails to open, the
@@ -70,10 +87,17 @@ class CameraCaptureFailed implements Exception {
 ///    arrives as a [CameraException] out of `open()` and is classified
 ///    below rather than by a second permission library this app does not
 ///    need;
-///  * **`enableAudio` is false.** A check-in selfie has no sound, and
-///    requesting the microphone alongside the camera would earn this app a
-///    permission it will never use.
+///  * **`enableAudio` is false.** Neither a check-in selfie nor a
+///    photograph of a doctor's note has sound, and requesting the
+///    microphone alongside the camera would earn this app a permission it
+///    will never use.
 class DeviceSelfieCamera implements SelfieCamera {
+  DeviceSelfieCamera({this.lens = CameraLensDirection.front});
+
+  /// Which camera to prefer. [CameraLensDirection.front] for a face,
+  /// [CameraLensDirection.back] for a document held up to the lens.
+  final CameraLensDirection lens;
+
   CameraController? _controller;
 
   int _deniedStrikes = 0;
@@ -103,10 +127,10 @@ class DeviceSelfieCamera implements SelfieCamera {
 
     if (cameras.isEmpty) return CameraStatus.noCamera;
 
-    // The selfie is a face, so the front camera — but a device without one
-    // still gets a working preview rather than an error screen.
+    // The preferred lens first — but a device without one still gets a
+    // working preview rather than an error screen.
     final chosen = cameras.firstWhere(
-      (camera) => camera.lensDirection == CameraLensDirection.front,
+      (camera) => camera.lensDirection == lens,
       orElse: () => cameras.first,
     );
 

@@ -1,9 +1,9 @@
 # Testing
 
-> **Status:** Phase 5 + the selfie hardening pass — two business slices are
-> covered end to end, and every selfie that enters the system is covered
-> too. Backend **321 passed (1451 assertions)**, Flutter **176 passed**.
-> This document defines the strategy for the modules still to come (Phases 6–12).
+> **Status:** Phase 6 — leave, certificates, LOP, holidays, timesheets and
+> overtime are covered end to end on top of Phases 1–5. Backend
+> **383 passed (2017 assertions)**, Flutter **215 passed**.
+> This document defines the strategy for the modules still to come (Phases 7–12).
 
 ---
 
@@ -286,32 +286,104 @@ limiter (the configuration *is* asserted; the shared envelope behaviour is
 covered by `ApiErrorHandlingTest::test_repeated_login_attempts_return_a_429_envelope`),
 and any override/audit behaviour — there is no override endpoint to test.
 
-### 3.5 Leave
+### 3.5 Leave ✅ (Phase 6 — `LeaveRequestTest`, `LeaveCertificateTest`)
+
+**`LeaveRequestTest` — 22 tests**
 
 | Test | Expectation |
 |---|---|
-| Create leave within balance | `201` |
-| Create leave exceeding balance | `422` |
-| Overlapping leave request | `422` |
-| Approve by authorized user | `200`, status `approved`, balance decremented |
-| Approve own request (self-approval) | `403` where workflow forbids it |
-| Reject requires reason | `422` without reason |
-| Balance: entitlement + carry forward | correct `remaining` |
-| Pending requests counted separately | `pending ≠ used` |
-| **Sick leave without certificate by deadline** | **converted to LOP** |
-| LOP conversion writes audit log | audit row exists |
-| LOP conversion notifies employee + HR | 2 notifications queued |
-| Leave on a holiday | not deducted from balance |
+| Day count is derived, not a client claim | `requested_days` comes from `LeaveDayCalculator` regardless of what was posted |
+| Weekends are not leave days | a Mon–Fri range over a weekend counts five |
+| A public holiday inside the range is not counted | holiday excluded from `working_days` |
+| A site holiday excludes that site only | the same date still counts for another site |
+| An inactive holiday still counts as working time | retiring a day changes the maths |
+| Submitting reserves the days; rejecting gives them back | balance `used`/`pending` move and reverse |
+| Beyond entitlement | `422` on submit, nothing reserved |
+| Unpaid leave | never refused for balance reasons — that is what `is_paid = false` means |
+| Overlapping ranges | `422` before a second claim can exist; `lop` counts as occupying |
+| Chain walks in order, completes at the last step | status → `approved` only at the end |
+| A workflow can be configured and changes who approves | the *configured* chain materialises, not the default |
+| **Nobody approves their own request** | `403` even when the chain points at them |
+| Without `leave.approve` | `403` from the middleware, before the policy |
+| Pending → cancelled | `200`, reservation released |
+| A submitted request can no longer be edited | `403` on `PUT` |
+| An employee only reads their own requests | row scope |
+| Leave types are rows, not rules in the services | changing a row changes the behaviour |
+| Approval workflows configurable through their own endpoint | `approvals.manage` only |
+| Balance summary: own only | `leave.balance.view`, scoped |
+| Only HR corrects a balance by hand | `leave.balance.manage` |
+| Holiday calendar readable by everybody, written by HR only | `GET` open, `POST` gated |
+| A site holiday needs a site | `422` |
 
-### 3.6 Overtime
+**`LeaveCertificateTest` — 11 tests**
 
 | Test | Expectation |
 |---|---|
-| Request created | `201`, status `pending` |
-| Approved → included in payroll | payroll line present |
-| Rejected → excluded from payroll | no payroll line |
-| Approve beyond requested hours | `422` |
-| Employee approves own OT | `403` |
+| Sick leave demands a certificate; deadline runs from the last day | `certificate_due_at` frozen at submit |
+| The leave type's own deadline beats the organisation default | `document_deadline_days > 0` wins |
+| The organisation default applies when the type names none | `leave.sick_certificate_deadline_days` = 2 |
+| Stored privately, **path never leaves the server** | no `certificate_path` in any response body |
+| Readable only by someone who may read the request | `403` for a colleague |
+| A file that is not a certificate | `422` on `errors.certificate[0]`, **nothing written** |
+| Missed deadline → `lop` | status, `lop_days`, `lop_reason`, `lop_applied_at`, balance release |
+| **Running the job again converts nothing a second time** | idempotent — `certificate_checked_at` |
+| A certificate filed on the deadline stops the conversion | the sweep respects the boundary, not a timezone guess |
+| Converting an *approved* request releases the days it already spent | `used` goes back |
+| A certificate cannot be uploaded after the request became `lop` | `403` |
+
+> **No audit row and no notifications are asserted here, because neither
+> exists.** §4 of this document used to say "audit row exists / 2
+> notifications queued"; those were plans, not tests. What is asserted is the
+> event hook: `LeaveConvertedToLop` is faked and observed.
+
+### 3.6 Overtime ✅ (Phase 6 — `OvertimeTest`)
+
+| Test | Expectation |
+|---|---|
+| A claim is a **draft** and ignores fields the client does not own | `status`, `payroll_eligible`, `approved_minutes` are server-set |
+| Overtime only for a day that happened | a future `overtime_date` is `422` |
+| Chain walks in order; only the current step may sign | `403` off-step |
+| The chain is configurable | overtime need not walk three links |
+| Nobody approves their own claim | `403` even when the chain says so |
+| A refusal is recorded and leaves nothing payable | `payroll_eligible` stays `false` |
+| The approved amount is capped by what was asked | `approved_minutes > requested_minutes` → `422` |
+| A draft can be edited; anything settled cannot | `403` on `PUT` |
+| A claim can be cancelled; a settled one cannot | `403` |
+| Without `overtime.approve` | `403` from the middleware |
+| An employee reads only their own claims | row scope |
+| **Only a completed claim is payroll-eligible, and the filter agrees** | `?payroll_eligible=true` returns exactly those |
+| A cancelled or refused claim is never payroll eligible | the flag is written on approval and nowhere else |
+
+**Deliberately untested, because it does not exist:** a payroll line.
+`payroll_eligible` is stored and filtered; nothing in Phase 6 computes money
+from it, and asserting a payroll total would be asserting a feature that is
+not there.
+
+### 3.6a Timesheets ✅ (Phase 6 — `TimesheetTest`)
+
+| Test | Expectation |
+|---|---|
+| A timesheet is a faithful copy of one attendance day | minutes and hours match the source |
+| **Generating the same window twice refreshes, not duplicates** | one row per `(employee, date)` |
+| The status is a property of the day, not of the request | `open`/`complete`/`incomplete` derived |
+| A nonsensical range is refused before anything is written | `422`, no partial window |
+| An employee reads only their own working days | row scope |
+| A supervisor sees the sites they run and no others | `Visibility` scope |
+| Deriving a period is administrative | `timesheets.manage` |
+| **There is no endpoint that can author a timesheet** | `POST /timesheets` → `405`, no `PUT`/`PATCH`/approve route |
+| The list narrows by date, status, site, project and person | every filter honoured |
+
+### 3.6b Holidays ✅ (Phase 6 — `HolidayApiTest`)
+
+| Test | Expectation |
+|---|---|
+| Readable by anybody, writable only by HR | `GET` with no permission succeeds; `POST` needs `holidays.manage` |
+| A reader gets public and company days **plus the sites they belong to** | visibility scope, not a raw dump |
+| Narrows by date, type, status and name | every filter honoured |
+| A scope on a date holds only one holiday | duplicate `(date, type, site_id)` → `422` |
+| A site holiday without a site | `422` |
+| **Retired by status, and there is no way to delete it** | `DELETE /holidays/{id}` → `405` |
+| Editing cannot make it collide with another | the duplicate check excludes the row being edited |
 
 ### 3.7 Payroll
 
@@ -359,20 +431,32 @@ Use **exact decimal assertions** — money must never be compared as floats.
 
 | Job | Test |
 |---|---|
-| Sick certificate deadline | `travelTo()` past deadline → run job → leave becomes LOP |
-| LOP conversion | Audit log + 2 notifications created |
-| Document expiry reminder | Expiring doc → notification queued |
-| Training expiry reminder | Expiring certificate → notification queued |
-| Missing check-out detection | **No scheduler exists yet** — the flag is written lazily by `AttendanceService::flagMissingCheckouts()` the moment anyone reads `GET /attendance/today`. Covered by `AttendanceCheckOutTest::test_the_missing_checkout_flag_is_written_when_the_schedule_ends_unattended`, using `Carbon::setTestNow()` rather than a run |
+| **Sick certificate deadline ✅ Phase 6** | `LeaveCertificateTest::test_a_missed_deadline_converts_the_request_to_loss_of_pay` — `Carbon::setTestNow()` past `certificate_due_at`, run `EnforceSickCertificateDeadlines` directly, assert `status = lop` |
+| **Same job, run twice ✅** | `test_running_the_deadline_job_again_converts_nothing_a_second_time` — the second run is a no-op because `certificate_checked_at` was set |
+| **Same job, filed in time ✅** | `test_a_certificate_filed_on_the_deadline_stops_the_conversion` |
+| **Same job, already approved ✅** | `test_converting_an_approved_request_releases_the_days_it_already_spent` — the balance goes back |
+| **Registration** | `php artisan schedule:list` shows `17 * * * * App\Jobs\EnforceSickCertificateDeadlines` with `withoutOverlapping(60)` and `onOneServer()` |
+| LOP conversion event | `Event::fake([LeaveConvertedToLop::class])` — required because the event `implements ShouldDispatchAfterCommit` under `RefreshDatabase` |
+| Document expiry reminder | ⬜ Not built — no documents module yet |
+| Training expiry reminder | ⬜ Not built |
+| Missing check-out detection | **No scheduler exists** — the flag is written lazily by `AttendanceService::flagMissingCheckouts()` the moment anyone reads `GET /attendance/today`. Covered by `AttendanceCheckOutTest::test_the_missing_checkout_flag_is_written_when_the_schedule_ends_unattended`, using `Carbon::setTestNow()` rather than a run |
 | Attendance reminder | ⬜ Not built — arrives with notifications |
 
-Use `Queue::fake()` / `Notification::fake()` and `Carbon::setTestNow()`.
+**How the job is made safe to run on a schedule:** `$tries = 3`,
+`$uniqueFor = 3600` plus `Schedule::job(...)->withoutOverlapping(60)` — two
+independent guards, because a queue worker restarted mid-run and an
+overlapping cron entry are different failures. The idempotency itself is in
+the data (`certificate_checked_at`), not in the lock: even a third
+concurrent run with both locks defeated converts nothing.
+
+Use `Queue::fake()` / `Notification::fake()` / `Event::fake()` and
+`Carbon::setTestNow()`.
 
 ---
 
 ## 5. Flutter Test Matrix
 
-### 5.1 Unit ✅ (Phases 3–5)
+### 5.1 Unit ✅ (Phases 3–6)
 
 | Target | Tests | File |
 |---|---|---|
@@ -386,6 +470,8 @@ Use `Queue::fake()` / `Notification::fake()` and `Carbon::setTestNow()`.
 | `LocalGeofence.assess` | inside / on the boundary / outside; radius from the server, not a literal; unusable accuracy and null coordinates reported as such rather than as "far away"; agrees with the server's own formula on known pairs | `test/features/attendance/local_geofence_test.dart` (12) |
 | `OfflineQueue` | enqueue → read → mark synced round-trip; **`enqueue(clientEventId:)` reuses the key it was given**; a retry re-sends the same id; corrupt JSON in storage yields an empty queue instead of a throwing app; selfie files move with their event; `markFailed` keeps the reason | `test/features/attendance/offline_queue_test.dart` (13) |
 | `AttendanceController` | loading / ready / error; every location state; **duplicate submit blocked while one is in flight**; 403 shown as a refusal; 422 rendering the server's own field message; no-fix refuses to send rather than posting (0,0); check-out; offline queueing and replay with the same `clientEventId` and `source: offline`; a rejected replay marked `failed`; site visits including an empty purpose; a purpose controller disposed only after its dialog has finished | `test/features/attendance/attendance_controller_test.dart` (27) |
+| `OvertimeRequest` | **`payableMinutes` is `approved ?? requested` and only when the status is `approved`** — an absent approval is not a refusal; draft/pending/rejected/cancelled are never payable whatever was granted; `payroll_eligible` is read from the server and **never inferred from `status`** (an approved-but-not-eligible claim is possible and must read as such); `is_payroll_eligible` reads the same as `payroll_eligible`; status labels spell nothing out to the user (`pending` → "Awaiting approval"); `requestedLabel` / `approvedLabel` in both units; `isEditable` is true for a draft and false for anything settled | `test/features/overtime/domain/overtime_request_test.dart` (9) |
+| `LeaveRequest` / `LeaveCertificate` | certificate facts arrive ready-made rather than being re-derived on the phone: *required but not yet due* shows "Certificate due 2026-10-04" with a file action, *overdue* shows the server's flag and its chip, and a type that never asks for one draws **no certificate block at all** | `leave_detail_screen_test.dart` (group "the certificate") |
 
 **Two non-obvious guarantees worth keeping under test:**
 
@@ -396,7 +482,7 @@ Use `Queue::fake()` / `Notification::fake()` and `Carbon::setTestNow()`.
   interceptor and the controller can notice. The sign-in form's own message
   must survive.
 
-### 5.2 Widget ✅ (Phases 3–5)
+### 5.2 Widget ✅ (Phases 3–6)
 
 | Screen | States verified |
 |---|---|
@@ -407,7 +493,11 @@ Use `Queue::fake()` / `Notification::fake()` and `Carbon::setTestNow()`.
 | Employee form | salary field not drawn without the permission; `salary` key **absent from the body** when it is not on screen and present with the right number when it is; untouched create never reaches the server; a 403 while editing says so plainly |
 | Department form | local validation before any request; trimmed values sent, blank description sent as `null`; **422 lands on the field it names** and clears on the next attempt; 403 shown in the banner with no field blamed; edit loads the record (including its `inactive` status) and puts it back with the same id |
 | Attendance (22 tests) | loading → error-with-retry → ready; CHECK IN shown before a punch and CHECK OUT after; one assigned site rendered as a line, several as a picker; the location banner in every state — denied (with a re-ask), permanently denied (with Settings and the pre-filled "Allow only while using the app" guide), **GPS switched off named separately from a refusal**, and an advisory "outside the radius" warning; the whole selfie flow (open → permission → front camera → capture → preview → retake → compress → submit) plus *cancel* and *retake* proving no upload happened; camera denied and **no camera at all**; a 403 drawn as a refusal; a 422 showing the server's sentence; **while a request is in flight every action is disabled**; the offline queue card with "Sync now"; the purpose dialog refusing an empty purpose; ending a visit |
-| Leave / rest | ⬜ Phases 6 onward |
+| Leave list | rows say which leave, over which days, and where it stands; the status filter sends `status` and **removes the key** when cleared (absent ≠ empty); *empty* drawn as empty; **a session without `leave.view` is drawn as a lock and the list controller is never built**; *Apply leave* and *Balances* appear only for `leave.create` / `leave.balance.view` |
+| Leave detail | **the action set is a function of state and permission** — draft offers submit/edit/cancel and never approve; pending offered to an approver carries approve + reject and **no cancel** (cancel is the owner's hatch, and the server would 403 an approver anyway); pending offered to its owner carries cancel and no decision; a finished request offers nothing; the certificate block appears only for a type that requires one, and the file button only for `leave.create`/`leave.manage`; reject refuses to send an empty reason and then sends the one typed; a refused action is reported in the banner, **not as a field error** |
+| Holidays list | readable with any permission at all (no gate — `HolidayPolicy::viewAny` says yes); rows show the scope, not just the type; *add* and row navigation appear only for `holidays.manage`; the type filter is a query parameter and clearing it removes the key; retired days stay on the list |
+| Timesheets list | rows carry day, owner, worked hours and the day's status; overtime shown **separately**, never folded into the total; *generate* only for `timesheets.manage` and it really calls the server; **a session without `timesheets.view` is a lock and never asked for rows** |
+| Overtime list | rows show date, ask and owner; the payroll flag is its own chip and not a status; `?payroll_eligible=true` toggled off **removes the key**; the claim door only for `overtime.create`; **a session without `overtime.view` is a lock and never asked for claims** |
 
 > **Don't read `TextFormField.obscureText`** — it is not public. Read the
 > widget's own `TextField.obscureText` field instead.
@@ -465,7 +555,18 @@ hardware-shaped fakes:
 
 `useTallScreen()` from `test/support/phase4.dart` is required for the
 attendance screen: it scrolls, and an unbuilt widget below the fold is not a
-widget a finder can see.
+widget a finder can see. The Phase 6 leave detail, timesheet and overtime
+screens need it for the same reason — they are long, and an action button
+outside the viewport is not in the tree at all, so a `find` that missed one
+would fail for a reason unrelated to permissions.
+
+Phase 6 added `test/support/phase6.dart`: `ScriptedLeave`,
+`ScriptedHolidays`, `ScriptedTimesheets` and `ScriptedOvertime` (each with
+the extra methods their own contracts need — transitions record
+`lastTransition` / `lastRemarks`, the certificate records `lastUpload`, and
+generation records `generateCalls`), plus `scopedPhase6(...)` and
+`phase6Router()`. It re-exports `advance`, `useTallScreen`, `forbidden403`
+and `notFound404` so a Phase 6 test needs exactly one import.
 
 `flutter_secure_storage` talks to the platform keychain over a method channel,
 and `ApiAuthRepository` would need a live server; neither has anything useful
@@ -487,19 +588,22 @@ Employee opens attendance
   → a second tap does not create one either (duplicate check-in → 409)
 ```
 
-### Scenario B — Missing medical certificate
+### Scenario B — Missing medical certificate ✅ (Phase 6, tested)
 ```
-Employee submits sick leave
-  → does not upload certificate
-  → configured deadline (default 2 days) passes
-  → scheduler runs server-side
-  → leave converted to LOP
-  → reason recorded
-  → audit log created
-  → employee notified
-  → HR notified
+Employee submits sick leave on a type with requires_document
+  → certificate_due_at frozen at submit (type deadline, else setting = 2 days)
+  → does not upload a certificate
+  → EnforceSickCertificateDeadlines runs hourly at :17, queued, unique
+  → status → lop, lop_days = requested_days
+  → lop_reason + lop_applied_at recorded
+  → the paid leave type's balance reservation is released
+  → LeaveConvertedToLop dispatched after commit  (event hook only)
+  → certificate_checked_at stamped — a second run converts nothing
   → runs even if the app is closed
 ```
+**Deliberately absent from this scenario:** an audit row and any
+notification. Neither exists in this system, and TESTING must not describe
+either as if it did (see SECURITY §8).
 
 ### Scenario C — Offline duplicate prevention
 ```
@@ -554,6 +658,52 @@ A client bypasses Flutter entirely and POSTs /attendance/check-in
 Never regress: the sanitiser stores **only its own re-encoded output**. If
 `SelfieStore` ever writes `$file` bytes again, Scenario F fails even though
 every Phase 5 test still passes.
+
+### Scenario G — Self-approval is impossible ✅ (Phase 6, tested)
+```
+An approver who is also the requester opens their own pending request
+  → the coarse permission check passes (they do hold leave.approve)
+  → ApprovalWorkflowService::authorize() compares the actor to the request owner
+  → 403, before any status is written
+  → the same holds when the workflow chain literally names them as step 1
+  → and for a Super Admin, who holds every permission there is
+  → the refusal is not a controller-level `if` — it is in the one method
+    every transition passes through
+  → the same refusal applies to an overtime claim, because both subjects
+    go through the same authorize()
+```
+
+### Scenario H — Only the current step may act ✅ (Phase 6, tested)
+```
+A three-step chain is submitted; step 1 is waiting
+  → the approver for step 2 calls approve → 403
+  → step 1 approves → step 2 becomes waiting, request still pending
+  → step 1 tries again → 403 (already decided, not re-decidable)
+  → step 3 approves → status becomes approved, nothing left waiting
+  → a workflow definition edited afterwards changes nothing for this request
+    (the chain was materialised at submit)
+  → an unresolvable step (a reporting manager the employee does not have)
+    is skipped with a remark, never deleted, and never blocks submit
+```
+
+### Scenario I — A certificate that is not what it claims ✅ (Phase 6, tested)
+```
+A client bypasses Flutter entirely and POSTs /leave/{id}/certificate
+  → 3 MB of bytes renamed note.pdf   → 422 on errors.certificate[0],
+                                        no row updated, no file written
+  → an image renamed .pdf            → 422 (mimetypes + CertificateContent)
+  → a valid PDF                      → 201, stored as
+                                        leave-certificates/{employeeId}/{uuid}.pdf
+                                        on the `local` disk, name minted by
+                                        the server — the client's filename
+                                        is never read for storage
+  → a file larger than the configured ceiling → 422
+  → unauthenticated GET .../certificate      → 401
+  → a colleague on the same route            → 403
+  → the JSON of the leave request contains certificate facts only —
+    never certificate_path, never a URL, never base64
+  → a second upload replaces the first; the superseded file is deleted
+```
 
 ---
 
@@ -616,7 +766,7 @@ flutter analyze                   # must report no issues
 | Flutter widgets | smoke tests on every screen |
 | Overall backend | ≥ 75% |
 
-Coverage is a floor, not a goal — the five critical scenarios in §6 matter more than
+Coverage is a floor, not a goal — the nine critical scenarios in §6 (A–I) matter more than
 a number.
 
 ---
@@ -647,8 +797,9 @@ A phase is complete only when:
 |---|---|
 | Test strategy (this document) | ✅ Written |
 | Development/testing database split (`hrms_laravel` vs `hrms_testing`) | ✅ Phase 2 safety cleanup |
-| Backend test suite | ✅ **321 passed (1451 assertions)** — 75 Phase 2 + 45 Phase 3 + 70 Phase 4 + **131 Phase 5 (incl. selfie hardening)** |
-| Flutter test suite | ✅ **176 passed** — 89 Phases 3–4 + **87 Phase 5** |
+| Backend test suite | ✅ **383 passed (2017 assertions)** — 75 Phase 2 + 45 Phase 3 + 70 Phase 4 + 131 Phase 5 (incl. selfie hardening) + **62 Phase 6** (22 `LeaveRequestTest` · 11 `LeaveCertificateTest` · 13 `OvertimeTest` · 9 `TimesheetTest` · 7 `HolidayApiTest`) |
+| Flutter test suite | ✅ **215 passed** — 89 Phases 3–4 + 87 Phase 5 + **39 Phase 6** |
+| Phase 6 registration checks | ✅ `php artisan route:list` (86 routes) · `php artisan schedule:list` shows `EnforceSickCertificateDeadlines` |
 | `flutter analyze` / `pint --test` / `composer validate` clean | ✅ |
 | CI pipeline running tests on every commit | ⬜ |
 | Coverage measurement (needs xdebug/pcov) | ⬜ |

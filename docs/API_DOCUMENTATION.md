@@ -106,7 +106,19 @@ screen agree about when the list ends.
 ```
 GET /api/v1/employees?search=ahmed&department_id=3&status=active&sort=created_at&direction=desc
 GET /api/v1/attendance?from=2026-09-01&to=2026-09-30&site_id=4&status=late
+GET /api/v1/leave?status=pending&leave_type_id=1&year=2026&sort=start_date&direction=desc
+GET /api/v1/holidays?from=2026-09-01&to=2026-12-31&type=site&status=active&sort=date
+GET /api/v1/overtime?status=approved&payroll_eligible=true
+GET /api/v1/timesheets?from=2026-09-01&to=2026-09-30&status=incomplete
 ```
+
+An absent parameter and an empty one are **different questions**: `status=`
+means "status is the empty string" and matches nothing, while no `status` at
+all means "every status". A client that wants to clear a filter must delete
+the key, not blank it.
+
+`sort` is always an allow-listed column, never a raw identifier; an unknown
+`sort` falls back to that resource's default rather than erroring.
 
 ### 1.9 Authentication
 
@@ -135,11 +147,14 @@ Behaviour that holds across every authenticated endpoint:
 
 ## 2. Endpoints
 
-> **Implemented:** §2.1 (Phase 3), §2.2–§2.3 (Phase 4), §2.4–§2.5 (Phase 5).
-> Everything from §2.6 onward arrives with Phases 6–12 and is listed here as
-> the contract to build against.
+> **Implemented:** §2.1 (Phase 3), §2.2–§2.3 (Phase 4), §2.4–§2.5 (Phase 5),
+> §2.7 (timesheets + overtime), §2.8 (leave), §2.9 (holidays) and
+> §2.7's approval-workflows in **Phase 6**. Everything still pending is listed
+> here as the contract to build against.
 
-**Two gates, both live on every Phase 4 and Phase 5 route:**
+**Two gates, both live on every Phase 4, Phase 5 and Phase 6 route** (the three
+exceptions are named in §2.7 / §2.9 — holiday reads, and the certificate
+read/write, which are policy-only on purpose):
 
 | Gate | Runs | Answers |
 |---|---|---|
@@ -671,30 +686,111 @@ it yet.
 | GET/POST | `/daily-reports` … |
 | GET | `/daily-reports/{id}/pdf` | generated PDF |
 
-### 2.7 Shifts, Timesheets, Overtime
+### 2.7 Shifts, Timesheets, Overtime & Approval Workflows — (Phase 6 ✅, shifts pending)
 
-| Method | Path | Permission |
+| Method | Path | Gate |
 |---|---|---|
-| GET/POST/PUT | `/shifts` … | `attendance.manage` |
-| GET/POST | `/timesheets` … | `timesheet.approve` |
-| GET/POST | `/overtime` … | `overtime.approve` |
-| POST | `/overtime/{id}/approve` | multi-step approval |
-| POST | `/overtime/{id}/reject` | requires reason |
+| GET | `/timesheets` | `timesheets.view` + row scope |
+| GET | `/timesheets/{timesheet}` | `timesheets.view` + row scope |
+| POST | `/timesheets/generate` | `timesheets.manage` — `{from, to}` (max 31 days) |
+| GET | `/overtime` | `overtime.view` + row scope |
+| POST | `/overtime` | `overtime.create` |
+| GET/PUT | `/overtime/{id}` | `overtime.view` / own draft or `overtime.manage` |
+| POST | `/overtime/{id}/submit` | own draft |
+| POST | `/overtime/{id}/approve` | `overtime.approve` + **current step** |
+| POST | `/overtime/{id}/reject` | `overtime.approve` + **current step** |
+| POST | `/overtime/{id}/cancel` | owner or `overtime.manage` |
+| GET/POST/PUT | `/approval-workflows` | `approvals.view` / `approvals.manage` |
+| GET/POST/PUT | `/shifts` … | `attendance.manage` · ⬜ not built |
 
-### 2.8 Leave
+**Timesheets are derived, not entered.** There is no `POST /timesheets` and
+no approval endpoint: `POST /timesheets/generate` re-reads `attendances` for
+the window and upserts one snapshot per working day, so running it twice
+refreshes rather than duplicates. `status` (`open` / `complete` /
+`incomplete`) is a property of the *day*, not something anyone approves.
 
-| Method | Path | Notes |
+**Overtime runs on the same engine as leave.** The chain is frozen at
+`submit`; `approve` carries an optional `approved_minutes` (1–1440) so the
+approver may grant less than was asked. Omitting it grants the whole request.
+`payroll_eligible` becomes `true` **only** on the approval that completes the
+chain — nothing in Phase 6 computes money from it.
+
+### 2.8 Leave — (Phase 6 ✅)
+
+| Method | Path | Gate |
 |---|---|---|
-| GET | `/leave/types` | Configured types + entitlements |
-| GET | `/leave/balance?year=2026` | Entitlement / used / pending / remaining |
-| GET | `/leave/requests` | With filters |
-| POST | `/leave/requests` | Validates balance + overlap |
-| POST | `/leave/requests/{id}/approve` | Permission + workflow |
-| POST | `/leave/requests/{id}/reject` | Requires reason |
-| POST | `/leave/requests/{id}/cancel` | By requester |
-| POST | `/leave/requests/{id}/document` | Medical certificate upload |
+| GET | `/leave` | `leave.view` + row scope |
+| POST | `/leave` | `leave.create` |
+| GET/PUT | `/leave/{id}` | `leave.view` / own draft or `leave.manage` |
+| POST | `/leave/{id}/submit` | owner — freezes the approval chain |
+| POST | `/leave/{id}/approve` | `leave.approve` + **current step**, never yourself |
+| POST | `/leave/{id}/reject` | `leave.approve` + **current step**, `remarks` required |
+| POST | `/leave/{id}/cancel` | owner (draft or pending) or `leave.manage` |
+| POST | `/leave/{id}/certificate` | owner or `leave.manage`, multipart `certificate` |
+| GET | `/leave/{id}/certificate` | same, returns raw bytes (`Content-Type` from the file) |
+| GET/POST/PUT/DELETE | `/leave-types` | `leave.view` / `leave.manage` |
+| GET/PUT | `/leave-balances` | `leave.balance.view` / `leave.balance.manage` |
 
-### 2.9 Payroll & Finance
+Statuses are exactly `draft · pending · approved · rejected · cancelled · lop`
+and every transition goes through a service method — a controller cannot write
+a status directly.
+
+- **Day counts are the server's.** `requested_days` comes from
+  `LeaveDayCalculator` (weekends + holiday calendar + halves) and is echoed
+  back; a client that recomputed it locally would disagree with the
+  reservation the API just made.
+- **Balances are transactional.** The row is locked, the reservation written,
+  and the whole thing rolled back if any part fails. A balance goes negative
+  only when the leave type says `allow_negative`.
+- **Certificate deadline** defaults to `leave.sick_certificate_deadline_days`
+  (2) and is overridden per leave type by `document_deadline_days` when that
+  is `> 0`. Missing it converts the request to `lop` **server-side** — see
+  §2.8a.
+- **No self-approval**, ever, and only the approver at the *current* step may
+  act; earlier and later steps see the buttons but the server refuses.
+
+> `POST /leave/{id}/certificate` is deliberately **not** rate-limited by a
+> new limiter: it is behind a session plus a policy check plus the same
+> MIME/size validation as every other upload. See §3.
+
+### 2.8a Sick certificates & LOP — (Phase 6 ✅)
+
+```
+POST   /leave/{id}/certificate      multipart: certificate
+GET    /leave/{id}/certificate      raw bytes, never a storage path
+```
+
+Upload: `pdf · jpg · jpeg · png · webp`, size from `certificate_max_kilobytes`
+(default **5120 KB**), content sniffed byte-by-byte by `CertificateContent` so
+a renamed `.exe` fails as a field error. The stored name is server-minted;
+the client's filename is never read.
+
+`EnforceSickCertificateDeadlines` runs hourly at :17 (queued, unique,
+idempotent). Any sick request past its deadline with no file becomes `lop`
+with `lop_days`, `lop_reason`, `lop_applied_at` recorded and
+`LeaveConvertedToLop` dispatched — the paid leave type's reservation is
+released in the same transaction. `GET /leave?status=lop` lists them.
+**No payroll figure is computed from `lop_days` in this phase.**
+
+### 2.9 Holidays — (Phase 6 ✅)
+
+| Method | Path | Gate |
+|---|---|---|
+| GET | `/holidays` | **any signed-in account** (no `permission:` middleware) |
+| GET | `/holidays/{id}` | same |
+| POST | `/holidays` | `holidays.manage` |
+| PUT | `/holidays/{id}` | `holidays.manage` |
+
+Filters: `type` (`public · company · site`), `status` (`active · inactive`),
+`from`, `to`, `search` (alias `q`), `sort` (`date` default, `name`, `type`,
+`created_at`), `direction`.
+
+**There is no DELETE** — a holiday the year's leave maths already depended on
+cannot be silently erased, so it is retired with `status=inactive` instead
+(→ `405` if you try). A duplicate on `(date, type, site_id)` is refused with
+`422` — including a real `IS NULL` check for the company-wide rows.
+
+### 2.10 Payroll & Finance
 
 | Method | Path | Permission |
 |---|---|---|
@@ -707,7 +803,7 @@ it yet.
 | GET/POST/PUT | `/expenses` … | workflow approval |
 | POST | `/expenses/{id}/approve` | `expenses.approve` |
 
-### 2.10 Documents, Training, Assets
+### 2.11 Documents, Training, Assets
 
 | Method | Path |
 |---|---|
@@ -718,7 +814,7 @@ it yet.
 | GET/POST/PUT | `/assets` … |
 | POST | `/assets/{id}/assign` |
 
-### 2.11 Dashboards & Reports
+### 2.12 Dashboards & Reports
 
 | Method | Path |
 |---|---|
@@ -731,7 +827,7 @@ it yet.
 
 Export formats: `format=csv|xlsx|pdf`
 
-### 2.12 Notifications
+### 2.13 Notifications
 
 | Method | Path |
 |---|---|
@@ -755,7 +851,14 @@ attached at the route as `throttle:{name}`. Never inline a number in a route.
 | `POST /auth/forgot-password`, `POST /auth/reset-password` | **5 / 15 minutes** | client IP | ✅ Phase 3 |
 | `POST /attendance/check-in`, `POST /attendance/check-out`, `POST /site-visits/start`, `POST /site-visits/{id}/end` | **30 / minute** | authenticated user id | ✅ Phase 5 |
 | General API | 60 / minute | — | ⬜ Planned |
-| Exports (PDF/Excel) | 10 / minute | — | ⬜ Phase 12 |
+| Exports (PDF/Excel) | 10 / minute | — | ⬜ Phase 11 |
+
+**Phase 6 added no new limiter, deliberately.** Leave, overtime, holiday and
+timesheet writes are cheap, already behind `auth:sanctum` + a permission +
+a policy, and rate-limiting them would punish a user retrying a flaky mobile
+connection — which is exactly this product's normal condition. The one write
+that could be abused, certificate upload, is bounded instead by the byte
+ceiling and MIME rules in §4.
 
 Exceeded → **HTTP 429** in the standard envelope, with a `Retry-After` header.
 
@@ -783,7 +886,9 @@ letting the user tap into the same wall repeatedly.
 
 ## 4. File Upload Rules
 
-Phase 5 uploads exactly one kind of file: the **check-in selfie**.
+Phase 6 uploads exactly one kind of file: the **medical certificate** for a
+sick-leave request. It is described in §4.2 below. Phase 5's check-in
+**selfie** follows the same shape with stricter rules (§4.1).
 
 - `multipart/form-data`, field name `selfie`, on `POST /attendance/check-in` only
 - Max size **5120 KB** — `hrms.storage.selfie_max_kilobytes` (`HRMS_SELFIE_MAX_KB`)
@@ -844,6 +949,41 @@ Nothing here feeds facial recognition. The photograph is evidence that a
 person stood at that gate at that moment; it is opened by a human during a
 dispute, never by a model, and never by someone who simply wants to look at
 another employee's file. **Facial recognition is deliberately not built.**
+
+### 4.2 Certificates — Phase 6 (sick leave)
+
+- `multipart/form-data`, field name **`certificate`**, on
+  `POST /api/v1/leave/{leaveRequest}/certificate` only
+- Max size **5120 KB** — `hrms.storage.certificate_max_kilobytes`
+  (`HRMS_CERTIFICATE_MAX_KB`)
+- Types: `pdf, jpg, jpeg, png, webp`, validated **three** ways — `mimes`
+  (declared extension), `mimetypes` (a `finfo` sniff), and
+  `App\Rules\CertificateContent`, which reads the first bytes itself: a PDF
+  must contain `%PDF-` within its first 1024 bytes (the spec allows leading
+  junk) and an image must survive `getimagesize()`. A 3 MB blob renamed
+  `note.pdf` is refused at the request with a message on
+  `errors.certificate[0]`.
+- **No re-encoding**, unlike the selfie: a scan is text a doctor signed, and
+  transcoding a PDF or JPEG a second time risks degrading the very evidence
+  it is. Validation is enough here because nothing in the response is ever
+  rendered inline to a third party.
+- The stored name is minted by the server —
+  `leave-certificates/{employeeId}/{uuid}.{ext}` — and the client's filename
+  is used only for the `Content-Disposition` on download, never for storage.
+  A non-allow-listed extension falls back to `.pdf`.
+- **Private storage** (`local` disk → `storage/app/private`). No public URL,
+  no directory listing, no path in any JSON. Re-upload replaces the previous
+  file in the same transaction, so a superseded certificate does not linger.
+- Download: `GET /api/v1/leave/{leaveRequest}/certificate` — raw bytes,
+  `Cache-Control: no-store`, authorized exactly like `uploadCertificate` on
+  the request. `LeaveCertificateResource` sends `original_name` and
+  `uploaded_at`, never the path.
+- Requires `Accept: application/json` on the write; the read returns the
+  file's own `Content-Type`.
+
+**Rejection responses** are `422` with the message on `errors.certificate[0]`,
+e.g. `"That file is not a PDF or an image a reader could open."` — and no
+leave-request row and no file are changed.
 
 ---
 
@@ -910,16 +1050,20 @@ Syncing is manual ("Sync now"), oldest first, and stops at the first 0 or
 | §2.2 Departments / Designations / Employees | ✅ Phase 4 |
 | §2.3 Projects / Sites / Assignments | ✅ Phase 4 |
 | §2.4 Attendance / §2.5 Site Visits & Movement | ✅ Phase 5 |
-| §2.6–§2.12 Everything else | ⬜ Phases 6–12 |
+| §2.7 Timesheets / Overtime / Approval workflows | ✅ Phase 6 |
+| §2.8 Leave / §2.8a Certificates & LOP / §2.9 Holidays | ✅ Phase 6 |
+| §2.6, §2.10–§2.13 Everything else | ⬜ Phases 7–12 |
 | Rate limiting — auth routes | ✅ Phase 3 |
 | Rate limiting — attendance writes | ✅ Phase 5 |
+| Rate limiting — leave/timesheet/overtime/holiday writes | **deliberately none** — see §3 |
 | Rate limiting — remaining scopes | ⬜ As their modules land |
-| §4 File upload rules (selfie) | ✅ Phase 5, **sanitised server-side since the post-Phase 5 hardening pass** |
-| §4 File upload rules (documents) | ⬜ Phase 10 |
+| §4.1 File upload rules (selfie) | ✅ Phase 5, **sanitised server-side since the post-Phase 5 hardening pass** |
+| §4.2 File upload rules (medical certificate) | ✅ Phase 6 |
+| §4 File upload rules (employee documents) | ⬜ Phase 10 |
 
-Backend proof: `php artisan test` → **321 passed (1451 assertions)**; 49 routes
-under `api/*`. Flutter proof: `dart format .` clean, `flutter analyze` clean,
-`flutter test` → **176 passed**.
+Backend proof: `php artisan test` → **383 passed (2017 assertions)**; **86 routes**
+under `api/*` (Phase 6 added 37). Flutter proof: `dart format .` clean,
+`flutter analyze` clean, `flutter test` → **215 passed**.
 
 > To explore a running API later, use Laravel's generated OpenAPI/Swagger UI or
 > a tool such as Postman.

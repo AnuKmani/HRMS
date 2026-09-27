@@ -1,11 +1,13 @@
 # Security
 
-> **Status:** Phase 5 — authentication, rate limiting, the password policy, the
-> permission layer, row-level policies, and now **GPS attendance controls**
-> (server-authoritative geofence, private selfie storage, location and camera
-> permissions) are live and tested. **Attendance selfie sanitisation is now
-> enforced server-side** (§4.3) — metadata stripping no longer depends on the
-> Flutter client. Transport hardening and audit logging remain phased ahead
+> **Status:** Phase 6 — authentication, rate limiting, the password policy, a
+> **51-permission** catalogue, row-level policies (15 of them), GPS attendance
+> controls (server-authoritative geofence, private selfie storage, location and
+> camera permissions), server-side selfie sanitisation (§4.3), and now the
+> **approval and leave controls**: no self-approval, current-step-only
+> decisions, own-draft-only edits, private medical-certificate storage with
+> three-way upload validation (§4.4), and an hourly idempotent scheduler job
+> (§13 row 6). Transport hardening and audit logging remain phased ahead
 > (§5, §8). Individual controls are marked with their phase below.
 
 ---
@@ -87,9 +89,13 @@ Two layers, both mandatory:
 
 ### 3.1 Permission layer (`spatie/laravel-permission`)
 
-**Implemented in Phase 2 ✅** — `spatie/laravel-permission` **^6.25**, 10 roles,
-40 permissions, **168 grants** (Phase 5 granted the existing `attendance.view`
-to the `Employee` role so a person can read back the day they recorded).
+**Implemented in Phase 2 ✅, extended in Phases 4–6** — `spatie/laravel-permission`
+**^6.25**, 10 roles, **51 permissions**, **236 grants**. Phase 4 added
+`employees.salary.view`; Phase 5 granted the existing `attendance.view` to the
+`Employee` role so a person can read back the day they recorded; Phase 6 added 11
+(`approvals.view/manage`, `leave.balance.view/manage`, `holidays.manage`,
+`timesheets.view/manage`, `overtime.view/create/approve/manage`) and retired
+`leave.request` in favour of `leave.create`.
 
 > **Version pin matters:** v7/v8 of this package require PHP `^8.3`. This environment
 > runs **PHP 8.2.4**, so Composer correctly resolves to **6.25.0** (supports Laravel
@@ -104,7 +110,12 @@ employees.salary.view
 departments.view      departments.manage
 designations.view     designations.manage
 attendance.view       attendance.manage
-leave.view            leave.request        leave.approve        leave.manage
+approvals.view        approvals.manage
+leave.view            leave.create         leave.approve        leave.manage
+leave.balance.view    leave.balance.manage
+holidays.manage
+timesheets.view       timesheets.manage
+overtime.view         overtime.create      overtime.approve     overtime.manage
 payroll.view          payroll.manage
 projects.view         projects.manage
 sites.view            sites.manage
@@ -118,6 +129,17 @@ roles.view            roles.manage
 users.view            users.manage
 audit.view
 ```
+
+Two absences are deliberate:
+
+- **No `holidays.view`.** Reading the calendar is owed to every signed-in
+  account — you cannot plan leave around days you are forbidden to see — so
+  `GET /holidays` carries no `permission:` middleware and
+  `HolidayPolicy::viewAny()` returns `true` unconditionally. Only writing is
+  gated (`holidays.manage`).
+- **No `timesheet.approve`.** Timesheets are derived snapshots with nothing
+  to approve (ARCHITECTURE §5.9); a permission that authorised a decision the
+  system does not offer would be a button nobody could press.
 
 | | |
 |---|---|
@@ -156,6 +178,13 @@ Permissions answer *"may this role do X?"*. Policies answer *"may this user do X
 | `EmployeeSiteAssignmentPolicy` | read / create / close an assignment |
 | `AttendancePolicy` | view a day, list days, read the photograph (`viewAny` / `view` / `viewSelfie`), and — separately — `checkIn` / `checkOut` for oneself |
 | `SiteVisitPolicy` | list visits, read one, and start/end one's own |
+| `LeaveRequestPolicy` | list, read, create, **edit a draft only**, `submit`, `cancel`, `approve`/`reject` (needs `ApprovalWorkflowService` — see below), `uploadCertificate`, `viewCertificate` |
+| `LeaveBalancePolicy` | `viewAny` (`leave.balance.view`), `update` (`leave.balance.manage`) |
+| `LeaveTypePolicy` | read (`leave.view`) / configure (`leave.manage`) |
+| `HolidayPolicy` | `viewAny` **unconditionally true**; `create`/`update` need `holidays.manage`; **no `delete`** — retire with `status=inactive` |
+| `TimesheetPolicy` | list/read with `timesheets.view` under the shared visibility scope; **no `update`, no approval ability** |
+| `OvertimeRequestPolicy` | list/read, create, edit a draft, `submit`, `cancel`, `approve`/`reject` |
+| `ApprovalWorkflowPolicy` | read (`approvals.view`) / configure (`approvals.manage`) |
 
 `EmployeePolicy::view` is the reason `GET /employees/{id}` carries **no**
 `permission:` middleware: an ordinary employee holding no `*.view` permission
@@ -184,7 +213,47 @@ chose not to render cannot be a way in.
 > **Hiding a button in Flutter is not authorization.** Every rule must also be enforced
 > in Laravel. The Flutter UI hides controls only for usability.
 
-**Status:** ✅ Permission layer live (Phase 2) · ✅ Permission-gated routes since Phase 3 · ✅ Policies for the Phase 4 modules (Phase 4) · ✅ Attendance + site-visit policies (Phase 5) · ⬜ Leave / payroll / document policies in their own phases
+**Implemented in Phase 6 ✅ — and one bug worth remembering.**
+
+`LeaveRequestPolicy` and `OvertimeRequestPolicy` are **constructor-injected
+with `ApprovalWorkflowService`**, because "may this actor approve?" is a
+question about the chain's current step and cannot be answered by a
+permission string alone. That collides with how Laravel resolves policies:
+`Gate::callPolicyMethod()` builds the policy itself and **never passes extra
+constructor parameters** — so an injected service arrives as `null` and any
+use of it is a 500 in production and a passing test in development.
+
+Both policies therefore resolve the service lazily from the container inside
+the ability method. A test that exercises `approve()` end-to-end, not just
+the happy `view()`, is what would have caught it.
+
+**The class must be named after the model.** Laravel *guesses* the policy from
+the model: `OvertimeRequest` → `OvertimeRequestPolicy`. A class named
+`OvertimePolicy` for that model is never resolved, and the gate **silently
+denies** — no exception, no log line, just an unexplained `403` on every
+call. It happened in Phase 6; the file was renamed and the rule is now in
+ARCHITECTURE §3.6: `app/Policies/{Model}Policy.php`, always.
+
+Three rules the Phase 6 policies encode:
+
+- **No self-approval, at the engine.** `ApprovalWorkflowService::authorize()`
+  compares the actor against `$actor->employee?->id` and refuses even a
+  Super Admin who also owns the request. It lives in the one place every
+  transition passes, not in six controllers that could each forget it.
+- **Only the current step may act.** The chain is materialised into
+  `approval_records` at submit; approving a later step, or re-deciding one
+  already decided, is `403`.
+- **Policy says "who", service says "state".** A policy never mutates
+  anything. Balances, chain advancement, `payroll_eligible` and LOP
+  conversion are service concerns, so the same workflow serves leave and
+  overtime without either policy growing a subject-specific `if`.
+
+**Certificate routes carry no `permission:` middleware.** `POST`/`GET
+/leave/{id}/certificate` are gated by `LeaveRequestPolicy::uploadCertificate`
+— you may file for a request you may already read, and only while it can
+still accept one. The upload itself is bounded by §4.2.
+
+**Status:** ✅ Permission layer live (Phase 2) · ✅ Permission-gated routes since Phase 3 · ✅ Policies for the Phase 4 modules (Phase 4) · ✅ Attendance + site-visit policies (Phase 5) · ✅ Leave / balance / leave-type / holiday / timesheet / overtime / approval-workflow policies (Phase 6) · ⬜ Payroll and document policies in their own phases
 
 > **Scope note:** permissions are a *coarse gate*. Row scoping belongs to the
 > policy, and for the modules that exist today that split is wired: every Phase
@@ -292,7 +361,34 @@ which record. Reading a selfie today is authorised by `viewSelfie` and
 denied when it should be, but the fact of the read is not persisted.
 
 **Status:** ✅ Phase 5 (selfie) · ✅ selfie sanitisation (this pass) ·
-⬜ Phase 10 (documents) · ⬜ audit/security phase
+✅ certificates (§4.4) · ⬜ Phase 9 (employee documents) · ⬜ audit/security phase
+
+### 4.4 Certificates — ✅ Phase 6 (medical documents)
+
+The same shape as selfies, minus the re-encode and plus a document sniff:
+
+| Layer | What it does | Why it exists |
+|---|---|---|
+| **`StoreLeaveCertificateRequest`** | `mimes:pdf,jpg,jpeg,png,webp` + `mimetypes:…` + `max:` from config | The declared type, the sniffed type and the size must all agree before anything is touched |
+| **`App\Rules\CertificateContent`** | A PDF must contain `%PDF-` inside its first 1024 bytes; an image must survive `getimagesize()` | Closes "3 MB of garbage renamed `note.pdf`", as a field error on `certificate`, not a 500 later |
+| **`SickCertificateStore`** | Mints `leave-certificates/{employeeId}/{uuid}.{ext}`, never reads the client's filename for storage | No path traversal, no collision, no client-chosen extension reaching disk; a bad extension falls back to `.pdf` |
+| **Private disk (`local`)** | Reachable only through `GET /leave/{id}/certificate` behind `LeaveRequestPolicy::viewCertificate`, `Cache-Control: no-store` | No public URL, no directory listing, no path in any JSON response |
+| **Replace-in-place** | A re-upload deletes the previous file in the same transaction | A superseded certificate must not sit on disk with nothing pointing at it |
+
+**Why certificates are validated but not re-encoded**, unlike selfies: a scan
+is evidence — a signature, a stamp, a date. Transcoding a PDF or JPEG a
+second time risks degrading exactly the thing being proved, and unlike a
+selfie this file is never rendered inline to a third party from a response
+body. Validation is sufficient where sanitisation was not.
+
+**Deliberately not added:** no `certificate.upload` permission. The right to
+file is derived from the request itself (`uploadCertificate`), because the
+question is never "may this role upload files" but "may this person answer
+for *this* request before *this* deadline" — and a permission that could be
+granted independently of both would be the wrong question.
+
+**Audit logging is still not implemented** for reads of this file either —
+§8/§13.
 
 ---
 
@@ -352,7 +448,16 @@ literal.
 | `POST /auth/forgot-password` · `POST /auth/reset-password` | 5 / 15 min | client IP | ✅ Phase 3 |
 | `POST /attendance/check-in` · `check-out` · `site-visits/start` · `site-visits/{id}/end` | 30 / min | authenticated user id | ✅ Phase 5 |
 | General API | 60 / min | client IP | ⬜ Planned |
-| Exports (PDF/Excel) | 10 / min | client IP | ⬜ Phase 12 |
+| Exports (PDF/Excel) | 10 / min | client IP | ⬜ Phase 11 |
+
+**Phase 6 added no limiter, deliberately (also API_DOCUMENTATION §3).** Leave,
+overtime, holiday and timesheet writes are cheap and already behind
+`auth:sanctum` + a permission + a policy; throttling them would punish a user
+retrying over a patchy site connection, which is this product's normal
+condition rather than an attack. The one write that could be abused —
+certificate upload — is bounded instead by the byte ceiling, the extension and
+sniffed-type checks and the content rule in §4.2/§4.4. Rate limiting is a
+control against *repetition*; there is nothing here worth repeating.
 
 On breach → `429` in the standard envelope with `Retry-After`, rendered by the
 exception handler rather than by a per-limiter `Limit::response()` callback, so
@@ -415,6 +520,17 @@ The honest gaps: **attendance override is not audited because attendance
 override does not exist yet**, and **login success/failure is still not
 recorded anywhere** — see §2. Reading a selfie is authorised by
 `viewSelfie`, but the read itself is not persisted as an activity row.
+
+**Phase 6 added two more honest gaps.** An approval decision on a leave
+request or an overtime claim, and an automatic LOP conversion, are exactly
+the operations the table above says should be audited — and neither writes a
+row yet. What Phase 6 *did* leave behind is the structure to audit later:
+every decision already lands in `approval_records` (who, which step, when,
+with what remark) and every LOP conversion records `lop_reason`,
+`lop_applied_at` and dispatches `LeaveConvertedToLop` after commit. So the
+facts of *what happened* are durable and queryable; what is missing is the
+append-only *who-changed-it* log and the read trail, both of which stay in
+the dedicated audit/security phase rather than being faked here.
 
 ---
 
@@ -543,12 +659,13 @@ Enforced by `Password::min(8)->letters()->numbers()` on both
 | 2 | RBAC (roles, permissions, middleware), settings as the single config authority |
 | 3 | Sanctum auth, one-token-per-device, rate limiting, password policy, session revocation, response-envelope exception handling. **Login audit deferred to Phase 5** with §8 |
 | 4 | Six policies (department, designation, employee, project, site, employee-site-assignment), 12 Form Requests, coarse `permission:` middleware on every route except the two self-read `show`s, `employees.salary.view` separated from `employees.view`, assignment identity fields frozen against edits |
-| 5 | Server-authoritative geofence (lat/lng range + accuracy ceiling + distance always computed, never accepted), site-assignment validation before any punch, private selfie storage behind `viewSelfie` with no-store and no paths in responses, MIME/extension/size checks twice over, `Attendance` + `SiteVisit` policies with fail-closed row scoping, `attendance.view` granted to `Employee` (168 grants), `attendance` rate limiter (30/min per user) on the four writes, foreground-only location + camera permissions, offline queue with `client_event_id` idempotency and server re-validation on sync. **Not delivered: attendance override audit (no override exists) and login audit (§8) — both still outstanding** |
-| 6–8 | Leave, payroll, documents, expenses, notifications — planned with their own audit rows |
-| 9 | Leave approval audit, LOP conversion audit |
-| 10 | Document private storage, signed URLs, expiry jobs |
-| 11 | Salary access control (own-only), payroll audit |
-| 13 | Full security audit, penetration-style test pass, deployment hardening |
+| 5 | Server-authoritative geofence (lat/lng range + accuracy ceiling + distance always computed, never accepted), site-assignment validation before any punch, private selfie storage behind `viewSelfie` with no-store and no paths in responses, MIME/extension/size checks twice over, `Attendance` + `SiteVisit` policies with fail-closed row scoping, `attendance.view` granted to `Employee` (167 → 168 grants at that point), `attendance` rate limiter (30/min per user) on the four writes, foreground-only location + camera permissions, offline queue with `client_event_id` idempotency and server re-validation on sync. **Not delivered: attendance override audit (no override exists) and login audit (§8) — both still outstanding** |
+| 6 | **Leave, timesheets, overtime, holidays, approval workflows** — `permission:` middleware on every route except the three deliberately open ones (holiday reads, certificate read/write), 7 policies named after their models, no self-approval and current-step-only checks inside `ApprovalWorkflowService`, own-draft-only edits with all transitions through service methods, private certificate storage with three-way upload validation and no path in any response, an hourly idempotent scheduler job for the LOP conversion, 11 new permissions (51 total / 236 grants), `leave.request` retired, **deliberately no new rate limiter (§3)**. **Not delivered: approval and LOP audit rows — still outstanding (§8)** |
+| 7–8 | Site activity reports & daily reports (PDF) — planned with their own audit rows |
+| 9 | Document private storage, signed URLs, expiry jobs, onboarding/training/assets — planned |
+| 10 | Payroll, salary slips, loans, expenses — own-only salary access and payroll audit, planned |
+| 11 | Notifications/FCM, dashboards, exports — planned |
+| 12 | Full security audit, penetration-style test pass, deployment hardening |
 
 ### Selfie hardening pass (after Phase 5, before Phase 6)
 

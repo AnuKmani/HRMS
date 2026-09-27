@@ -122,7 +122,11 @@ HRMS/
 │   │   │   ├── auth/        #   models, repository, controller, login, splash
 │   │   │   ├── home/        #   permission-gated module tiles
 │   │   │   ├── employees/   #   departments, designations, projects, sites…
-│   │   │   └── attendance/  #   today screen, geofence, selfie, offline queue
+│   │   │   ├── attendance/  #   today screen, geofence, selfie, offline queue
+│   │   │   ├── leave/       #   requests, approval chain, certificate, balances
+│   │   │   ├── timesheet/   #   derived working-day snapshots
+│   │   │   ├── overtime/    #   claims, approval chain, payroll eligibility
+│   │   │   └── holidays/    #   holiday calendar (public / company / site)
 │   │   ├── app.dart         # MaterialApp.router
 │   │   └── main.dart        # ProviderScope + runApp
 │   └── test/                # fakes/, app_test.dart, feature + unit tests
@@ -130,13 +134,13 @@ HRMS/
 ├── backend/                 # Laravel REST API
 │   ├── app/
 │   │   ├── Http/
-│   │   │   ├── Controllers/Api/V1/   # Auth, org, attendance, site visits, movement
+│   │   │   ├── Controllers/Api/V1/   # Auth, org, attendance, leave, timesheets, overtime
 │   │   │   ├── Requests/             # Form Requests for every write endpoint
 │   │   │   ├── Resources/            # ApiResponse-backed resource classes
 │   │   │   └── Responses/            # ApiResponse — the response envelope
 │   │   ├── Models/          # Eloquent models
-│   │   ├── Services/        # Business logic (attendance, geofence, working time…)
-│   │   ├── Policies/        # Authorization — 8 policies
+│   │   ├── Services/        # Business logic (leave days, approval chain, timesheets…)
+│   │   ├── Policies/        # Authorization — 15 policies (always named `<Model>Policy`)
 │   │   ├── Support/         # Visibility scoping, Geo (haversine), ClientInput
 │   │   ├── Jobs/            # Queued work
 │   │   └── Notifications/   # FCM + database notifications
@@ -184,9 +188,13 @@ Access is controlled by **roles** *and* **granular permissions**. Hiding a butto
 
 Example permissions: `employees.view`, `employees.create`, `attendance.manage`, `leave.approve`, `payroll.manage`, `sites.manage`, `audit.view`.
 
-**Implemented (Phase 2):** 40 permissions, all named `resource.action`, seeded by
+**Implemented:** **51 permissions**, all named `resource.action`, seeded by
 `RoleSeeder` + `PermissionSeeder` + `RolePermissionSeeder`. Super Admin holds every
 permission; each other role is an explicit allow-list, so anything absent is denied.
+Phase 2 seeded the first 40; Phase 5 only *granted* an existing one
+(`attendance.view`); Phase 6 added `approvals.view/manage`, `leave.balance.view/manage`,
+`holidays.manage`, `timesheets.view/manage` and `overtime.view/create/approve/manage`,
+and retired `leave.request` in favour of `leave.create`.
 See [`docs/SECURITY.md`](docs/SECURITY.md) §3.1 for the full catalogue and the
 middleware used to enforce it server-side.
 
@@ -216,12 +224,12 @@ composer install
 cp .env.example .env
 php artisan key:generate
 # configure DB_* in .env
-php artisan migrate --seed        # creates 23 tables + RBAC/settings seed data
+php artisan migrate --seed        # 26 migrations, 34 tables + RBAC/settings seed data
 php artisan serve          # http://127.0.0.1:8000
 ```
 
 ```bash
-php artisan test                  # 120 tests, 517 assertions
+php artisan test                  # 383 tests, 2017 assertions
 ./vendor/bin/pint                 # code style
 ```
 
@@ -255,7 +263,7 @@ flutter run --dart-define=API_BASE_URL=http://192.168.1.20:8000/api/v1
 
 ```bash
 flutter analyze              # must report no issues
-flutter test                 # 43 tests, no device or server required
+flutter test                 # 215 tests, no device or server required
 ```
 
 > The base URL is compiled in with `--dart-define`. There is no config file to
@@ -302,7 +310,7 @@ flutter test                 # 43 tests, no device or server required
 | Deliverable | Status |
 |---|---|
 | `spatie/laravel-permission` **^6.25** (the release line compatible with PHP 8.2 + Laravel 12) | ✅ |
-| 10 roles · 40 permissions · 168 role-permission grants (167 until Phase 5 gave `attendance.view` to Employee) | ✅ |
+| 10 roles · 51 permissions · 236 role-permission grants (the count grew as Phases 5–6 added permissions; `PermissionSeeder::flat()` is the single source of truth) | ✅ |
 | Middleware aliases `permission` / `role` / `role_or_permission` registered | ✅ |
 | `settings` table + `SettingsService` — 12 seeded business rules | ✅ |
 | `departments`, `designations` | ✅ |
@@ -417,6 +425,48 @@ by any client that speaks HTTP.
 > logging** — which remains scheduled for the dedicated audit/security
 > phase and is not partially faked. See [`docs/SECURITY.md`](docs/SECURITY.md) §8.
 
+### ✅ Phase 6 — Leave, timesheets and overtime workflows (COMPLETE)
+
+The whole timekeeping half of the product: leave requests with a configurable
+approval chain, balances, a holiday calendar, the sick-certificate → LOP rule,
+derived timesheets, and overtime claims.
+
+**Backend**
+
+| Deliverable | Status |
+|---|---|
+| **9 migrations · 26 total · 34 tables · all `Ran`** — `approval_workflows`, `approval_workflow_steps`, `leave_types`, `leave_balances`, `leave_requests`, `holidays`, `timesheets`, `overtime_requests`, `approval_records` | ✅ |
+| Configurable **leave types** (`entitlement_days`, `carry_forward_enabled`/`_limit`, `maximum_days_per_request`, `is_paid`, `requires_document`, `document_deadline_days`, `allow_negative_balance`, optional own workflow) — no leave rule is hard-coded in a service | ✅ |
+| **Leave balances** written inside a DB transaction with a row lock; negative only when the leave type allows it | ✅ |
+| `LeaveDayCalculator` — the one place day counts come from (weekends, holidays, halves); nothing else does date arithmetic | ✅ |
+| Normalised request statuses `draft / pending / approved / rejected / cancelled / lop`, transitions only through service methods | ✅ |
+| **Approval workflow engine** — `approval_workflows` + `approval_workflow_steps` (a `sequence`, no status column) + a materialised `approval_records` chain frozen at submit; approvers resolve as `reporting_manager` / `role` / `permission`, unresolvable steps are skipped with a remark and never deleted | ✅ |
+| **Authorization**: own draft edit, **no self-approve**, approver only at the *current* step; coarse `permission:leave.approve` / `permission:overtime.approve` on the transition routes, everything else row-level in policies | ✅ |
+| Sick **certificate upload** — private disk, `mimes`+`mimetypes`+config size, byte-level `CertificateContent` rule, server-minted filename, never a path in JSON | ✅ |
+| Deadline defaults to **2 days** → converts to `lop` server-side with `lop_days`/`lop_reason`/`lop_applied_at`, the paid reservation released, and `LeaveConvertedToLop` dispatched after commit; `Schedule::job(EnforceSickCertificateDeadlines)->hourlyAt(17)` with a queued, idempotent job (`$uniqueFor`). **No audit row and no notification — neither exists (SECURITY §8)** | ✅ |
+| **Timesheets** as derived snapshots regenerated from attendance (`status = open / complete / incomplete`), own + manager-scoped lists, no approval endpoints | ✅ |
+| **Overtime** through the same workflow engine; `payroll_eligible` set only on approval, no payroll arithmetic anywhere | ✅ |
+| **7 policies** (`LeaveRequest`, `LeaveBalance`, `LeaveType`, `Holiday`, `Timesheet`, `OvertimeRequest`, `ApprovalWorkflow`) + 15 form requests + 9 API resources | ✅ |
+| Routes: `/leave` (+`submit/approve/reject/cancel/certificate`), `/leave-balances`, `/leave-types`, `/holidays`, `/timesheets` (+`generate`), `/overtime`, `/approval-workflows` | ✅ |
+| **11 new permissions** → 51 total, 236 grants | ✅ |
+| Tests: backend **383 passed (2017 assertions)** · `pint --test` clean · `composer validate` valid | ✅ |
+
+**Flutter**
+
+| Deliverable | Status |
+|---|---|
+| `features/leave`, `features/timesheet`, `features/overtime`, `features/holidays` — each in `data/` · `domain/` · `presentation/` | ✅ |
+| Shared `StatusChip`, `CameraCaptureSheet`, `DeviceCamera` (front/back lens), `NoPermission`, `ApprovalStep` | ✅ |
+| Certificate filing photographs the document with the **back** camera — no file-picker package added | ✅ |
+| Permission gates on every list (`leave.view`, `timesheets.view`, `overtime.view`) that skip the request entirely, not just the widget | ✅ |
+| 15 routes under `/leave`, `/leave-balances`, `/holidays`, `/timesheets`, `/overtime`; module tiles on the home screen | ✅ |
+| Tests: Flutter **215 passed** · `dart format` · `flutter analyze` clean | ✅ |
+
+> **Deliberately not built in Phase 6:** payroll, salary slips, loans, expenses,
+> documents, onboarding, training, assets, notifications/FCM and full audit
+> logging. `payroll_eligible` and `lop_days` are recorded as *facts* for that
+> future phase — nothing computes money here.
+
 ### Planned Phases
 
 | Phase | Scope | Status |
@@ -426,14 +476,13 @@ by any client that speaks HTTP.
 | **3** | Authentication (Sanctum) + Flutter auth feature | ✅ Done |
 | **4** | Employees, Projects, Sites, Assignments (first vertical slice) | ✅ Done |
 | **5** | Attendance: geofence, selfie, check-in/out, site visits, movement timeline, offline queue | ✅ Done |
-| **6** | *(absorbed into 5 — offline sync shipped there; reserved for automatic background sync)* | ⬜ |
+| **6** | Leave: types, balances, requests, approval workflow, sick-cert → LOP, holiday calendar, timesheets, overtime | ✅ Done |
 | **7** | Site activity reports & daily reports (PDF) | ⬜ Next |
-| **8** | Shifts, timesheets, overtime | ⬜ |
-| **9** | Leave, balances, sick-cert → LOP automation | ⬜ |
-| **10** | Holidays, documents + expiry, onboarding, training, assets | ⬜ |
-| **11** | Payroll, salary slips, certificates, loans, expenses | ⬜ |
-| **12** | FCM notifications, dashboards, reports & exports | ⬜ |
-| **13** | Testing, security audit, deployment, backups | ⬜ |
+| **8** | Shifts (API + screens) and background/automatic attendance sync | ⬜ |
+| **9** | Documents + expiry, onboarding, training, assets | ⬜ |
+| **10** | Payroll, salary slips, certificates, loans, expenses | ⬜ |
+| **11** | FCM notifications, dashboards, reports & exports | ⬜ |
+| **12** | Testing, security audit, deployment, backups | ⬜ |
 
 ---
 

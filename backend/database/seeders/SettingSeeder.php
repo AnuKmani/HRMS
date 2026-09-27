@@ -54,8 +54,11 @@ class SettingSeeder extends Seeder
 
         // --- leave ------------------------------------------------------
         [
+            // 2 days, the default the specification asks for. A leave type
+            // with its own `document_deadline_days` overrides this — see
+            // LeaveType::documentDeadlineDays().
             'key' => 'leave.sick_certificate_deadline_days',
-            'value' => '3',
+            'value' => '2',
             'type' => 'integer',
             'group' => 'leave',
             'label' => 'Sick certificate deadline',

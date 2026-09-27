@@ -20,6 +20,10 @@ class DatabaseSeeder extends Seeder
             PermissionSeeder::class,
             RolePermissionSeeder::class,
             SettingSeeder::class,
+            // Workflows before leave types: a type may name its chain, so the
+            // chain has to exist by the time the type is written.
+            ApprovalWorkflowSeeder::class,
+            LeaveTypeSeeder::class,
             DevelopmentDataSeeder::class,
         ]);
     }

@@ -47,11 +47,55 @@ class PermissionSeeder extends Seeder
             'attendance.view',
             'attendance.manage',
         ],
+        /*
+        | Approval chains (Phase 6).
+        |
+        | Deliberately a separate module from `leave` rather than folded into
+        | it: a workflow applies to leave *and* overtime, so gating its
+        | configuration behind `leave.manage` would make editing an overtime
+        | chain a leave operation. Held by HR Admin and Super Admin only —
+        | changing who signs off on absences is a policy change, not a daily
+        | task.
+        */
+        'approvals' => [
+            'approvals.view',
+            'approvals.manage',
+        ],
         'leave' => [
+            // `leave.create` replaces the Phase 2 placeholder `leave.request`.
+            // Every other module spells the coarse write gate `{resource}.create`
+            // (employees.create, …) and leave was the one outlier; the old name
+            // was never wired to a route. Retired in PermissionSeeder::RETIRED
+            // so re-seeding removes it rather than leaving a permission nobody
+            // can reason about in the table.
             'leave.view',
-            'leave.request',
+            'leave.create',
             'leave.approve',
             'leave.manage',
+
+            // Three segments, for the same reason `employees.salary.view` is
+            // three: seeing a pot of days is a different question from
+            // changing one. Balance *reads* go to anybody who may take leave,
+            // balance *writes* (entitlement, carry-forward, adjustment) to HR.
+            'leave.balance.view',
+            'leave.balance.manage',
+        ],
+        'holidays' => [
+            // Write-only, on purpose: the holiday calendar is readable by
+            // every signed-in account through HolidayPolicy — a day off is
+            // information about the company, not a privilege — so there is no
+            // `holidays.view` to grant.
+            'holidays.manage',
+        ],
+        'timesheets' => [
+            'timesheets.view',
+            'timesheets.manage',
+        ],
+        'overtime' => [
+            'overtime.view',
+            'overtime.create',
+            'overtime.approve',
+            'overtime.manage',
         ],
         'payroll' => [
             'payroll.view',
@@ -104,6 +148,22 @@ class PermissionSeeder extends Seeder
     ];
 
     /**
+     * Permissions that have been renamed out of existence.
+     *
+     * `firstOrCreate` cannot remove anything, so without this a permission
+     * that no longer appears anywhere in the codebase would sit in the table
+     * forever, still granted to roles that no longer have a route behind it.
+     * An explicit list beats purging everything not in the catalog — an
+     * operator may legitimately have added one of their own.
+     *
+     * @var array<int, string>
+     */
+    public const RETIRED = [
+        // Renamed to `leave.create` in Phase 6 to match {resource}.{action}.
+        'leave.request',
+    ];
+
+    /**
      * @return array<int, string>
      */
     public static function flat(): array
@@ -123,6 +183,15 @@ class PermissionSeeder extends Seeder
                     'guard_name' => 'web',
                 ]);
             }
+        }
+
+        foreach (self::RETIRED as $permission) {
+            // `model_has_permissions` cascades on delete, so a role that held
+            // it is simply one grant lighter — and RolePermissionSeeder runs
+            // straight afterwards and re-syncs from the catalog anyway.
+            Permission::query()
+                ->where('name', $permission)
+                ->delete();
         }
     }
 }

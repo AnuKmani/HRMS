@@ -10,7 +10,7 @@ import 'package:mobile/core/storage/device_identity.dart';
 import 'package:mobile/features/attendance/data/api_attendance_repository.dart';
 import 'package:mobile/features/attendance/data/device_location.dart';
 import 'package:mobile/features/attendance/data/offline_queue.dart';
-import 'package:mobile/features/attendance/data/selfie_camera.dart';
+import 'package:mobile/core/data/device_camera.dart';
 import 'package:mobile/features/attendance/data/selfie_compressor.dart';
 import 'package:mobile/features/attendance/domain/attendance_record.dart';
 import 'package:mobile/features/attendance/domain/attendance_repository.dart';

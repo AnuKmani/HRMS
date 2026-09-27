@@ -80,6 +80,52 @@ class PermissionScope {
 
   bool get canManageSites => can('sites.manage');
 
+  /* ------------------------------------------------------------- leave */
+
+  bool get canViewLeave => can('leave.view');
+
+  bool get canCreateLeave => can('leave.create');
+
+  bool get canApproveLeave => can('leave.approve');
+
+  bool get canManageLeave => can('leave.manage');
+
+  /// The balance screen. Deliberately a separate answer from `canViewLeave`:
+  /// the seeders grant `leave.balance.view` to every role that has leave at
+  /// all but `leave.balance.manage` to HR alone, and merging the two would
+  /// turn "correct a pot by hand" into a button every employee could press.
+  bool get canViewLeaveBalances => can('leave.balance.view');
+
+  bool get canManageLeaveBalances => can('leave.balance.manage');
+
+  /// There is no `holidays.view` — a day the company declared off is not a
+  /// privilege within it, so `GET /holidays` is open to every signed-in
+  /// account and only *writing* the calendar is a permission.
+  bool get canManageHolidays => can('holidays.manage');
+
+  /// Whether this session is allowed to *try* to file a medical certificate.
+  /// "May this one have one?" is the request's own question and is answered
+  /// from [LeaveRequest.certificateRequired] on the detail screen.
+  bool get canFileCertificates => can('leave.create') || can('leave.manage');
+
+  /* -------------------------------------------------------- timesheets */
+
+  bool get canViewTimesheets => can('timesheets.view');
+
+  /// Regenerating a period from attendance — not "editing" one, which does
+  /// not exist: a timesheet is a snapshot and has no write endpoint at all.
+  bool get canGenerateTimesheets => can('timesheets.manage');
+
+  /* ---------------------------------------------------------- overtime */
+
+  bool get canViewOvertime => can('overtime.view');
+
+  bool get canCreateOvertime => can('overtime.create');
+
+  bool get canApproveOvertime => can('overtime.approve');
+
+  bool get canManageOvertime => can('overtime.manage');
+
   /* ---------------------------------------------------- assignments */
 
   bool get canViewAssignments => can('assignments.view');

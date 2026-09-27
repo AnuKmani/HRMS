@@ -1,13 +1,14 @@
 # Flutter Guide
 
-> **Status:** Phase 5 — Flutter is installed (on `F:`), the project exists, and
-> two business slices are built and tested: the organisation modules and GPS
-> attendance. `dart format .` clean, `flutter analyze` clean, `flutter test`
-> **176 passed**. This guide explains the concepts and patterns the app uses,
-> written for someone who knows PHP/Laravel but is new to Flutter/Dart.
-> Sections that were written as a plan in Phase 4 — the offline queue, the
-> location and camera permission flows, the `attendance/` folder — are now
-> describing shipped code, and say so.
+> **Status:** Phase 6 — four new modules are built and tested on top of the
+> organisation, auth and attendance slices: `leave/`, `holidays/`, `timesheet/`
+> and `overtime/`, in the same `data / domain / presentation` shape as
+> everything before them. `dart format .` clean, `flutter analyze` clean,
+> `flutter test` **215 passed**. This guide explains the concepts and patterns
+> the app uses, written for someone who knows PHP/Laravel but is new to
+> Flutter/Dart. Sections that were written as a plan in earlier phases — the
+> offline queue, the location and camera permission flows, the approval chain,
+> the module permission gates — are now describing shipped code, and say so.
 
 ---
 
@@ -486,6 +487,30 @@ and `:id` carries the regex `(\d+)` so `/employees/new` is never read as an id.
 Detail routes parse `int.parse(state.pathParameters['id']!)`; forms take the id
 as a nullable `int?`, `null` meaning create.
 
+**Phase 6 route table (15 routes):**
+
+| Path | Screen | Notes |
+|---|---|---|
+| `/leave` · `/leave/new` | list · form | the list draws `NoPermission` without `leave.view` and never builds the controller |
+| `/leave/:id` · `/leave/:id/edit` | detail · form | detail carries the approval chain, the certificate block and the four transitions |
+| `/leave-balances` | list | read-only; entry point from the leave list's app bar |
+| `/holidays` · `/holidays/new` · `/holidays/:id/edit` | list · form | **no `/holidays/:id` detail route** — the calendar *is* the detail. There is also no delete route to match the API: a day is retired with `status=inactive` |
+| `/timesheets` · `/timesheets/:id` | list · detail | read + generate only; there is nothing to edit or approve |
+| `/overtime` · `/overtime/new` | list · form | |
+| `/overtime/:id` · `/overtime/:id/edit` | detail · form | detail mirrors leave, plus the *minutes to allow* field on approve |
+
+Ordering rules from Phase 4 still apply: `/leave/new` before `/leave/:id`,
+`/leave-balances` declared where it cannot be read as `/leave/:id`, and
+`timesheets/generate` (backend) registered before `timesheets/{timesheet}` —
+GoRouter and Laravel both match in declaration order, and the bug on either
+side is "your new page 404s", which is easy to misread as a permission
+problem.
+
+**Screens navigate with `context.go(...)`, not `context.pop()`.** After a
+save, a detail screen must re-run `initState` to fetch what was just written;
+`pop()` would return to a stale detail still holding the pre-edit model.
+`pop()` stays where nothing was persisted.
+
 ---
 
 ## 10. Offline queue design
@@ -567,17 +592,31 @@ final canView = ref.watch(
 
 `PermissionScope` (`core/permissions/permission_scope.dart`) exposes `can`,
 `canAny`, `canAll` plus the named getters the screens actually use
-(`canViewEmployees`, `canCreateEmployees`, `canViewSalary`, …). Three properties
-it is built to hold, each of them under test:
+(`canViewEmployees`, `canCreateEmployees`, `canViewSalary`, …). Phase 6 added
+the timekeeping half: `canViewLeaveRequests`, `canCreateLeaveRequests`,
+`canApproveLeaveRequests`, `canViewLeaveBalances`, `canManageHolidays`,
+`canViewTimesheets`, `canManageTimesheets`, `canViewOvertime`,
+`canCreateOvertime`, `canApproveOvertime` — every one of them a **getter over
+the same list**, so a permission renamed server-side breaks one line here and
+shows up as a single failing test rather than as scattered string literals.
+
+Four properties it is built to hold, each of them under test:
 
 1. **Fails closed.** A session with no permissions denies everything, so a
    partially-restored app draws nothing rather than everything.
 2. **Salary is not a subset of the roster.** `employees.view` never implies
    `employees.salary.view`; the same two-rule split the API uses
    (`EmployeePolicy::viewSalary` needs *both*) is phrased the same way here.
+   The same is true of `leave.view` vs `leave.balance.view`, and of reading
+   the holiday calendar (no permission at all) vs writing one
+   (`holidays.manage`).
 3. **A misspelling denies.** An unknown permission string reads as denied, not
    as granted — the failure mode of a typo should be an absent button, never
    an exposed one.
+4. **Visibility is not authorization.** A drawn button is a courtesy; the
+   server's answer is the rule. Phase 6 tests this in both directions: a
+   session without `leave.view` draws a lock, and a session *with* it that
+   points at someone else's request is still refused by the row scope.
 
 **Remember:** this only controls *visibility*. The API enforces the real rule and
 returns `403` if the app is bypassed — which is why every form and detail screen
@@ -626,6 +665,49 @@ front-facing camera, or the simulator has none) / `ready`, each with its own
 message and its own way forward — including "no camera" being an honest
 answer rather than a black preview.
 
+**Phase 6 widened the abstraction without widening the API.** The camera now
+serves two jobs — a selfie and a medical certificate — so the implementation
+moved to `core/data/device_camera.dart` and gained one `lens` parameter
+(`CameraLens.front` by default, `CameraLens.back` for documents). Two named
+providers (`selfieCameraProvider`, `documentCameraProvider`) and one shared
+`CameraCaptureSheet` keep both call sites honest, while `SelfieCaptureSheet`
+still exists as a thin wrapper so Phase 5's screens and tests are untouched.
+One flow, two lenses, and no second camera package.
+
+### 11.2 Module permission gates (Phase 6 ✅) — the list that never asks
+
+An OS permission is about hardware; a module gate is about the *list request*.
+Phase 4's rule was "a list you may not open is never fetched", but it was
+applied inside each screen — which means the `Notifier` was already built and
+the provider already mounted by the time the guard ran.
+
+Phase 6 moved the guard **outward**:
+
+```dart
+class LeaveListScreen extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scope = ref.watch(permissionScopeProvider);
+    if (!scope.canViewLeaveRequests) return const NoPermission(module: 'Leave');
+    return const _LeaveList();   // ← the only place the controller is built
+  }
+}
+```
+
+`NoPermission` (shared, `core/presentation/no_permission.dart`, key
+`no-permission`) draws a lock rather than a red error, and the important part
+is the boundary: because `_LeaveList` is the `ConsumerWidget` that watches
+`listControllerProvider`, that provider is **never constructed** for a session
+without the permission. A test asserting `listControllerProvider` was never
+built is therefore stronger than one asserting the widget says "no access" —
+the first proves no request was contemplated, the second only that it was
+politely declined.
+
+Leave, timesheets and overtime all gate this way. **Holidays deliberately
+does not**: `HolidayPolicy::viewAny()` is unconditionally true on the server,
+so a lock there would be the app inventing a rule the API does not have —
+and would hide the calendar from exactly the people who need to plan around it.
+
 ---
 
 ## 12. Project structure
@@ -640,12 +722,19 @@ mobile/lib/
 │   ├── network/api_client.dart         # Dio + bearer interceptor + ApiEnvelope
 │   ├── network/api_exception.dart      # ApiException + envelope parsing
 │   ├── permissions/permission_scope.dart  # may()/can() — one place that answers
+│   ├── data/
+│   │   ├── page_result.dart               # (see above) PagedList<T> envelope
+│   │   └── device_camera.dart             # ← Phase 6: front/back lens, the ONE camera seam
 │   ├── presentation/
-│   │   ├── paged_list_view.dart        # spinner / empty / error+retry / rows / banner
-│   │   ├── list_state.dart             # PagedListController<T>, generation guard
-│   │   ├── form_controls.dart          # LabeledTextField, StatusField, FormBanner
-│   │   ├── fields.dart                 # DateField, StatusFilter, SectionCard
-│   │   └── remote_picker.dart          # debounced searchable option sheet
+│   │   ├── paged_list_view.dart           # spinner / empty / error+retry / rows / banner
+│   │   ├── list_state.dart                # PagedListController<T>, generation guard
+│   │   ├── form_controls.dart             # LabeledTextField, StatusField, FormBanner
+│   │   ├── fields.dart                    # DateField, StatusFilter, SectionCard
+│   │   ├── remote_picker.dart             # debounced searchable option sheet
+│   │   ├── status_chip.dart               # ← Phase 6: StatusChip + StatusTone, every module
+│   │   ├── no_permission.dart             # ← Phase 6: the lock a list draws instead of fetching
+│   │   └── camera_capture_sheet.dart      # ← Phase 6: shared capture → preview → retake flow
+│   ├── data/approval_step.dart            # ← Phase 6: one link of an approval chain
 │   ├── router/app_router.dart          # GoRouter + refreshListenable guard
 │   └── storage/
 │       ├── token_store.dart            # flutter_secure_storage (TokenStore)
@@ -661,9 +750,10 @@ mobile/lib/
 │   │   └── splash_screen.dart
 │   ├── home/home_screen.dart           # permission-gated module tiles
 │   │
-│   │   └── each of the five below has the same three layers:
-│   ├── employees/      ├── departments/   ├── designations/
-│   ├── projects/       └── sites/
+│   │   └── each of the nine below has the same three layers:
+│   ├── employees/   ├── departments/   ├── designations/
+│   ├── projects/    ├── sites/         ├── attendance/
+│   ├── leave/       ├── timesheet/     ├── overtime/      ├── holidays/
 │   │
 │   └── <feature>/
 │       ├── data/
@@ -674,7 +764,7 @@ mobile/lib/
 │       │   └── <feature>_repository.dart      # the contract the fake implements
 │       └── presentation/
 │           ├── <feature>_list_screen.dart
-│           ├── <feature>_detail_screen.dart   # (employees / projects / sites)
+│           ├── <feature>_detail_screen.dart   # (employees / projects / sites / leave / overtime)
 │           ├── <feature>_form_screen.dart
 │           └── <feature>_controller.dart      # PagedListController<T>
 │
@@ -694,9 +784,13 @@ parsing without a socket.
 shape starts paying for itself exactly when a feature grows local sources of
 its own — which the Phase 4 modules did, and which `attendance/` did in Phase
 5: it is the first feature with sources that are not repositories
-(`device_location.dart`, `selfie_camera.dart`, `offline_queue.dart`,
+(`device_location.dart`, `offline_queue.dart`,
 `local_geofence.dart`), and each of those is a seam a test replaces with a
-fake instead of with a permission it does not have.
+fake instead of with a permission it does not have. **Phase 6 added a second
+kind of seam, this time shared**: a camera used by two features is not a
+feature's private source, so it moved out of `attendance/` into
+`core/data/device_camera.dart` — and `features/attendance/data/selfie_camera.dart`
+was deleted rather than left behind as a stale import.
 
 ---
 
@@ -777,6 +871,12 @@ flutter build appbundle         # build an AAB for Play Store
 | Convert a server timestamp to local time for display | Slice it (`'HH:mm'.substring(0, 5)` on the wall-clock string the server sent) — the day the server assigned and the time it recorded must not be shifted by the phone's zone |
 | Dispose a `TextEditingController` while its dialog is still animating out | Let the dialog own its controllers and dispose them itself |
 | Assume `flutter test` can rasterise a camera frame | Script the camera to return real bytes (a 1×1 PNG) and assert on the logic |
+| `const AppBar(title: Text('…'))` | Write `appBar: AppBar(title: const Text('…'))` — in this Flutter version `AppBar` is **not** const-constructible and `const_with_non_const` fires on the whole expression |
+| Call `find(id)` inside a `Scripted*` test double | Call `super.find(id)` — bare `find` resolves to flutter_test's `find` getter and fails as `invocation_of_non_function` |
+| Name a scripted field after its method (`types` / `balances`) | Rename the field (`leaveTypes` / `balanceRows`) — a field cannot shadow a method of the same name |
+| Put two identical rows in a list fixture | Make them distinct, or scope the assertion (`find.text('Pending').last`, `find.widgetWithText(FilledButton, 'OK').last`) — otherwise `findsOneWidget` fails with "too many" for a reason unrelated to the code |
+| Blank a query parameter to clear a filter | Delete the key — `status=` matches the empty string and returns nothing, while an absent `status` means "every status". The tests assert this with `expectQuery(..., absent)` |
+| Pop() back to a detail screen after editing it | `context.go(...)` so the detail re-runs `initState` and re-fetches what was just written |
 
 ---
 
@@ -789,9 +889,10 @@ flutter build appbundle         # build an AAB for Play Store
 | Flutter project skeleton | ✅ Phase 1b |
 | Packages: `flutter_riverpod` 3.4.3 · `dio` 5.11.1 · `go_router` 18.0.1 · `flutter_secure_storage` 11.2.0 | ✅ Phase 3 |
 | Packages: `geolocator` ^14.1.0 · `camera` ^0.12.1 · `image` ^4.10.1 · `shared_preferences` ^2.5.5 · `path_provider` ^2.1.6 | ✅ Phase 5 — five additions, each checked for Dart 3.13 / Flutter 3.47 compatibility before it was added |
-| Packages deliberately **not** added | ✅ Phase 5 — `connectivity_plus` (the queue learns a failure is transport-level from the failed request itself; a connectivity plugin would report "online" at a captive portal) and `permission_handler` (it drags in platform channels the two permissions we need do not require — `geolocator` and `camera` already surface their own statuses) |
+| Packages deliberately **not** added | ✅ Phase 5 — `connectivity_plus` (the queue learns a failure is transport-level from the failed request itself; a connectivity plugin would report "online" at a captive portal) and `permission_handler` (it drags in platform channels the two permissions we need do not require — `geolocator` and `camera` already surface their own statuses) · ✅ Phase 6 — `file_picker` (the certificate is captured with the back camera rather than chosen from disk, so the one package the feature would have needed is not added) and `intl` (the app formats its own dates) |
 | `core/` — config, network, storage, router | ✅ Phase 3 |
 | `core/data` page envelope · `core/permissions` scope · `core/presentation` list + form widgets | ✅ Phase 4 |
+| `core/presentation` `StatusChip` · `NoPermission` · `CameraCaptureSheet`; `core/data` `device_camera`; `core/data` `approval_step` | ✅ Phase 6 |
 | Auth feature — controller, repository, models, login + splash screens | ✅ Phase 3 |
 | Router guard (`refreshListenable`) + session restore | ✅ Phase 3 |
 | Module routes + permission-gated home tiles | ✅ Phase 4 |
@@ -802,8 +903,14 @@ flutter build appbundle         # build an AAB for Play Store
 | Camera permission flow + capture → preview → retake → compress → submit | ✅ Phase 5 |
 | Offline queue (event UUID, `pending_sync`, manual Sync now, `clientEventId` reuse) | ✅ Phase 5 |
 | Android manifest — fine/coarse location + camera, **no** background location | ✅ Phase 5 |
-| `dart format .` | ✅ clean (88 files) |
+| `features/leave` — list · detail (chain, certificate, 4 transitions) · form · balances | ✅ Phase 6 |
+| `features/holidays` — calendar list · form, retired-by-status instead of delete | ✅ Phase 6 |
+| `features/timesheet` — list · detail, generate action behind `timesheets.manage` | ✅ Phase 6 |
+| `features/overtime` — list · detail (with *minutes to allow*) · form | ✅ Phase 6 |
+| Back-lens document capture sharing the front-lens selfie flow | ✅ Phase 6 |
+| `NoPermission` gate drawn **before** the list controller is built | ✅ Phase 6 |
+| `dart format .` | ✅ clean (34 files reflowed in Phase 6) |
 | `flutter analyze` | ✅ clean |
-| `flutter test` | ✅ **176 passed** |
+| `flutter test` | ✅ **215 passed** |
 | Local database (Drift) + relational offline cache | ⬜ Not started — Phase 5 proved the queue does not need it (§10); revisit when a module is genuinely relational |
 | Shared widgets under `core/widgets/` | ⬜ The list and form widgets live in `core/presentation/` today; the split is worth it once a second, differently-shaped widget set appears |

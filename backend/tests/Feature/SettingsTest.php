@@ -61,7 +61,10 @@ class SettingsTest extends TestCase
 
         $this->assertIsInt($this->service()->int('attendance.grace_period_minutes'));
         $this->assertSame(10, $this->service()->int('attendance.grace_period_minutes'));
-        $this->assertSame(3, $this->service()->int('leave.sick_certificate_deadline_days'));
+        // Phase 6: the deadline is configurable and defaults to two days.
+        // A type's own `document_deadline_days` overrides it when set above
+        // zero — see LeaveType::documentDeadlineDays().
+        $this->assertSame(2, $this->service()->int('leave.sick_certificate_deadline_days'));
 
         $this->assertIsArray($this->service()->json('working_hours.default'));
         $this->assertSame(8, $this->service()->json('working_hours.default')['daily_hours']);

@@ -15,17 +15,28 @@ import '../../features/employees/presentation/employee_detail_screen.dart';
 import '../../features/employees/presentation/employee_form_screen.dart';
 import '../../features/employees/presentation/employees_list_screen.dart';
 import '../../features/home/home_screen.dart';
+import '../../features/holidays/presentation/holiday_form_screen.dart';
+import '../../features/holidays/presentation/holidays_list_screen.dart';
+import '../../features/leave/presentation/leave_balance_screen.dart';
+import '../../features/leave/presentation/leave_detail_screen.dart';
+import '../../features/leave/presentation/leave_form_screen.dart';
+import '../../features/leave/presentation/leave_list_screen.dart';
+import '../../features/overtime/presentation/overtime_detail_screen.dart';
+import '../../features/overtime/presentation/overtime_form_screen.dart';
+import '../../features/overtime/presentation/overtime_list_screen.dart';
 import '../../features/projects/presentation/project_detail_screen.dart';
 import '../../features/projects/presentation/project_form_screen.dart';
 import '../../features/projects/presentation/projects_list_screen.dart';
 import '../../features/sites/presentation/site_detail_screen.dart';
 import '../../features/sites/presentation/site_form_screen.dart';
 import '../../features/sites/presentation/sites_list_screen.dart';
+import '../../features/timesheet/presentation/timesheet_detail_screen.dart';
+import '../../features/timesheet/presentation/timesheets_list_screen.dart';
 
 /// The app's routes, one redirect, and a guard driven entirely by auth state.
 ///
-/// Phase 4 adds the five business modules. Two rules shape how they are laid
-/// out:
+/// Four phases of modules now sit behind it. Two rules shape how they are
+/// laid out:
 ///
 ///  - **`new` before `:id`, and `:id` only matches digits.** A route
 ///    `'/employees/:id'` would otherwise swallow `/employees/new` and try to
@@ -184,6 +195,83 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/sites/:id/edit',
         builder: (context, state) => SiteFormScreen(siteId: idOf(state)),
+      ),
+
+      /* ---------------------------------------------------------- leave */
+
+      // Phase 6. The same three rules as above, plus one: `/leave-balances`
+      // is a *different first segment* from `/leave/:id`, so the two cannot
+      // collide however the table is ordered — but `/leave/new` genuinely
+      // can, and is therefore registered first.
+      GoRoute(
+        path: '/leave',
+        builder: (context, state) => const LeaveListScreen(),
+      ),
+      GoRoute(
+        path: '/leave/new',
+        builder: (context, state) => const LeaveFormScreen(),
+      ),
+      GoRoute(
+        path: '/leave-balances',
+        builder: (context, state) => const LeaveBalanceScreen(),
+      ),
+      GoRoute(
+        path: '/leave/:id',
+        builder: (context, state) => LeaveDetailScreen(leaveId: idOf(state)),
+      ),
+      GoRoute(
+        path: '/leave/:id/edit',
+        builder: (context, state) => LeaveFormScreen(leaveId: idOf(state)),
+      ),
+
+      /* ------------------------------------------------------- holidays */
+
+      // No `/holidays/:id` detail route: a holiday has no read-only screen
+      // worth a navigation, and the list *is* the calendar. Only somebody
+      // holding `holidays.manage` is offered a way in — see
+      // HolidaysListScreen for why the chevron disappears with the button.
+      GoRoute(
+        path: '/holidays',
+        builder: (context, state) => const HolidaysListScreen(),
+      ),
+      GoRoute(
+        path: '/holidays/new',
+        builder: (context, state) => const HolidayFormScreen(),
+      ),
+      GoRoute(
+        path: '/holidays/:id/edit',
+        builder: (context, state) => HolidayFormScreen(holidayId: idOf(state)),
+      ),
+
+      /* ------------------------------------------------------ timesheets */
+      GoRoute(
+        path: '/timesheets',
+        builder: (context, state) => const TimesheetsListScreen(),
+      ),
+      GoRoute(
+        path: '/timesheets/:id',
+        builder: (context, state) =>
+            TimesheetDetailScreen(timesheetId: idOf(state)),
+      ),
+
+      /* -------------------------------------------------------- overtime */
+      GoRoute(
+        path: '/overtime',
+        builder: (context, state) => const OvertimeListScreen(),
+      ),
+      GoRoute(
+        path: '/overtime/new',
+        builder: (context, state) => const OvertimeFormScreen(),
+      ),
+      GoRoute(
+        path: '/overtime/:id',
+        builder: (context, state) =>
+            OvertimeDetailScreen(overtimeId: idOf(state)),
+      ),
+      GoRoute(
+        path: '/overtime/:id/edit',
+        builder: (context, state) =>
+            OvertimeFormScreen(overtimeId: idOf(state)),
       ),
     ],
   );

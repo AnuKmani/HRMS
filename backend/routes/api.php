@@ -1,17 +1,24 @@
 <?php
 
+use App\Http\Controllers\Api\V1\ApprovalWorkflowController;
 use App\Http\Controllers\Api\V1\AttendanceController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\DepartmentController;
 use App\Http\Controllers\Api\V1\DesignationController;
 use App\Http\Controllers\Api\V1\EmployeeController;
 use App\Http\Controllers\Api\V1\EmployeeSiteAssignmentController;
+use App\Http\Controllers\Api\V1\HolidayController;
+use App\Http\Controllers\Api\V1\LeaveBalanceController;
+use App\Http\Controllers\Api\V1\LeaveRequestController;
+use App\Http\Controllers\Api\V1\LeaveTypeController;
 use App\Http\Controllers\Api\V1\MovementController;
+use App\Http\Controllers\Api\V1\OvertimeController;
 use App\Http\Controllers\Api\V1\PasswordResetController;
 use App\Http\Controllers\Api\V1\ProjectController;
 use App\Http\Controllers\Api\V1\RoleController;
 use App\Http\Controllers\Api\V1\SiteController;
 use App\Http\Controllers\Api\V1\SiteVisitController;
+use App\Http\Controllers\Api\V1\TimesheetController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -214,5 +221,137 @@ Route::prefix('v1')->group(function () {
         // The day as one ordered list. Self-only, and no permission gate —
         // see MovementController.
         Route::get('movement/today', [MovementController::class, 'today']);
+
+        /* ------------------------------------------ Phase 6: leave & co */
+
+        // Same two-gate arrangement as Phase 4 and Phase 5: `permission:` on
+        // the route is the coarse door, the policy is the row, and the
+        // service is the state machine.
+        //
+        // Three routes deliberately carry no `permission:` middleware, and
+        // each for the reason the Phase 5 self-service routes carry none:
+        //
+        //   GET  /holidays                 a day the company declared off is
+        //                                 not a privilege within it — see
+        //                                 HolidayPolicy
+        //   POST /leave/{id}/certificate   filing your own medical note is
+        //   GET  /leave/{id}/certificate   as intrinsic to your own leave as
+        //                                 checking in is to your own day
+        //
+        // Literals are registered before `{...}` bindings, and every binding
+        // is `whereNumber`, so `generate`, `check-in` and friends can never be
+        // read as an id.
+
+        // Leave types — policy configuration (LeaveTypePolicy).
+        Route::get('leave-types', [LeaveTypeController::class, 'index'])
+            ->middleware('permission:leave.view');
+        Route::get('leave-types/{leaveType}', [LeaveTypeController::class, 'show'])
+            ->whereNumber('leaveType')
+            ->middleware('permission:leave.view');
+        Route::post('leave-types', [LeaveTypeController::class, 'store'])
+            ->middleware('permission:leave.manage');
+        Route::put('leave-types/{leaveType}', [LeaveTypeController::class, 'update'])
+            ->whereNumber('leaveType')
+            ->middleware('permission:leave.manage');
+        Route::delete('leave-types/{leaveType}', [LeaveTypeController::class, 'destroy'])
+            ->whereNumber('leaveType')
+            ->middleware('permission:leave.manage');
+
+        // Leave balances — read with leave, write with HR.
+        Route::get('leave-balances', [LeaveBalanceController::class, 'index'])
+            ->middleware('permission:leave.balance.view');
+        Route::get('leave-balances/{leaveBalance}', [LeaveBalanceController::class, 'show'])
+            ->whereNumber('leaveBalance')
+            ->middleware('permission:leave.balance.view');
+        Route::put('leave-balances/{leaveBalance}', [LeaveBalanceController::class, 'update'])
+            ->whereNumber('leaveBalance')
+            ->middleware('permission:leave.balance.manage');
+
+        // Leave requests.
+        Route::get('leave', [LeaveRequestController::class, 'index'])
+            ->middleware('permission:leave.view');
+
+        Route::post('leave/{leaveRequest}/certificate', [LeaveRequestController::class, 'storeCertificate'])
+            ->whereNumber('leaveRequest');
+        Route::get('leave/{leaveRequest}/certificate', [LeaveRequestController::class, 'certificate'])
+            ->whereNumber('leaveRequest');
+
+        Route::post('leave/{leaveRequest}/submit', [LeaveRequestController::class, 'submit'])
+            ->whereNumber('leaveRequest')
+            ->middleware('permission:leave.create');
+        Route::post('leave/{leaveRequest}/approve', [LeaveRequestController::class, 'approve'])
+            ->whereNumber('leaveRequest')
+            ->middleware('permission:leave.approve');
+        Route::post('leave/{leaveRequest}/reject', [LeaveRequestController::class, 'reject'])
+            ->whereNumber('leaveRequest')
+            ->middleware('permission:leave.approve');
+        Route::post('leave/{leaveRequest}/cancel', [LeaveRequestController::class, 'cancel'])
+            ->whereNumber('leaveRequest')
+            ->middleware('permission:leave.create');
+
+        Route::get('leave/{leaveRequest}', [LeaveRequestController::class, 'show'])
+            ->whereNumber('leaveRequest')
+            ->middleware('permission:leave.view');
+        Route::post('leave', [LeaveRequestController::class, 'store'])
+            ->middleware('permission:leave.create');
+        Route::put('leave/{leaveRequest}', [LeaveRequestController::class, 'update'])
+            ->whereNumber('leaveRequest')
+            ->middleware('permission:leave.create');
+
+        // Holidays — readable by every signed-in account.
+        Route::get('holidays', [HolidayController::class, 'index']);
+        Route::get('holidays/{holiday}', [HolidayController::class, 'show'])
+            ->whereNumber('holiday');
+        Route::post('holidays', [HolidayController::class, 'store'])
+            ->middleware('permission:holidays.manage');
+        Route::put('holidays/{holiday}', [HolidayController::class, 'update'])
+            ->whereNumber('holiday')
+            ->middleware('permission:holidays.manage');
+
+        // Approval chains — the configuration of who may say yes to what.
+        Route::get('approval-workflows', [ApprovalWorkflowController::class, 'index'])
+            ->middleware('permission:approvals.view');
+        Route::get('approval-workflows/{approvalWorkflow}', [ApprovalWorkflowController::class, 'show'])
+            ->whereNumber('approvalWorkflow')
+            ->middleware('permission:approvals.view');
+        Route::post('approval-workflows', [ApprovalWorkflowController::class, 'store'])
+            ->middleware('permission:approvals.manage');
+        Route::put('approval-workflows/{approvalWorkflow}', [ApprovalWorkflowController::class, 'update'])
+            ->whereNumber('approvalWorkflow')
+            ->middleware('permission:approvals.manage');
+
+        // Timesheets. `generate` is a literal and is registered first, so it
+        // can never be swallowed by the `{timesheet}` binding below.
+        Route::get('timesheets', [TimesheetController::class, 'index'])
+            ->middleware('permission:timesheets.view');
+        Route::post('timesheets/generate', [TimesheetController::class, 'generate'])
+            ->middleware('permission:timesheets.manage');
+        Route::get('timesheets/{timesheet}', [TimesheetController::class, 'show'])
+            ->whereNumber('timesheet')
+            ->middleware('permission:timesheets.view');
+
+        // Overtime — the same eight verbs the leave routes expose.
+        Route::get('overtime', [OvertimeController::class, 'index'])
+            ->middleware('permission:overtime.view');
+        Route::post('overtime/{overtimeRequest}/submit', [OvertimeController::class, 'submit'])
+            ->whereNumber('overtimeRequest')
+            ->middleware('permission:overtime.create');
+        Route::post('overtime/{overtimeRequest}/approve', [OvertimeController::class, 'approve'])
+            ->whereNumber('overtimeRequest')
+            ->middleware('permission:overtime.approve');
+        Route::post('overtime/{overtimeRequest}/reject', [OvertimeController::class, 'reject'])
+            ->whereNumber('overtimeRequest')
+            ->middleware('permission:overtime.approve');
+        Route::post('overtime/{overtimeRequest}/cancel', [OvertimeController::class, 'cancel'])
+            ->whereNumber('overtimeRequest')
+            ->middleware('permission:overtime.create');
+        Route::get('overtime/{overtimeRequest}', [OvertimeController::class, 'show'])
+            ->whereNumber('overtimeRequest')
+            ->middleware('permission:overtime.view');
+        Route::post('overtime', [OvertimeController::class, 'store'])
+            ->middleware('permission:overtime.create');
+        Route::put('overtime/{overtimeRequest}', [OvertimeController::class, 'update'])
+            ->whereNumber('overtimeRequest')
+            ->middleware('permission:overtime.create');
     });
 });

@@ -71,6 +71,37 @@ class HomeScreen extends ConsumerWidget {
           '/sites',
           'Where the work happens',
         ),
+
+      // Phase 6. `Leave` and `Timesheets` are permission-gated like the
+      // modules above; `Holidays` is not, because the calendar is readable by
+      // every signed-in account and there is no `holidays.view` to be missing.
+      if (scope.canViewLeave)
+        _Module(
+          'Leave',
+          Icons.beach_access_outlined,
+          '/leave',
+          'Apply, approve and track time off',
+        ),
+      if (scope.canViewTimesheets)
+        _Module(
+          'Timesheets',
+          Icons.table_chart_outlined,
+          '/timesheets',
+          'Working time, derived from attendance',
+        ),
+      if (scope.canViewOvertime)
+        _Module(
+          'Overtime',
+          Icons.hourglass_bottom_outlined,
+          '/overtime',
+          'Extra hours and their approvals',
+        ),
+      _Module(
+        'Holidays',
+        Icons.calendar_month_outlined,
+        '/holidays',
+        'Days the organisation has declared off',
+      ),
     ];
 
     return Scaffold(

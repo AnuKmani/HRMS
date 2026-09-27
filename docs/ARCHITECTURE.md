@@ -298,13 +298,72 @@ withheld from Project Manager, Site Engineer, Payroll Admin, Finance,
 Management and Employee, none of whom need to edit anybody's day to do their
 job.
 
+**Implemented in Phase 6 ✅** — seven more policies, the same two-layer split, and
+two rules worth writing down:
+
+| Route group | Gate |
+|---|---|
+| `GET /leave`, `GET /leave/{id}`, `GET /leave-types`, `GET /leave-types/{id}` | `permission:leave.view` **then** policy row scope |
+| `POST /leave`, `PUT /leave/{id}`, `.../submit`, `.../cancel` | `permission:leave.create` **then** policy |
+| `POST /leave/{id}/approve`, `POST /leave/{id}/reject` | `permission:leave.approve` **then** `LeaveRequestPolicy::approve` |
+| `POST`/`GET` `/leave/{id}/certificate` | policy only — no `permission:` middleware |
+| `GET /leave-balances`, `GET /leave-balances/{id}` | `permission:leave.balance.view` |
+| `PUT /leave-balances/{id}` | `permission:leave.balance.manage` |
+| `GET /holidays`, `GET /holidays/{id}` | **policy only** — `HolidayPolicy::viewAny()` is unconditionally `true` |
+| `POST /holidays`, `PUT /holidays/{id}` | `permission:holidays.manage` |
+| `GET /timesheets` (+`{id}`) | `permission:timesheets.view` **then** row scope |
+| `POST /timesheets/generate` | `permission:timesheets.manage` |
+| `GET /overtime` (+`{id}`) | `permission:overtime.view` **then** row scope |
+| `POST /overtime`, `PUT /overtime/{id}`, `.../submit`, `.../cancel` | `permission:overtime.create` |
+| `POST /overtime/{id}/approve`, `.../reject` | `permission:overtime.approve` **then** `OvertimeRequestPolicy::approve` |
+| `GET/POST/PUT /approval-workflows` | `permission:approvals.view` / `approvals.manage` |
+
+**Rule 1 — policy answers "who", service answers "state".**
+
+A policy never mutates anything and never looks at workflow position beyond
+"is this actor allowed to try". Everything about *what a decision does* —
+advancing the chain, releasing the balance, writing `payroll_eligible`,
+converting to LOP — lives in a service. That split is what makes the same
+workflow usable by leave and overtime without a policy growing an `if`
+per subject.
+
+**Rule 2 — a policy class is always named after its model.**
+
+Laravel's `Gate::callPolicyMethod()` *guesses* the policy from the model
+class (`OvertimeRequest` → `OvertimeRequestPolicy`). A class named
+`OvertimePolicy` for the `OvertimeRequest` model is never resolved, and the
+gate **silently denies** every check — no exception, no 500, just an
+unexplained `403`. This happened during Phase 6 and the fix was a rename, so
+the rule is now: `app/Policies/{Model}Policy.php`, always, no shorthand.
+
+**Rule 3 — self-approval is impossible, at the engine, not the route.**
+
+`ApprovalWorkflowService::authorize()` compares the actor against
+`$actor->employee?->id`. Even a Super Admin who also owns the request is
+refused, and the check sits in the one place every transition passes through
+rather than in six controllers that could each forget it.
+
+**Rule 4 — only the current step may act.**
+
+The chain is materialised into `approval_records` at submit. Approve/reject
+finds the single row for this subject in `waiting` status whose approver is
+the actor, updates it, and either advances to the next step or finalises.
+Approving on behalf of a later step, or re-deciding one already decided, is
+`403` — and no self-service route can reach the endpoint without the coarse
+permission too.
+
+Reads are scoped by `Visibility` (`hrms.visibility.attendance` for leave,
+timesheets and overtime — the same three roles that may see beyond their own
+attendance), so a Project Manager's queue contains their reports and nobody
+else's, in both the list query and the single-row check.
+
 #### Roles and permissions
 
 | | |
 |---|---|
 | Roles | 10 — Super Admin, HR Admin, HR Executive, Payroll Admin, Project Manager, Site Engineer, Site Supervisor, Finance, Management, Employee |
-| Permissions | 40, all named `resource.action` (lowercase) |
-| Grants | 168 rows in `role_has_permissions` (Phase 5 added `attendance.view` to `Employee`) |
+| Permissions | **51**, all named `resource.action` (lowercase) |
+| Grants | **236** rows in `role_has_permissions` |
 | Seeders | `RoleSeeder` → `PermissionSeeder` → `RolePermissionSeeder` (order matters) |
 
 Permission catalogue lives in one place — `PermissionSeeder::PERMISSIONS`, grouped by
@@ -316,7 +375,11 @@ employees    employees.view | .create | .update | .delete | .salary.view
 departments  departments.view | .manage
 designations designations.view | .manage
 attendance   attendance.view | .manage
-leave        leave.view | .request | .approve | .manage
+approvals    approvals.view | .manage
+leave        leave.view | .create | .approve | .manage | leave.balance.view | leave.balance.manage
+holidays     holidays.manage
+timesheets   timesheets.view | .manage
+overtime     overtime.view | .create | .approve | .manage
 payroll      payroll.view | .manage
 projects     projects.view | .manage
 sites        sites.view | .manage
@@ -331,11 +394,23 @@ users        users.view | .manage
 audit        audit.view
 ```
 
+There is deliberately **no `holidays.view`**: reading the calendar is a
+courtesy every signed-in account is owed (you cannot plan leave around days
+you are not allowed to see), so `GET /holidays` carries no `permission:`
+middleware at all and `HolidayPolicy::viewAny()` returns `true`. Writing one
+is `holidays.manage`. Likewise there is no `timesheet.approve` — timesheets
+are derived snapshots with nothing to approve (see §5.9).
+
+`leave.request` was **retired** in Phase 6 in favour of `leave.create`,
+joining the `resource.action` shape every other verb follows;
+`PermissionSeeder::RETIRED` deletes it when the seeder re-runs, so an older
+database does not keep a permission nothing references.
+
 **Super Admin** holds `['*']` — every permission, resolved from the catalogue at seed
 time rather than hard-coded, so a newly added permission is granted automatically.
 Every other role is an explicit allow-list: anything absent is **denied**. The mapping
 is `RolePermissionSeeder::MAP`, and `RbacTest` asserts both directions (Super Admin has
-all 40; `Employee` is denied `payroll.manage`, `employees.delete`, `attendance.manage`,
+all 51; `Employee` is denied `payroll.manage`, `employees.delete`, `attendance.manage`,
 `leave.approve`, `audit.view`).
 
 `employees.salary.view` — added in Phase 4 — is the one permission that is *not*
@@ -455,7 +530,12 @@ mobile/lib/
 │   │   ├── list_state.dart             # PagedListController<T>, generation guard
 │   │   ├── form_controls.dart          # StatusField, FormBanner, StatusFilter
 │   │   ├── fields.dart                 # LabeledTextField, DateField
-│   │   └── remote_picker.dart          # debounced, searchable option sheet
+│   │   ├── remote_picker.dart          # debounced, searchable option sheet
+│   │   ├── status_chip.dart            # ← Phase 6, StatusTone for every module
+│   │   ├── no_permission.dart          # ← Phase 6, the gate a list draws
+│   │   └── camera_capture_sheet.dart   # ← Phase 6, shared selfie/certificate flow
+│   ├── data/approval_step.dart         # ← Phase 6, one approval chain step
+│   ├── data/device_camera.dart         # ← Phase 6, front/back lens abstraction
 │   ├── router/app_router.dart          # GoRouter + refreshListenable guard
 │   ├── storage/token_store.dart        # flutter_secure_storage
 │   └── storage/device_identity.dart    # stable per-install device name
@@ -467,9 +547,30 @@ mobile/lib/
 │   ├── designations/
 │   ├── projects/
 │   ├── sites/
-│   └── attendance/                     # ← Phase 5, three-layer (below)
+│   ├── attendance/                     # ← Phase 5, three-layer (below)
+│   ├── leave/                          # ← Phase 6, three-layer
+│   ├── timesheet/                      # ← Phase 6, three-layer
+│   ├── overtime/                       # ← Phase 6, three-layer
+│   └── holidays/                       # ← Phase 6, three-layer
 └── main.dart
 ```
+
+Each of the four Phase 6 features follows the same three layers, and the
+split is load-bearing rather than cosmetic:
+
+```
+features/leave/
+├── domain/      # LeaveRequest, LeaveType, LeaveBalance + LeaveRepository
+│                #   ← no Flutter import, no JSON, no HTTP
+├── data/        # ApiLeaveRepository implements LeaveRepository
+│                #   ← the only place that knows the envelope
+└── presentation/# controller (Riverpod Notifier), list / detail / form screens
+```
+
+The screens never construct a model from JSON and never see an envelope:
+they are handed a `LeaveRepository`. That is what lets the tests substitute
+an in-memory double (see TESTING §5) and assert on behaviour — "a pending
+request shows approve only to an approver" — instead of on parsing.
 
 Five files do not justify four directories, so `auth/` stays flat. The Phase 4
 modules are the first to have local sources of their own, and each takes the
@@ -732,6 +833,51 @@ captured at the moment a person pressed a button. A visit that starts
 inside the boundary cannot be ended from outside it, because each end
 re-runs the geofence against its own reading.
 
+### 5.9 A timesheet is a derived snapshot, never a record someone signs off (Phase 6)
+
+`timesheets` has no `approved_by`, no approval column and no create endpoint,
+because there is nothing to create and nothing to approve: a row is a
+projection of one attendance day, generated by
+`TimesheetService::generate(from, to)` from the working-time maths. Running
+it twice upserts (the unique key is `(employee_id, timesheet_date)`), so the
+button is safe to press again after a correction.
+
+`status` on a timesheet is `open` / `complete` / `incomplete` — a property of
+*the day*, derived from how the hours landed, not a sign-off. Confusing the
+two would invite an approval workflow around a number that can be recomputed,
+and the recomputation would then be the thing that disagreed with the
+approved record.
+
+The `attendance_id` is `nullOnDelete`: if a source day is ever removed the
+snapshot stays as history rather than vanishing, and `attendance_id` being
+nullable is what lets a timesheet exist for a day attendance has not yet
+produced.
+
+### 5.10 The approval chain is frozen at submit (Phase 6)
+
+Editing an approval workflow is a configuration change; it must not reach
+backwards. So `ApprovalWorkflowService::submit()` resolves every step once,
+writes one `approval_records` row per step with the *resolved* approver, and
+never consults the definition again for that subject.
+
+Three things fall out of that:
+
+- **A request already in flight keeps its chain.** Renaming a role or
+  retiring a workflow cannot silently change who is waiting on what.
+- **Unresolvable steps are skipped, not fatal.** If step 2 names a
+  reporting manager the employee does not have, the step is recorded with a
+  remark and passed over — never deleted, so the gap is visible in the
+  record rather than papered over.
+- **History is a query, not a reconstruction.** `approval_records` is the
+  timeline; there is no need to replay definition changes to explain a past
+  decision.
+
+There are deliberately two vocabularies:
+`approval_workflows.subject_type` is the *subject* (`leave`, `overtime`) and
+`approval_records.subject_type` is the *record* (`leave_request`,
+`overtime_request`). Conflating them would make "which definition" and
+"which row" answerable by the same string and therefore neither.
+
 ---
 
 ## 6. Deployment Topology (cloud-ready)
@@ -779,4 +925,5 @@ The following are explicitly **out of scope** unless later requested:
 | Phase 3 | Authentication — login / logout / sessions / change-password / forgot-password (501 until a mailer), named rate limiters, the success-and-failure envelope in `ApiResponse`, Flutter auth + GoRouter guard |
 | Phase 4 | First vertical slice — departments, designations, employees, projects, sites and employee-site-assignments (Form Requests, Resources, services, transactions, six policies, `employees.salary.view`); Flutter `data/domain/presentation` features, permission-gated home, 13 screens |
 | Phase 5 | GPS attendance and site movement — `attendances` + `site_visits` (2 migrations), `GeofenceService`, `WorkingTimeCalculator`, `AttendanceStatusCalculator`, `AttendanceService`, 11 routes, `Attendance`/`SiteVisit` policies, private selfie storage, `attendance` rate limiter, movement timeline; Flutter `features/attendance/` with location + camera permission flows, advisory geofence, offline queue with `client_event_id`, 176 tests |
+| Phase 6 | Leave, timesheets and overtime — 9 migrations (34 tables total), configurable leave types, transactional balances, `LeaveDayCalculator`, holiday calendar, materialised approval workflow engine, sick-certificate upload + hourly deadline job with LOP conversion, derived timesheets, overtime with `payroll_eligible`; 7 policies (with the `<Model>Policy>` naming rule), 11 permissions (51 total / 236 grants), 37 routes; Flutter `features/{leave,timesheet,overtime,holidays}` + shared `StatusChip` / `CameraCaptureSheet` / `NoPermission`, 215 tests |
 | Post-Phase 5 hardening | Server-side selfie sanitisation — `SelfieSanitizer` (GD decode → flatten → JPEG re-encode, EXIF/GPS stripped, original never stored) + `App\Rules\ImageContent` (header decode check + pixel budget); closes §4.3's "EXIF is stripped by the app, not by the server" gap; no new dependency; `AttendanceSelfieSanitizationTest` (13), backend 321 tests |

@@ -126,6 +126,28 @@ class Employee extends Model
             ->latestOfMany('start_date');
     }
 
+    /* ---------------------------------------------------- Phase 6: leave */
+
+    public function leaveRequests(): HasMany
+    {
+        return $this->hasMany(LeaveRequest::class);
+    }
+
+    public function leaveBalances(): HasMany
+    {
+        return $this->hasMany(LeaveBalance::class);
+    }
+
+    public function timesheets(): HasMany
+    {
+        return $this->hasMany(Timesheet::class);
+    }
+
+    public function overtimeRequests(): HasMany
+    {
+        return $this->hasMany(OvertimeRequest::class);
+    }
+
     /* ---------------------------------------------------------- accessors */
 
     public function getFullNameAttribute(): string
