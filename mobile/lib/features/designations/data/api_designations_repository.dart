@@ -27,10 +27,7 @@ class ApiDesignationsRepository implements DesignationsRepository {
       query: <String, Object?>{...query, 'page': page},
     );
 
-    return PageResult<Designation>.fromEnvelope(
-      envelope,
-      Designation.fromJson,
-    );
+    return PageResult<Designation>.fromEnvelope(envelope, Designation.fromJson);
   }
 
   @override

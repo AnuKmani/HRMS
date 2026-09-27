@@ -63,7 +63,9 @@ class _EmployeesList extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final statusFilter = ref.watch(
-      employeesListProvider.select((s) => s.query['employment_status'] as String?),
+      employeesListProvider.select(
+        (s) => s.query['employment_status'] as String?,
+      ),
     );
     final canView = ref.watch(
       permissionScopeProvider.select((scope) => scope.canViewEmployees),
@@ -77,8 +79,9 @@ class _EmployeesList extends ConsumerWidget {
       filter: StatusFilter(
         value: statusFilter,
         options: _employeeStatuses,
-        onChanged: (value) =>
-            ref.read(employeesListProvider.notifier).setFilter('employment_status', value),
+        onChanged: (value) => ref
+            .read(employeesListProvider.notifier)
+            .setFilter('employment_status', value),
       ),
       itemBuilder: (context, employee, index) => ListTile(
         key: ValueKey('employee-${employee.id}'),

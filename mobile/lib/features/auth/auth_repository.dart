@@ -65,7 +65,9 @@ class ApiAuthRepository implements AuthRepository {
 
     return LoginResult(
       token: token,
-      tokenType: body['token_type'] is String ? body['token_type']! as String : 'Bearer',
+      tokenType: body['token_type'] is String
+          ? body['token_type']! as String
+          : 'Bearer',
       expiresAt: expiresAt is String ? DateTime.tryParse(expiresAt) : null,
       user: AuthUser.fromJson(user),
     );

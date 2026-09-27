@@ -38,16 +38,17 @@ void main() {
       listen: false,
     );
 
-    await container
-        .read(authControllerProvider.notifier)
-        .restoreSession();
+    await container.read(authControllerProvider.notifier).restoreSession();
     await tester.pump();
 
     return container;
   }
 
-  Future<void> type(WidgetTester tester,
-      {required String email, required String password}) async {
+  Future<void> type(
+    WidgetTester tester, {
+    required String email,
+    required String password,
+  }) async {
     await tester.enterText(find.byType(TextFormField).at(0), email);
     await tester.enterText(find.byType(TextFormField).at(1), password);
   }
@@ -58,8 +59,9 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('an empty form says what is missing and sends nothing',
-      (tester) async {
+  testWidgets('an empty form says what is missing and sends nothing', (
+    tester,
+  ) async {
     await pumpLogin(tester);
 
     await tapSignIn(tester);
@@ -69,8 +71,7 @@ void main() {
     expect(repository.loginCalls, 0);
   });
 
-  testWidgets('the typed credentials are what reaches the API',
-      (tester) async {
+  testWidgets('the typed credentials are what reaches the API', (tester) async {
     final container = await pumpLogin(tester);
 
     await type(
@@ -92,8 +93,9 @@ void main() {
     expect(state.user?.name, 'Ada Lovelace');
   });
 
-  testWidgets('a rejected password is one banner, with no field marked',
-      (tester) async {
+  testWidgets('a rejected password is one banner, with no field marked', (
+    tester,
+  ) async {
     repository.loginError = invalidCredentials;
     await pumpLogin(tester);
 

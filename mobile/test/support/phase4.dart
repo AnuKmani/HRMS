@@ -214,26 +214,50 @@ class Scripted<T> {
 
 class ScriptedEmployees extends Scripted<Employee>
     implements EmployeesRepository {
-  ScriptedEmployees({super.items, super.pageSize, required super.idOf, super.fallback});
+  ScriptedEmployees({
+    super.items,
+    super.pageSize,
+    required super.idOf,
+    super.fallback,
+  });
 }
 
 class ScriptedDepartments extends Scripted<Department>
     implements DepartmentsRepository {
-  ScriptedDepartments({super.items, super.pageSize, required super.idOf, super.fallback});
+  ScriptedDepartments({
+    super.items,
+    super.pageSize,
+    required super.idOf,
+    super.fallback,
+  });
 }
 
 class ScriptedDesignations extends Scripted<Designation>
     implements DesignationsRepository {
-  ScriptedDesignations({super.items, super.pageSize, required super.idOf, super.fallback});
+  ScriptedDesignations({
+    super.items,
+    super.pageSize,
+    required super.idOf,
+    super.fallback,
+  });
 }
 
-class ScriptedProjects extends Scripted<Project>
-    implements ProjectsRepository {
-  ScriptedProjects({super.items, super.pageSize, required super.idOf, super.fallback});
+class ScriptedProjects extends Scripted<Project> implements ProjectsRepository {
+  ScriptedProjects({
+    super.items,
+    super.pageSize,
+    required super.idOf,
+    super.fallback,
+  });
 }
 
 class ScriptedSites extends Scripted<Site> implements SitesRepository {
-  ScriptedSites({super.items, super.pageSize, required super.idOf, super.fallback});
+  ScriptedSites({
+    super.items,
+    super.pageSize,
+    required super.idOf,
+    super.fallback,
+  });
 }
 
 /// Wraps a screen in the providers Phase 4 needs: a permission scope with
@@ -253,23 +277,20 @@ Widget scopedPhase4({
   ScriptedDesignations? designations,
   ScriptedProjects? projects,
   ScriptedSites? sites,
-}) =>
-    ProviderScope(
-      overrides: [
-        permissionScopeProvider.overrideWithValue(
-          PermissionScope(
-            buildUser(permissions: permissions, roles: roles),
-          ),
-        ),
-        if (employees != null)
-          employeesRepositoryProvider.overrideWithValue(employees),
-        if (departments != null)
-          departmentsRepositoryProvider.overrideWithValue(departments),
-        if (designations != null)
-          designationsRepositoryProvider.overrideWithValue(designations),
-        if (projects != null)
-          projectsRepositoryProvider.overrideWithValue(projects),
-        if (sites != null) sitesRepositoryProvider.overrideWithValue(sites),
-      ],
-      child: child,
-    );
+}) => ProviderScope(
+  overrides: [
+    permissionScopeProvider.overrideWithValue(
+      PermissionScope(buildUser(permissions: permissions, roles: roles)),
+    ),
+    if (employees != null)
+      employeesRepositoryProvider.overrideWithValue(employees),
+    if (departments != null)
+      departmentsRepositoryProvider.overrideWithValue(departments),
+    if (designations != null)
+      designationsRepositoryProvider.overrideWithValue(designations),
+    if (projects != null)
+      projectsRepositoryProvider.overrideWithValue(projects),
+    if (sites != null) sitesRepositoryProvider.overrideWithValue(sites),
+  ],
+  child: child,
+);

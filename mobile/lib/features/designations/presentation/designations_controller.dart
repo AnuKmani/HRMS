@@ -7,14 +7,14 @@ import '../domain/designation.dart';
 
 final designationsListProvider =
     NotifierProvider<DesignationsListController, ListState<Designation>>(
-  DesignationsListController.new,
-);
+      DesignationsListController.new,
+    );
 
 /// Designation ids with their titles, for the employee form.
 final designationsPickerProvider =
     NotifierProvider<DesignationsPickerController, ListState<Designation>>(
-  DesignationsPickerController.new,
-);
+      DesignationsPickerController.new,
+    );
 
 class DesignationsListController extends PagedListController<Designation> {
   @override
@@ -22,13 +22,13 @@ class DesignationsListController extends PagedListController<Designation> {
     required int page,
     required Map<String, Object?> query,
   }) =>
-      ref
-          .watch(designationsRepositoryProvider)
-          .list(page: page, query: query);
+      ref.watch(designationsRepositoryProvider).list(page: page, query: query);
 }
 
 class DesignationsPickerController extends DesignationsListController {
   @override
-  Map<String, Object?> get baseQuery =>
-      const <String, Object?>{'per_page': 100, 'sort': 'name'};
+  Map<String, Object?> get baseQuery => const <String, Object?>{
+    'per_page': 100,
+    'sort': 'name',
+  };
 }

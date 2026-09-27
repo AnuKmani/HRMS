@@ -8,8 +8,8 @@ import '../domain/department.dart';
 /// The departments list screen.
 final departmentsListProvider =
     NotifierProvider<DepartmentsListController, ListState<Department>>(
-  DepartmentsListController.new,
-);
+      DepartmentsListController.new,
+    );
 
 /// The departments a form dropdown needs — the same fetch, asking for a
 /// page big enough to fill a picker rather than a page a screen can scroll.
@@ -18,22 +18,21 @@ final departmentsListProvider =
 /// rewrite the filter the list screen believes it is showing.
 final departmentsPickerProvider =
     NotifierProvider<DepartmentsPickerController, ListState<Department>>(
-  DepartmentsPickerController.new,
-);
+      DepartmentsPickerController.new,
+    );
 
 class DepartmentsListController extends PagedListController<Department> {
   @override
   Future<PageResult<Department>> fetch({
     required int page,
     required Map<String, Object?> query,
-  }) =>
-      ref
-          .watch(departmentsRepositoryProvider)
-          .list(page: page, query: query);
+  }) => ref.watch(departmentsRepositoryProvider).list(page: page, query: query);
 }
 
 class DepartmentsPickerController extends DepartmentsListController {
   @override
-  Map<String, Object?> get baseQuery =>
-      const <String, Object?>{'per_page': 100, 'sort': 'name'};
+  Map<String, Object?> get baseQuery => const <String, Object?>{
+    'per_page': 100,
+    'sort': 'name',
+  };
 }

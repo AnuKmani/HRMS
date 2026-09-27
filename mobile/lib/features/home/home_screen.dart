@@ -26,6 +26,16 @@ class HomeScreen extends ConsumerWidget {
     final theme = Theme.of(context);
 
     final modules = <_Module>[
+      // First, and not gated on a permission: recording your own day is not
+      // something a role grants. Every account with an employee record gets
+      // this door — the API behind it enforces exactly the same rule.
+      if (user?.employee != null)
+        _Module(
+          'Attendance',
+          Icons.schedule_outlined,
+          '/attendance',
+          'Check in, visit a site, check out',
+        ),
       if (scope.canViewEmployees)
         _Module(
           'Employees',
@@ -70,8 +80,7 @@ class HomeScreen extends ConsumerWidget {
           IconButton(
             tooltip: 'Sign out',
             icon: const Icon(Icons.logout),
-            onPressed: () =>
-                ref.read(authControllerProvider.notifier).logout(),
+            onPressed: () => ref.read(authControllerProvider.notifier).logout(),
           ),
         ],
       ),
@@ -84,10 +93,7 @@ class HomeScreen extends ConsumerWidget {
           ),
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
-            child: Text(
-              user?.name ?? '',
-              style: theme.textTheme.headlineSmall,
-            ),
+            child: Text(user?.name ?? '', style: theme.textTheme.headlineSmall),
           ),
           if (subtitle != null)
             Padding(

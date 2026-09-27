@@ -55,8 +55,9 @@ void main() {
   }
 
   group('session restore', () {
-    testWidgets('lands on the sign-in form when nothing is stored',
-        (tester) async {
+    testWidgets('lands on the sign-in form when nothing is stored', (
+      tester,
+    ) async {
       await pumpApp(tester);
 
       expect(find.byType(SplashScreen), findsNothing);
@@ -65,8 +66,9 @@ void main() {
       expect(repository.meCalls, 0, reason: 'no token, no request');
     });
 
-    testWidgets('goes straight to the home screen with a stored token',
-        (tester) async {
+    testWidgets('goes straight to the home screen with a stored token', (
+      tester,
+    ) async {
       tokenStore.value = 'stored-token';
 
       await pumpApp(tester);
@@ -91,12 +93,14 @@ void main() {
       expect(tokenStore.value, isNull, reason: 'no dead token kept around');
     });
 
-    testWidgets('keeps a token the server could not be asked about',
-        (tester) async {
+    testWidgets('keeps a token the server could not be asked about', (
+      tester,
+    ) async {
       tokenStore.value = 'good-token';
       repository.meError = const ApiException(
         statusCode: 0,
-        message: 'Could not reach the server. Check your connection and try again.',
+        message:
+            'Could not reach the server. Check your connection and try again.',
       );
 
       await pumpApp(tester);
@@ -108,8 +112,9 @@ void main() {
   });
 
   group('the guard', () {
-    testWidgets('sends a signed-in user away from the sign-in form',
-        (tester) async {
+    testWidgets('sends a signed-in user away from the sign-in form', (
+      tester,
+    ) async {
       tokenStore.value = 'stored-token';
 
       await pumpApp(tester);
@@ -145,7 +150,10 @@ void main() {
     testWidgets('a submitted form lands on the home screen', (tester) async {
       await pumpApp(tester);
 
-      await tester.enterText(find.byType(TextFormField).at(0), 'grace@example.com');
+      await tester.enterText(
+        find.byType(TextFormField).at(0),
+        'grace@example.com',
+      );
       await tester.enterText(find.byType(TextFormField).at(1), 'secret');
       await tester.tap(find.text('Sign in'));
       await advance(tester);
@@ -155,8 +163,9 @@ void main() {
       expect(tokenStore.value, 'token-from-server');
     });
 
-    testWidgets('signing out from the home screen returns to the form',
-        (tester) async {
+    testWidgets('signing out from the home screen returns to the form', (
+      tester,
+    ) async {
       tokenStore.value = 'stored-token';
       await pumpApp(tester);
       expect(find.byType(HomeScreen), findsOneWidget);
@@ -169,8 +178,9 @@ void main() {
       expect(repository.logoutCalls, 1);
     });
 
-    testWidgets('a token revoked elsewhere returns the user to the form',
-        (tester) async {
+    testWidgets('a token revoked elsewhere returns the user to the form', (
+      tester,
+    ) async {
       tokenStore.value = 'stored-token';
       final container = await pumpApp(tester);
       expect(find.byType(HomeScreen), findsOneWidget);

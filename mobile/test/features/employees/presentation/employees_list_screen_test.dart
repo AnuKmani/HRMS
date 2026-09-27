@@ -10,14 +10,14 @@ import '../../../support/phase4.dart';
 /// Three different people, so an assertion on "one row" cannot be satisfied
 /// by three identical ones hiding a duplicated result.
 Employee employee({required int id, String? name}) => Employee(
-      id: id,
-      employeeCode: 'EMP-$id',
-      firstName: 'Person',
-      lastName: '$id',
-      fullName: name ?? 'Person $id',
-      employmentType: 'permanent',
-      employmentStatus: 'active',
-    );
+  id: id,
+  employeeCode: 'EMP-$id',
+  firstName: 'Person',
+  lastName: '$id',
+  fullName: name ?? 'Person $id',
+  employmentType: 'permanent',
+  employmentStatus: 'active',
+);
 
 void main() {
   late ScriptedEmployees script;
@@ -40,8 +40,9 @@ void main() {
   }
 
   group('the four states a list can be in', () {
-    testWidgets('draws a spinner while the first page is in flight',
-        (tester) async {
+    testWidgets('draws a spinner while the first page is in flight', (
+      tester,
+    ) async {
       script.holdList = Completer<void>();
 
       await pumpList(tester);
@@ -61,8 +62,9 @@ void main() {
       expect(find.text('Person 1'), findsOneWidget);
     });
 
-    testWidgets('says the list is empty rather than drawing nothing',
-        (tester) async {
+    testWidgets('says the list is empty rather than drawing nothing', (
+      tester,
+    ) async {
       script.items.clear();
 
       await pumpList(tester);
@@ -73,8 +75,9 @@ void main() {
       expect(find.byKey(const ValueKey('list-error')), findsNothing);
     });
 
-    testWidgets('shows the failure with a way out, and retries',
-        (tester) async {
+    testWidgets('shows the failure with a way out, and retries', (
+      tester,
+    ) async {
       script.listError = unreachable;
 
       await pumpList(tester);
@@ -95,8 +98,9 @@ void main() {
       expect(script.listCalls, 2);
     });
 
-    testWidgets('keeps the rows on screen when a refresh fails',
-        (tester) async {
+    testWidgets('keeps the rows on screen when a refresh fails', (
+      tester,
+    ) async {
       await pumpList(tester);
       await advance(tester);
 
@@ -128,8 +132,9 @@ void main() {
   });
 
   group('filters', () {
-    testWidgets('a search is sent as `search` and kept out of the list keys',
-        (tester) async {
+    testWidgets('a search is sent as `search` and kept out of the list keys', (
+      tester,
+    ) async {
       await pumpList(tester);
       await advance(tester);
 
@@ -147,8 +152,9 @@ void main() {
       expect(script.lastQuery!['search'], 'ravi');
     });
 
-    testWidgets('the status filter sends only the status chosen',
-        (tester) async {
+    testWidgets('the status filter sends only the status chosen', (
+      tester,
+    ) async {
       await pumpList(tester);
       await advance(tester);
 
@@ -203,8 +209,9 @@ void main() {
     expect(find.byKey(const ValueKey('list-load-more')), findsNothing);
   });
 
-  testWidgets('a session without employees.view is never asked for them',
-      (tester) async {
+  testWidgets('a session without employees.view is never asked for them', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       scopedPhase4(
         permissions: const ['projects.view'],
@@ -220,8 +227,9 @@ void main() {
     expect(find.byKey(const ValueKey('add-employee')), findsNothing);
   });
 
-  testWidgets('the create button appears only for employees.create',
-      (tester) async {
+  testWidgets('the create button appears only for employees.create', (
+    tester,
+  ) async {
     await pumpList(tester);
     await advance(tester);
 

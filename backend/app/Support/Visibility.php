@@ -2,10 +2,12 @@
 
 namespace App\Support;
 
+use App\Models\Attendance;
 use App\Models\Employee;
 use App\Models\EmployeeSiteAssignment;
 use App\Models\Project;
 use App\Models\Site;
+use App\Models\SiteVisit;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -92,21 +94,28 @@ final class Visibility
                 $q->orWhereIn('employees.primary_site_id', $managedSites);
             }
 
-            $q->orWhereExists(function ($sub) use ($managedProjects, $managedSites) {
-                $sub->selectRaw('1')
-                    ->from('employee_site_assignments')
-                    ->whereColumn('employee_site_assignments.employee_id', 'employees.id');
+            // Only when there is something to manage. With an empty scope the
+            // inner `where()` compiles to *no* predicate at all, so the
+            // EXISTS degenerates to "this employee has any assignment row" —
+            // a scope that silently widens to the whole directory instead of
+            // collapsing to the user's own records.
+            if ($managedProjects->isNotEmpty() || $managedSites->isNotEmpty()) {
+                $q->orWhereExists(function ($sub) use ($managedProjects, $managedSites) {
+                    $sub->selectRaw('1')
+                        ->from('employee_site_assignments')
+                        ->whereColumn('employee_site_assignments.employee_id', 'employees.id');
 
-                $sub->where(function ($inner) use ($managedProjects, $managedSites) {
-                    if ($managedProjects->isNotEmpty()) {
-                        $inner->whereIn('employee_site_assignments.project_id', $managedProjects);
-                    }
+                    $sub->where(function ($inner) use ($managedProjects, $managedSites) {
+                        if ($managedProjects->isNotEmpty()) {
+                            $inner->whereIn('employee_site_assignments.project_id', $managedProjects);
+                        }
 
-                    if ($managedSites->isNotEmpty()) {
-                        $inner->orWhereIn('employee_site_assignments.site_id', $managedSites);
-                    }
+                        if ($managedSites->isNotEmpty()) {
+                            $inner->orWhereIn('employee_site_assignments.site_id', $managedSites);
+                        }
+                    });
                 });
-            });
+            }
         });
     }
 
@@ -290,6 +299,154 @@ final class Visibility
 
         return self::scopedSiteIds($user)->contains($assignment->site_id)
             || self::scopedProjectIds($user)->contains($assignment->project_id);
+    }
+
+    /* ---------------------------------------------------------- attendance */
+
+    /**
+     * Is this user's attendance access narrowed to the projects/sites they
+     * run?
+     */
+    public static function attendanceIsScopedFor(User $user): bool
+    {
+        return $user->hasAnyRole((array) config('hrms.visibility.attendance', []));
+    }
+
+    /**
+     * May this user read somebody *else's* attendance?
+     *
+     * The one place the answer is decided, so AttendancePolicy and the
+     * attendance queries cannot drift apart — a policy that said no while
+     * the index said yes would be no boundary at all.
+     *
+     * Fails CLOSED, unlike the module visibility rules above, and for a
+     * different reason. Those answer "which rows of a module may this role
+     * open?" for roles that already hold the module's permission; this one
+     * also decides whether an ordinary employee — who holds nothing but
+     * `attendance.view` for their own records — may see the workforce's.
+     * Falling back to "everything" there would publish every check-in in the
+     * company to every phone in it.
+     *
+     * Three ways in, and no fourth:
+     *   - a role listed in config('hrms.visibility.attendance') — scoped;
+     *   - `attendance.manage`, the explicit "you run attendance" grant;
+     *   - `employees.view`, i.e. already trusted with the workforce itself —
+     *     scoped the same way the employee directory is.
+     */
+    public static function mayViewOthersAttendance(User $user): bool
+    {
+        if (! $user->can('attendance.view')) {
+            return false;
+        }
+
+        if (self::attendanceIsScopedFor($user)) {
+            return true;
+        }
+
+        return $user->can('attendance.manage') || $user->can('employees.view');
+    }
+
+    /**
+     * Restrict an attendance (or site visit) query to what this user may see.
+     *
+     * @param  Builder<Attendance>|Builder<SiteVisit>  $query
+     * @return Builder<Attendance>|Builder<SiteVisit>
+     */
+    public static function attendanceFor(Builder $query, User $user)
+    {
+        $table = $query->getModel()->getTable();
+
+        if (! self::mayViewOthersAttendance($user)) {
+            // Fails closed: no employee record means no rows at all, not all
+            // of them. `0` rather than `whereRaw('1 = 0')` keeps the query
+            // indexable and reads as what it means.
+            return $query->where($table.'.employee_id', $user->employee?->id ?? 0);
+        }
+
+        if (! self::attendanceIsScopedFor($user)) {
+            return $query;
+        }
+
+        $own = $user->employee?->id;
+        $projects = self::scopedProjectIds($user);
+        $sites = self::scopedSiteIds($user);
+
+        if ($own === null && $projects->isEmpty() && $sites->isEmpty()) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->where(function ($q) use ($table, $own, $projects, $sites) {
+            if ($own !== null) {
+                $q->where($table.'.employee_id', $own);
+            }
+
+            if ($projects->isNotEmpty()) {
+                $q->orWhereIn($table.'.project_id', $projects);
+            }
+
+            if ($sites->isNotEmpty()) {
+                $q->orWhereIn($table.'.site_id', $sites);
+            }
+
+            // A person on their managed workforce who checked in somewhere
+            // else today — the row's own site is out of scope, the person is
+            // not. Same rule employeesFor() applies to the directory.
+            //
+            // Guarded for the same reason: with an empty scope the inner
+            // `where()` compiles to no predicate, the EXISTS becomes "this
+            // employee exists at all", and every row matches. A listed
+            // overseer who manages nothing must read their own records and
+            // nothing else — not everyone's.
+            if ($projects->isNotEmpty() || $sites->isNotEmpty()) {
+                $q->orWhereExists(function ($sub) use ($table, $projects, $sites) {
+                    $sub->selectRaw('1')
+                        ->from('employees')
+                        ->whereColumn('employees.id', $table.'.employee_id')
+                        ->where(function ($inner) use ($projects, $sites) {
+                            if ($projects->isNotEmpty()) {
+                                $inner->whereIn('employees.primary_project_id', $projects);
+                            }
+
+                            if ($sites->isNotEmpty()) {
+                                $inner->orWhereIn('employees.primary_site_id', $sites);
+                            }
+                        });
+                });
+            }
+        });
+    }
+
+    /**
+     * Does this one attendance/site-visit row fall inside what the user may
+     * see? Same rule as attendanceFor(), evaluated against a row.
+     */
+    public static function attendanceIsVisible(User $user, Attendance|SiteVisit $record): bool
+    {
+        if ($user->employee?->id === $record->employee_id) {
+            return true;
+        }
+
+        if (! self::mayViewOthersAttendance($user)) {
+            return false;
+        }
+
+        if (! self::attendanceIsScopedFor($user)) {
+            return true;
+        }
+
+        if (self::scopedProjectIds($user)->contains($record->project_id)
+            || self::scopedSiteIds($user)->contains($record->site_id)) {
+            return true;
+        }
+
+        $employee = Employee::query()->find($record->employee_id);
+
+        if ($employee === null) {
+            return false;
+        }
+
+        return self::scopedProjectIds($user)->contains($employee->primary_project_id)
+            || self::scopedSiteIds($user)->contains($employee->primary_site_id);
     }
 
     /* ------------------------------------------------------------ helpers */

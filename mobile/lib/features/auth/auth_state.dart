@@ -42,10 +42,8 @@ class AuthState {
   factory AuthState.restoring() =>
       const AuthState(status: AuthStatus.restoring);
 
-  factory AuthState.signedOut({String message = ''}) => AuthState(
-        status: AuthStatus.unauthenticated,
-        message: message,
-      );
+  factory AuthState.signedOut({String message = ''}) =>
+      AuthState(status: AuthStatus.unauthenticated, message: message);
 
   final AuthStatus status;
 

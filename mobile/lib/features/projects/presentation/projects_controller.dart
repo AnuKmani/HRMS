@@ -7,26 +7,27 @@ import '../domain/project.dart';
 
 final projectsListProvider =
     NotifierProvider<ProjectsListController, ListState<Project>>(
-  ProjectsListController.new,
-);
+      ProjectsListController.new,
+    );
 
 /// Project names for the site form and the employee form.
 final projectsPickerProvider =
     NotifierProvider<ProjectsPickerController, ListState<Project>>(
-  ProjectsPickerController.new,
-);
+      ProjectsPickerController.new,
+    );
 
 class ProjectsListController extends PagedListController<Project> {
   @override
   Future<PageResult<Project>> fetch({
     required int page,
     required Map<String, Object?> query,
-  }) =>
-      ref.watch(projectsRepositoryProvider).list(page: page, query: query);
+  }) => ref.watch(projectsRepositoryProvider).list(page: page, query: query);
 }
 
 class ProjectsPickerController extends ProjectsListController {
   @override
-  Map<String, Object?> get baseQuery =>
-      const <String, Object?>{'per_page': 100, 'sort': 'name'};
+  Map<String, Object?> get baseQuery => const <String, Object?>{
+    'per_page': 100,
+    'sort': 'name',
+  };
 }

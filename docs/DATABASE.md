@@ -1,13 +1,15 @@
 # Database Design
 
-> **Status:** Phase 4 — core schema plus the auth addition, and the first slice
-> **using** it. Laravel's base tables plus 10 Phase 2 migrations and the Phase 3
-> `users.status` column now exist: `settings`,
-> `departments`, `designations`, `shifts`, `projects`, `employees`, `sites`,
-> `employee_site_assignments` and the `spatie/laravel-permission` RBAC tables.
-> Tables for later phases (`attendances`, `leave_requests`, `payrolls`, …)
-> are **design only** and have not been created. `hrms_testing` mirrors this
-> schema for the test suite.
+> **Status:** Phase 5 — core schema, the auth addition, the first slice
+> **using** it, and now GPS attendance and site movement. Laravel's base
+> tables plus 10 Phase 2 migrations, the Phase 3 `users.status` column and
+> the two Phase 5 migrations all exist: `settings`, `departments`,
+> `designations`, `shifts`, `projects`, `employees`, `sites`,
+> `employee_site_assignments`, **`attendances`**, **`site_visits`** and the
+> `spatie/laravel-permission` RBAC tables. Tables for later phases
+> (`leave_requests`, `payrolls`, `site_activity_reports`, …) are **design
+> only** and have not been created. `hrms_testing` mirrors this schema for
+> the test suite.
 
 **DBMS:** MariaDB 10.4.28 (XAMPP)
 **Charset:** `utf8mb4` / collation `utf8mb4_unicode_ci`
@@ -190,48 +192,103 @@ than copying hours into its own columns — configuration is referenced, not dup
 
 ### 2.4 Attendance & Movement
 
-| Table | Purpose |
-|---|---|
-| `attendances` | **One row per employee per work day** — check-in/out, sites, GPS, accuracy, distance, selfie, status, source (online/offline), device info, `client_uuid` (idempotency key) |
-| `site_visits` | Movement between sites: start/end time, start/end GPS, purpose, remarks, status |
-| `site_activity_reports` | Work performed, progress %, materials, manpower, equipment, issues, safety |
-| `site_report_photos` | Multiple photos per report |
-| `daily_site_reports` | Supervisor's daily report (workforce, planned/completed, delays) |
+| Table | Purpose | Status |
+|---|---|---|
+| `attendances` | **One row per employee per work day** — check-in/out, GPS, accuracy, distance, selfie, shift, scheduled window, minutes, status, source, idempotency keys | ✅ Phase 5 |
+| `site_visits` | A bounded two-point episode at another site: start/end time, start/end GPS, purpose, remarks, status | ✅ Phase 5 |
+| `site_activity_reports` | Work performed, progress %, materials, manpower, equipment, issues, safety | ⬜ Later |
+| `site_report_photos` | Multiple photos per report | ⬜ Later |
+| `daily_site_reports` | Supervisor's daily report (workforce, planned/completed, delays) | ⬜ Later |
 
-#### `attendances` shape
+#### `attendances` shape — as built
 
 ```
 attendances
   id
-  employee_id            FK
-  work_date              DATE
-  check_in_at            DATETIME
-  check_in_site_id       FK → sites
-  check_in_project_id    FK → projects
-  check_in_lat, check_in_lng
-  check_in_accuracy      DECIMAL  (GPS accuracy in metres)
-  check_in_distance      DECIMAL  (metres from site centre — server computed)
-  check_in_selfie_path   VARCHAR  (private storage)
-  check_out_at           DATETIME, nullable
-  check_out_site_id      FK, nullable      ← may differ from check-in site
-  check_out_lat, check_out_lng, check_out_accuracy, check_out_distance
-  check_out_selfie_path  VARCHAR, nullable
-  status                 PRESENT / LATE / ABSENT / ON_LEAVE / LOP / OVERRIDE / MISSING_CHECKOUT
-  source                 ONLINE / OFFLINE_SYNC / HR_OVERRIDE
-  client_uuid            CHAR(36) UNIQUE   ← duplicate prevention
-  device_info            JSON, nullable
-  overridden_by          FK users, nullable
-  override_reason        TEXT, nullable
-  UNIQUE (employee_id, work_date)
+  employee_id             FK → employees        RESTRICT
+  project_id              FK → projects         RESTRICT
+  site_id                 FK → sites            RESTRICT   ← one site per day
+  attendance_date         DATE
+  check_in_at             DATETIME, NOT NULL
+  check_in_latitude       DECIMAL(10,7)
+  check_in_longitude      DECIMAL(10,7)
+  check_in_accuracy       DECIMAL(8,2)   metres, as reported by the device
+  check_in_distance       DECIMAL(10,2)  metres from site centre — SERVER computed
+  check_in_selfie_path    VARCHAR(500), private disk, never a URL
+  check_out_at            DATETIME, nullable
+  check_out_latitude      DECIMAL(10,7), nullable
+  check_out_longitude     DECIMAL(10,7), nullable
+  check_out_accuracy      DECIMAL(8,2),  nullable
+  check_out_distance      DECIMAL(10,2), nullable
+  shift_id                FK → shifts, nullable
+  scheduled_start_at      DATETIME, nullable   ← resolved at check-in
+  scheduled_end_at        DATETIME, nullable
+  working_minutes         INT  elapsed minus scheduled break, floored at 0
+  break_minutes           INT  the configured scheduled break
+  overtime_minutes        INT  working − minimum − threshold, floored at 0
+  late_minutes            INT  raw arrival gap; grace only decides isLate
+  early_departure_minutes INT  before scheduled end, floored at 0
+  status                  VARCHAR(30)  present | late | incomplete |
+                                        missing_checkout | manually_adjusted
+  source                  VARCHAR(20)  online | offline | manual
+  device_reference        VARCHAR(100), nullable
+  notes                   VARCHAR(500), nullable
+  client_event_id         UUID, UNIQUE   ← check-in idempotency
+  check_out_client_event_id UUID, UNIQUE ← check-out idempotency
+  created_at / updated_at
+  UNIQUE (employee_id, attendance_date)   att_employee_date_idx
+  INDEX (attendance_date, status), (site_id, attendance_date), (check_in_at)
 ```
 
-**`UNIQUE (employee_id, work_date)`** is the primary defence against duplicate
-attendance. **`client_uuid` UNIQUE** is the defence against duplicate *offline sync*.
+**`UNIQUE (employee_id, attendance_date)`** is the primary defence against
+duplicate attendance; **`client_event_id` UNIQUE** is the defence against a
+replayed offline event. Both are checked by the database, inside the same
+transaction that writes the row — not by a `whereExists` anybody could
+forget.
 
-**Why attendance_locations is not a separate table (for now):** every GPS capture is
-already stored on its own row in `attendances` (check-in and check-out columns) and in
-`site_visits`. A third location table would duplicate that data. It will be introduced
-only if a requirement for multiple location pings per punch emerges.
+**Why `DATETIME` and not `TIMESTAMP`:** MariaDB 10.4.28 runs with
+`explicit_defaults_for_timestamp=0`, so the first `NOT NULL timestamp`
+column in a table silently gets `ON UPDATE CURRENT_TIMESTAMP`. It rewrote
+`check_in_at` on every check-out. The migration docblock says so in place.
+
+**Why there is no `attendance_locations` table:** every GPS reading taken
+for attendance already has a home — check-in columns, check-out columns, and
+two more pairs in `site_visits`. A fourth table would repeat those values
+with nowhere new to put them. It should be introduced only if a requirement
+for *multiple* location pings per punch appears, and it would be an append-
+only log keyed by the attendance row rather than another copy of a distance.
+
+**`manually_adjusted` has a status value and no writer.** The override
+endpoint and its audit trail arrive later; reserving the value now means
+that work changes rows without migrating them.
+
+#### `site_visits` shape — as built
+
+```
+site_visits
+  id
+  employee_id       FK → employees   RESTRICT
+  project_id        FK → projects    RESTRICT
+  site_id           FK → sites       RESTRICT
+  started_at        DATETIME, NOT NULL
+  ended_at          DATETIME, nullable
+  start_latitude    DECIMAL(10,7)   start_longitude   DECIMAL(10,7)
+  start_accuracy    DECIMAL(8,2)    start_distance    DECIMAL(10,2)
+  end_latitude      DECIMAL(10,7)   end_longitude     DECIMAL(10,7)
+  end_accuracy      DECIMAL(8,2)    end_distance      DECIMAL(10,2)
+  purpose           VARCHAR(150), NOT NULL     ← why the visit happened
+  remarks           VARCHAR(500), nullable
+  status            VARCHAR(20)  open | closed   (default open)
+  client_event_id      UUID, UNIQUE   ← start idempotency
+  end_client_event_id  UUID, UNIQUE   ← end idempotency
+  created_at / updated_at
+  INDEX (employee_id, started_at), (site_id, started_at)
+```
+
+Exactly two points, never a track. Nothing else in the schema records where
+anybody was between `started_at` and `ended_at`, which is also what makes
+"no continuous location tracking" a property of the data model rather than
+a promise in a privacy notice.
 
 ---
 
@@ -320,6 +377,22 @@ users ──*── roles ──*── permissions          (spatie/laravel-per
 settings  (standalone typed key/value store)
 ```
 
+**Added in Phase 5 ✅:**
+
+```
+employees ──*── attendances *── sites *── projects
+                       │  └── shifts
+           └──*── site_visits  *── sites *── projects
+```
+
+Both use `RESTRICT` toward employees, projects and sites: a day of
+attendance is what turns an employee, a site or a project into a historical
+record, and hard-deleting any of them should throw rather than erase it. The
+one exception is `attendances.shift_id`, which is `nullOnDelete` — a shift
+is configuration that may be retired, and it must never be possible to
+block the removal of a schedule by a year of old attendance rows that
+merely referenced it.
+
 **Circular-reference note:** `employees.primary_project_id → projects` and
 `projects.project_manager_id → employees` are mutually referential, as are
 `employees.primary_site_id → sites` and `sites.site_manager_id → employees`. Both
@@ -327,12 +400,10 @@ pairs are created across two migrations (see §6) to avoid a circular dependency
 at schema-creation time. They are *not* an architectural loop — one side is a
 "current placement" pointer, the other is a staffed-role pointer.
 
-**Designed but not yet created (Phases 5–12):**
+**Designed but not yet created (Phases 6–12):**
 
 ```
-employees ──*── attendances *── sites
-           ├──*── site_visits  *── sites
-           ├──*── site_activity_reports *── sites
+employees ──*── site_activity_reports *── sites
            ├──*── timesheets
            ├──*── overtime_requests
            ├──*── leave_requests *── leave_types
@@ -361,9 +432,10 @@ for the two to disagree.
 | Pattern | Index |
 |---|---|
 | Every FK | Single-column index |
-| Attendance by day | `(work_date, status)` |
-| Attendance by employee + date | `UNIQUE (employee_id, work_date)` |
-| Offline sync idempotency | `UNIQUE (client_uuid)` |
+| Attendance by day | `(attendance_date, status)` |
+| Attendance by employee + date | `UNIQUE (employee_id, attendance_date)` |
+| Attendance by site + day | `(site_id, attendance_date)` |
+| Offline sync idempotency | `UNIQUE (client_event_id)`, `UNIQUE (check_out_client_event_id)` |
 | Site lookup | `(project_id, status)` |
 | Open assignment lookup | `(employee_id, status, end_date)` |
 | Leave approval queue | `(status, request_date)` |
@@ -384,7 +456,7 @@ All counts below are **live and verified** against `hrms_laravel` after
 |---|---|---|
 | Roles | 10 | `RoleSeeder` |
 | Permissions | 40 | `PermissionSeeder` |
-| Role → permission grants | 167 | `RolePermissionSeeder` |
+| Role → permission grants | 168 | `RolePermissionSeeder` |
 | Settings | 12 | `SettingSeeder` |
 | Shifts | 4 — General, Morning, Evening, Night | `DevelopmentDataSeeder` |
 | Departments | 4 *(development sample)* | `DevelopmentDataSeeder` |
@@ -392,8 +464,11 @@ All counts below are **live and verified** against `hrms_laravel` after
 
 Phase 4 added exactly one permission, `employees.salary.view`, granted to
 HR Admin, Payroll Admin and Finance (Super Admin holds it through `*`).
-Re-running the two seeders brings an older dev database up to date without
-touching anything else — they are `firstOrCreate` / `syncPermissions` only.
+Phase 5 added no permission but granted the existing `attendance.view` to
+the `Employee` role, taking the total to 168 — without it an employee could
+not read back the day they themselves recorded. Re-running the two seeders
+brings an older dev database up to date without touching anything else —
+they are `firstOrCreate` / `syncPermissions` only.
 
 Not yet seeded (later phases): leave types, demo projects/sites.
 
@@ -414,7 +489,7 @@ Not yet seeded (later phases): leave types, demo projects/sites.
 | 2 | Core schema — 10 migrations, see below | ✅ |
 | 3 | `2026_09_27_000010` — `users.status` (indexed `active`/`inactive`) | ✅ |
 | 4 | **None.** Controllers, Form Requests, Resources, services and six policies on the tables Phase 2 already created | ✅ |
-| 5 | Attendance | ⬜ |
+| 5 | `2026_09_27_110001_create_attendances_table`, `2026_09_27_110002_create_site_visits_table` | ✅ |
 
 ### Phase 2 migrations (all `Ran`)
 
@@ -431,7 +506,15 @@ Not yet seeded (later phases): leave types, demo projects/sites.
 | 9 | `2026_09_27_000008_create_employee_site_assignments_table` | `employee_site_assignments` |
 | 10 | `2026_09_27_000009_add_deferred_foreign_keys` | FKs deferred to break circular refs |
 
-**23 tables** total in `hrms_laravel` (14 migrations + 9 framework/RBAC tables).
+### Phase 5 migrations (all `Ran`)
+
+| # | Migration | Creates | Why it looks like this |
+|---|---|---|---|
+| 11 | `2026_09_27_110001_create_attendances_table` | `attendances` | `dateTime`, not `timestamp`, for all four time columns — see §2.4 |
+| 12 | `2026_09_27_110002_create_site_visits_table` | `site_visits` | Two point-pairs of coordinates, one `purpose`, two idempotency keys |
+
+**25 tables** total in `hrms_laravel`, across **19 migrations** (3 framework,
+1 Sanctum, 10 Phase 2, 1 Phase 3, 2 Phase 5).
 
 ### Why two foreign keys are "deferred"
 
@@ -503,9 +586,21 @@ are immutable history, settings are a small config table.
 | `shifts` | `(crosses_midnight)` | Overnight-shift duration queries |
 | `employee_site_assignments` | `(employee_id, status)` | Find a person's current site |
 | `employee_site_assignments` | `(site_id, start_date)` | Who was on this site, when |
+| `attendances` | `UNIQUE (employee_id, attendance_date)` — `att_employee_date_idx` | One day, one row — duplicate check-in is refused by the database |
+| `attendances` | `UNIQUE (client_event_id)` | Offline replay cannot insert twice |
+| `attendances` | `UNIQUE (check_out_client_event_id)` | Same, for the closing punch |
+| `attendances` | `(attendance_date, status)` — `att_date_status_idx` | Daily present/late/incomplete reports |
+| `attendances` | `(site_id, attendance_date)` — `att_site_date_idx` | Who was on this site, on this day |
+| `attendances` | `(check_in_at)` — `att_check_in_idx` | Movement timelines and arrival ordering |
+| `attendances` | `(status)` | The status default is indexed as well as the composite |
+| `site_visits` | `UNIQUE (client_event_id)`, `UNIQUE (end_client_event_id)` | Start and end each replay safely |
+| `site_visits` | `(employee_id, started_at)` — `sv_emp_started_idx` | "Where was this person today?" |
+| `site_visits` | `(site_id, started_at)` — `sv_site_started_idx` | Visits to a site, by date |
 
 Composite indexes were chosen for the two filters that appear together most
-often in HR reports: *department × status* and *site × start date*.
+often in HR reports: *department × status* and *site × start date*. The two
+Phase 5 tables add the two that appear together in every attendance query:
+*employee × date* (which is also the uniqueness rule) and *site × date*.
 
 **N+1 prevention:** all list endpoints eager-load their relations via `with()`, and are
 verified with `DB::enableQueryLog()` during testing.
@@ -513,6 +608,9 @@ verified with `DB::enableQueryLog()` during testing.
 ---
 
 ## 9. Phase 2 Tables — Full Column Reference
+
+> The Phase 5 tables (`attendances`, `site_visits`) are documented in full in
+> §2.4 above, alongside their design reasons.
 
 ```
 settings
@@ -595,6 +693,9 @@ assert the exact vocabulary:
 | `employee_site_assignments` | `assignment_type` | `primary`, `temporary`, `additional` |
 | `employee_site_assignments` | `status` | `active`, `ended`, `cancelled` |
 | `departments`, `designations`, `shifts`, `sites` | `status` | `active`, `inactive` |
+| `attendances` | `status` | `present`, `late`, `incomplete`, `missing_checkout`, `manually_adjusted` — written only by `AttendanceStatusCalculator`; the last value has no writer yet |
+| `attendances` | `source` | `online`, `offline`, `manual` — `manual` is server-only; a client sending it is ignored |
+| `site_visits` | `status` | `open`, `closed` |
 
 ### Numeric type choices
 
@@ -602,10 +703,13 @@ assert the exact vocabulary:
 |---|---|---|
 | `latitude` / `longitude` | `DECIMAL(10,7)` | ~1.1 cm precision. `FLOAT` is binary and rounds unpredictably at a geofence boundary. |
 | `geofence_radius` | `DECIMAL(8,2)` | Fractional metres allowed; still bounded. |
+| `check_in_accuracy`, `check_out_accuracy`, `start_accuracy`, `end_accuracy` | `DECIMAL(8,2)` | Metres reported by the device, and the ceiling the geofence compares against — a whole metre is too coarse for a 100 m radius. |
+| `check_in_distance`, `check_out_distance`, `start_distance`, `end_distance` | `DECIMAL(10,2)` | Server-computed metres. Never read from a request. |
 | `salary` | `DECIMAL(12,2)` | Money — never `FLOAT`. |
 | `minimum_working_hours`, `overtime_threshold` | `DECIMAL(4,2)` | Fractional hours without float drift. |
 | `break_duration`, `grace_period` | `SMALLINT` | Whole minutes; bounded to 65 535. |
 | `start_time`, `end_time` | `TIME` | Clock times, not instants — no timezone/DST drift. |
+| `check_in_at`, `check_out_at`, `scheduled_start_at`, `scheduled_end_at`, `started_at`, `ended_at` | `DATETIME` | Instants on the server clock. **Not** `TIMESTAMP`: MariaDB 10.4 with `explicit_defaults_for_timestamp=0` would give the first `NOT NULL timestamp` column an implicit `ON UPDATE CURRENT_TIMESTAMP`. |
 
 ---
 
@@ -613,12 +717,11 @@ assert the exact vocabulary:
 
 `audit_logs`, `notifications`, `notification_preferences`, `employee_documents`,
 `employee_onboarding`, `trainings`, `employee_trainings`, `assets`,
-`asset_assignments`, `holidays`, `attendances`, `site_visits`,
-`site_activity_reports`, `site_report_photos`, `daily_site_reports`,
-`timesheets`, `overtime_requests`, `leave_types`, `leave_balances`,
-`leave_requests`, `leave_documents`, `payrolls`, `payroll_items`,
-`salary_slips`, `salary_certificate_requests`, `loans`, `loan_installments`,
-`expenses`, `expense_receipts`, `device_tokens`.
+`asset_assignments`, `holidays`, `site_activity_reports`, `site_report_photos`,
+`daily_site_reports`, `timesheets`, `overtime_requests`, `leave_types`,
+`leave_balances`, `leave_requests`, `leave_documents`, `payrolls`,
+`payroll_items`, `salary_slips`, `salary_certificate_requests`, `loans`,
+`loan_installments`, `expenses`, `expense_receipts`, `device_tokens`.
 
 > **Current state:** only `hrms_laravel` (development) and `hrms_testing` (automated
 > tests) are used. Other databases on this machine belong to previous, unrelated

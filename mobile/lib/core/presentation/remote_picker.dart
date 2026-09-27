@@ -198,7 +198,10 @@ class _PickerSheetState<T> extends ConsumerState<_PickerSheet<T>> {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(widget.title, style: theme.textTheme.titleMedium),
+                    child: Text(
+                      widget.title,
+                      style: theme.textTheme.titleMedium,
+                    ),
                   ),
                   IconButton(
                     tooltip: 'Close',
@@ -260,10 +263,7 @@ class _PickerSheetState<T> extends ConsumerState<_PickerSheet<T>> {
 
     if (state.isEmpty) {
       return Center(
-        child: Text(
-          'No matches.',
-          style: theme.textTheme.bodyMedium,
-        ),
+        child: Text('No matches.', style: theme.textTheme.bodyMedium),
       );
     }
 

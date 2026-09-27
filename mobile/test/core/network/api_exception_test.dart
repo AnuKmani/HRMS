@@ -58,8 +58,12 @@ void main() {
             'success': false,
             'message': 'The given data was invalid. (and 1 more errors)',
             'errors': <String, dynamic>{
-              'email': <String>['The email field must be a valid email address.'],
-              'password': <String>['The password field must be at least 8 characters.'],
+              'email': <String>[
+                'The email field must be a valid email address.',
+              ],
+              'password': <String>[
+                'The password field must be at least 8 characters.',
+              ],
             },
           },
         ),
@@ -79,7 +83,10 @@ void main() {
       final exception = apiExceptionFrom(
         failure(
           status: 400,
-          body: <String, dynamic>{'success': false, 'errors': <String, dynamic>{}},
+          body: <String, dynamic>{
+            'success': false,
+            'errors': <String, dynamic>{},
+          },
         ),
       );
 
@@ -96,7 +103,9 @@ void main() {
             'message': 'Too many attempts. Please wait a moment and try again.',
             'errors': <String, dynamic>{},
           },
-          headers: const <String, List<String>>{'retry-after': <String>['37']},
+          headers: const <String, List<String>>{
+            'retry-after': <String>['37'],
+          },
         ),
       );
 
@@ -106,11 +115,18 @@ void main() {
 
     test('a timeout never blames the user for it', () {
       final exception = apiExceptionFrom(
-        failure(status: null, body: null, type: DioExceptionType.connectionTimeout),
+        failure(
+          status: null,
+          body: null,
+          type: DioExceptionType.connectionTimeout,
+        ),
       );
 
       expect(exception.statusCode, 0);
-      expect(exception.message, 'Could not reach the server. Check your connection and try again.');
+      expect(
+        exception.message,
+        'Could not reach the server. Check your connection and try again.',
+      );
     });
 
     test('a non-envelope body is not shown to anyone as prose', () {
@@ -119,7 +135,10 @@ void main() {
       );
 
       expect(exception.statusCode, 502);
-      expect(exception.message, 'The server returned an unexpected response. Please try again.');
+      expect(
+        exception.message,
+        'The server returned an unexpected response. Please try again.',
+      );
       expect(exception.message, isNot(contains('html')));
     });
 
@@ -128,7 +147,9 @@ void main() {
         failure(
           status: 429,
           body: 'slow down',
-          headers: const <String, List<String>>{'retry-after': <String>['15']},
+          headers: const <String, List<String>>{
+            'retry-after': <String>['15'],
+          },
         ),
       );
 

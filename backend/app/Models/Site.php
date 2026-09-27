@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\Geo;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -73,10 +74,24 @@ class Site extends Model
     }
 
     /**
+     * The radius actually in force for this site.
+     *
+     * The row wins; `attendance.default_geofence_radius_m` (a seeded setting)
+     * is the fallback for a site whose radius has not been filled in yet. No
+     * literal appears here — the number lives in the settings table so an
+     * operator can change it without a deploy.
+     */
+    public function effectiveGeofenceRadius(float $configuredDefault): float
+    {
+        return (float) ($this->geofence_radius ?? $configuredDefault);
+    }
+
+    /**
      * Does the point fall inside this site's geofence?
      *
      * Radius comes from the row (or the configured default) — never a
-     * hard-coded constant.
+     * hard-coded constant. The distance itself is Geo's, so this and the
+     * attendance geofence service can never answer differently.
      */
     public function withinGeofence(float $lat, float $lng, ?float $fallbackRadius = null): bool
     {
@@ -84,33 +99,17 @@ class Site extends Model
             return false;
         }
 
-        $radius = (float) ($this->geofence_radius ?? $fallbackRadius ?? 0);
+        $radius = $this->effectiveGeofenceRadius((float) ($fallbackRadius ?? 0));
 
         if ($radius <= 0) {
             return false;
         }
 
-        return $this->haversineMetres(
+        return Geo::distanceMetres(
             (float) $this->latitude,
             (float) $this->longitude,
             $lat,
             $lng,
         ) <= $radius;
-    }
-
-    /**
-     * Great-circle distance in metres (WGS-84 mean earth radius).
-     */
-    private function haversineMetres(float $lat1, float $lng1, float $lat2, float $lng2): float
-    {
-        $earthRadius = 6371000;   // mean earth radius, metres
-
-        $dLat = deg2rad($lat2 - $lat1);
-        $dLng = deg2rad($lng2 - $lng1);
-
-        $a = sin($dLat / 2) ** 2
-            + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng / 2) ** 2;
-
-        return $earthRadius * 2 * atan2(sqrt($a), sqrt(1 - $a));
     }
 }

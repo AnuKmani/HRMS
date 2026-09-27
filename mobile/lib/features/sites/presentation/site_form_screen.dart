@@ -143,8 +143,7 @@ class _SiteFormScreenState extends ConsumerState<SiteFormScreen> {
     }
 
     if (geofenceCount != 0 && geofenceCount != 3) {
-      local['geofence_radius'] =
-          'Latitude, longitude and radius must be given together, or not at all.';
+      local['geofence_radius'] = 'Latitude, longitude and radius must be given together, or not at all.';
     }
 
     if (local.isNotEmpty) {
@@ -168,8 +167,7 @@ class _SiteFormScreenState extends ConsumerState<SiteFormScreen> {
       'site_supervisor_id': _siteSupervisorId,
       'latitude': blank(lat) == null ? null : double.tryParse(lat),
       'longitude': blank(lng) == null ? null : double.tryParse(lng),
-      'geofence_radius':
-          blank(radius) == null ? null : double.tryParse(radius),
+      'geofence_radius': blank(radius) == null ? null : double.tryParse(radius),
       'status': _status,
     };
 
@@ -293,7 +291,7 @@ class _SiteFormScreenState extends ConsumerState<SiteFormScreen> {
                       errorText: _errors['geofence_radius'],
                       helper:
                           'Latitude, longitude and radius go together or not '
-                              'at all.',
+                          'at all.',
                     ),
                     RemotePickerField(
                       label: 'Site manager',
@@ -334,8 +332,9 @@ class _SiteFormScreenState extends ConsumerState<SiteFormScreen> {
                       isRequired: true,
                       options: _siteStatuses,
                       value: _status,
-                      onChanged:
-                          _saving ? (_) {} : (v) => setState(() => _status = v),
+                      onChanged: _saving
+                          ? (_) {}
+                          : (v) => setState(() => _status = v),
                       errorText: _errors['status'],
                     ),
                     const SizedBox(height: 8),
@@ -346,8 +345,7 @@ class _SiteFormScreenState extends ConsumerState<SiteFormScreen> {
                           ? const SizedBox(
                               width: 20,
                               height: 20,
-                              child:
-                                  CircularProgressIndicator(strokeWidth: 2),
+                              child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : Text(_isCreate ? 'Create' : 'Save changes'),
                     ),

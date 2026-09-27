@@ -38,8 +38,9 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
     });
 
     try {
-      final project =
-          await ref.read(projectsRepositoryProvider).find(widget.projectId);
+      final project = await ref
+          .read(projectsRepositoryProvider)
+          .find(widget.projectId);
 
       if (!mounted) return;
 
@@ -60,8 +61,7 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
 
       setState(() {
         _loading = false;
-        _message =
-            'Something went wrong while loading this project. Please try again.';
+        _message = 'Something went wrong while loading this project. Please try again.';
       });
     }
   }
@@ -110,9 +110,7 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
     final scope = ref.watch(permissionScopeProvider);
 
     if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     final project = _project;
@@ -237,22 +235,22 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
   }
 
   Widget _section(String title, List<Widget> rows) => Padding(
-        padding: const EdgeInsets.only(bottom: 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border.all(color: Theme.of(context).dividerColor),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(children: rows),
-            ),
-          ],
+    padding: const EdgeInsets.only(bottom: 24),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border.all(color: Theme.of(context).dividerColor),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(children: rows),
         ),
-      );
+      ],
+    ),
+  );
 
   Widget _row(String label, String? value, {Key? key}) {
     final resolved = (value == null || value.trim().isEmpty) ? '—' : value;

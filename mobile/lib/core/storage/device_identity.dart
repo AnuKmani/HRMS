@@ -33,7 +33,7 @@ abstract class DeviceIdentity {
 /// Keystore-backed [DeviceIdentity].
 class SecureDeviceIdentity implements DeviceIdentity {
   SecureDeviceIdentity({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+    : _storage = storage ?? const FlutterSecureStorage();
 
   static const String _key = 'hrms.install.id';
 
@@ -45,9 +45,10 @@ class SecureDeviceIdentity implements DeviceIdentity {
     if (existing != null && existing.isNotEmpty) return _format(existing);
 
     final random = Random.secure();
-    final id = List<int>.generate(8, (_) => random.nextInt(256))
-        .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
-        .join();
+    final id = List<int>.generate(
+      8,
+      (_) => random.nextInt(256),
+    ).map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
 
     await _storage.write(key: _key, value: id);
 

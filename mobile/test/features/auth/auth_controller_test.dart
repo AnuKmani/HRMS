@@ -67,7 +67,8 @@ void main() {
       tokenStore.value = 'good-token';
       repository.meError = const ApiException(
         statusCode: 0,
-        message: 'Could not reach the server. Check your connection and try again.',
+        message:
+            'Could not reach the server. Check your connection and try again.',
       );
 
       await controller().restoreSession();
@@ -105,24 +106,27 @@ void main() {
       expect(repository.lastDeviceName, 'test-device');
     });
 
-    test('a rejected password leaves the form with the server\'s message', () async {
-      repository.loginError = invalidCredentials;
+    test(
+      'a rejected password leaves the form with the server\'s message',
+      () async {
+        repository.loginError = invalidCredentials;
 
-      final accepted = await controller().login(
-        email: 'ada@example.com',
-        password: 'wrong',
-      );
+        final accepted = await controller().login(
+          email: 'ada@example.com',
+          password: 'wrong',
+        );
 
-      expect(accepted, isFalse);
-      expect(state().status, AuthStatus.failed);
-      expect(state().message, invalidCredentials.message);
-      // One banner, no field marks: the API answers 401 identically for an
-      // unknown address and a wrong password, and the form must not
-      // contradict it by implying one input was the problem.
-      expect(state().errors, isEmpty);
-      expect(tokenStore.value, isNull);
-      expect(repository.loginCalls, 1);
-    });
+        expect(accepted, isFalse);
+        expect(state().status, AuthStatus.failed);
+        expect(state().message, invalidCredentials.message);
+        // One banner, no field marks: the API answers 401 identically for an
+        // unknown address and a wrong password, and the form must not
+        // contradict it by implying one input was the problem.
+        expect(state().errors, isEmpty);
+        expect(tokenStore.value, isNull);
+        expect(repository.loginCalls, 1);
+      },
+    );
 
     test('carries 422 errors field by field', () async {
       repository.loginError = const ApiException(
@@ -152,8 +156,10 @@ void main() {
     test('an escaped exception still lands in a usable state', () async {
       repository.loginError = StateError('something not anticipated');
 
-      final accepted =
-          await controller().login(email: 'ada@example.com', password: 'secret');
+      final accepted = await controller().login(
+        email: 'ada@example.com',
+        password: 'secret',
+      );
 
       expect(accepted, isFalse);
       expect(state().status, AuthStatus.failed);
@@ -174,14 +180,17 @@ void main() {
       expect(state().retryAfter, isNull);
     });
 
-    test('dismissFeedback does nothing when there is nothing to dismiss', () async {
-      await controller().login(email: 'ada@example.com', password: 'secret');
+    test(
+      'dismissFeedback does nothing when there is nothing to dismiss',
+      () async {
+        await controller().login(email: 'ada@example.com', password: 'secret');
 
-      controller().dismissFeedback();
+        controller().dismissFeedback();
 
-      expect(state().status, AuthStatus.authenticated);
-      expect(state().user, isNotNull);
-    });
+        expect(state().status, AuthStatus.authenticated);
+        expect(state().user, isNotNull);
+      },
+    );
   });
 
   group('logout', () {
@@ -200,7 +209,8 @@ void main() {
       tokenStore.value = 'stored-token';
       repository.logoutError = const ApiException(
         statusCode: 0,
-        message: 'Could not reach the server. Check your connection and try again.',
+        message:
+            'Could not reach the server. Check your connection and try again.',
       );
 
       await controller().logout();
@@ -232,23 +242,29 @@ void main() {
       expect(tokenStore.value, isNull);
     });
 
-    test('does not trample the message a rejected sign-in is showing', () async {
-      repository.loginError = invalidCredentials;
-      await controller().login(email: 'ada@example.com', password: 'wrong');
+    test(
+      'does not trample the message a rejected sign-in is showing',
+      () async {
+        repository.loginError = invalidCredentials;
+        await controller().login(email: 'ada@example.com', password: 'wrong');
 
-      controller().signOutLocally();
+        controller().signOutLocally();
 
-      expect(state().status, AuthStatus.failed);
-      expect(state().message, invalidCredentials.message);
-    });
+        expect(state().status, AuthStatus.failed);
+        expect(state().message, invalidCredentials.message);
+      },
+    );
 
-    test('does not announce a second sign-out to someone already at the form', () async {
-      await controller().logout();
+    test(
+      'does not announce a second sign-out to someone already at the form',
+      () async {
+        await controller().logout();
 
-      controller().signOutLocally();
+        controller().signOutLocally();
 
-      expect(state().status, AuthStatus.unauthenticated);
-      expect(state().message, isEmpty);
-    });
+        expect(state().status, AuthStatus.unauthenticated);
+        expect(state().message, isEmpty);
+      },
+    );
   });
 }

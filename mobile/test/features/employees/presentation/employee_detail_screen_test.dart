@@ -12,20 +12,20 @@ const denied = ApiException(
 );
 
 Employee employee({double? salary, bool salaryVisible = false}) => Employee(
-      id: 12,
-      employeeCode: 'EMP-1001',
-      firstName: 'Asha',
-      lastName: 'Nair',
-      fullName: 'Asha Nair',
-      email: 'asha@example.com',
-      joiningDate: '2024-03-01',
-      departmentName: 'Human Resources',
-      designationName: 'Site Engineer',
-      employmentType: 'permanent',
-      employmentStatus: 'active',
-      salary: salary,
-      salaryVisible: salaryVisible,
-    );
+  id: 12,
+  employeeCode: 'EMP-1001',
+  firstName: 'Asha',
+  lastName: 'Nair',
+  fullName: 'Asha Nair',
+  email: 'asha@example.com',
+  joiningDate: '2024-03-01',
+  departmentName: 'Human Resources',
+  designationName: 'Site Engineer',
+  employmentType: 'permanent',
+  employmentStatus: 'active',
+  salary: salary,
+  salaryVisible: salaryVisible,
+);
 
 void main() {
   late ScriptedEmployees script;
@@ -49,8 +49,9 @@ void main() {
     await advance(tester);
   }
 
-  testWidgets('a 403 is shown as a refusal, not as a broken screen',
-      (tester) async {
+  testWidgets('a 403 is shown as a refusal, not as a broken screen', (
+    tester,
+  ) async {
     script.findError = denied;
 
     await pumpDetail(tester, permissions: const ['employees.view']);
@@ -76,8 +77,9 @@ void main() {
     expect(find.byKey(const ValueKey('detail-name')), findsOneWidget);
   });
 
-  testWidgets('draws the roster fields without a salary for a viewer',
-      (tester) async {
+  testWidgets('draws the roster fields without a salary for a viewer', (
+    tester,
+  ) async {
     await pumpDetail(tester, permissions: const ['employees.view']);
 
     expect(find.text('Asha Nair'), findsOneWidget);
@@ -94,8 +96,7 @@ void main() {
     expect(find.byKey(const ValueKey('detail-delete')), findsNothing);
   });
 
-  testWidgets('draws the salary for a role allowed to see it',
-      (tester) async {
+  testWidgets('draws the salary for a role allowed to see it', (tester) async {
     script.items.clear();
     script.items.add(employee(salary: 150000.50, salaryVisible: true));
 
@@ -116,17 +117,19 @@ void main() {
     expect(find.byKey(const ValueKey('detail-delete')), findsOneWidget);
   });
 
-  testWidgets('hides the salary when the permission exists but the payload has none',
-      (tester) async {
-    // The realistic case for an HR admin looking at a list projection that
-    // deliberately carries no payroll: permission alone must not conjure a
-    // number, and an absent figure is not a zero.
-    await pumpDetail(
-      tester,
-      permissions: const ['employees.view', 'employees.salary.view'],
-    );
+  testWidgets(
+    'hides the salary when the permission exists but the payload has none',
+    (tester) async {
+      // The realistic case for an HR admin looking at a list projection that
+      // deliberately carries no payroll: permission alone must not conjure a
+      // number, and an absent figure is not a zero.
+      await pumpDetail(
+        tester,
+        permissions: const ['employees.view', 'employees.salary.view'],
+      );
 
-    expect(find.byKey(const ValueKey('detail-salary')), findsNothing);
-    expect(find.text('0.00'), findsNothing);
-  });
+      expect(find.byKey(const ValueKey('detail-salary')), findsNothing);
+      expect(find.text('0.00'), findsNothing);
+    },
+  );
 }

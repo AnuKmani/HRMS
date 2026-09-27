@@ -192,7 +192,9 @@ class _DepartmentFormScreenState extends ConsumerState<DepartmentFormScreen> {
                         StatusOption('inactive', 'Inactive'),
                       ],
                       value: _status,
-                      onChanged: _saving ? (_) {} : (v) => setState(() => _status = v),
+                      onChanged: _saving
+                          ? (_) {}
+                          : (v) => setState(() => _status = v),
                       errorText: _errors['status'],
                     ),
                     const SizedBox(height: 8),

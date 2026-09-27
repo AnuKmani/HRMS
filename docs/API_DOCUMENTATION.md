@@ -74,6 +74,7 @@ client assigns when no response arrived at all.)
 | `401` | Token expired / invalid | Clear the stored token, return to login. There is no refresh token in this API — a dead session is re-established by signing in again |
 | `403` | Authenticated but not permitted | Show "not authorized" state, do **not** log out |
 | `404` | Not found | Show empty / not-found state |
+| `409` | Conflict — the state already exists | Show the message; do **not** queue or retry. Attendance answers 409 for a second check-in on the same day, a duplicate check-out, an unclosed prior-day row, and a `client_event_id` reused with a different payload |
 | `422` | Validation failed | Map `errors` onto form fields |
 | `429` | Rate limited | Show cooldown message, respect `Retry-After` |
 | `500` | Server error | Show generic failure, log details for developers |
@@ -134,21 +135,31 @@ Behaviour that holds across every authenticated endpoint:
 
 ## 2. Endpoints
 
-> **Implemented:** §2.1 (Phase 3), §2.2–§2.3 (Phase 4). Everything from §2.4
-> onward arrives with Phases 5–12 and is listed here as the contract to build
-> against.
+> **Implemented:** §2.1 (Phase 3), §2.2–§2.3 (Phase 4), §2.4–§2.5 (Phase 5).
+> Everything from §2.6 onward arrives with Phases 6–12 and is listed here as
+> the contract to build against.
 
-**Two gates, both live on every Phase 4 route:**
+**Two gates, both live on every Phase 4 and Phase 5 route:**
 
 | Gate | Runs | Answers |
 |---|---|---|
 | `permission:…` middleware | before the controller | "may this role open the module at all?" — an unauthorised caller never reaches a query |
-| `$this->authorize()` → policy | inside the controller | "may they touch *this* record?" — row-level, and it also guards the two routes below that carry no middleware |
+| `$this->authorize()` → policy | inside the controller | "may they touch *this* record?" — row-level, and it also guards the routes below that carry no middleware |
 
 `GET /employees/{id}` and `GET /employee-site-assignments/{id}` deliberately
 have **no** `permission:` middleware: an ordinary employee reading their own
 profile holds no `*.view` permission, and the policy is what separates
 "yours" from "everybody else's". Everything else is coarse-gated first.
+
+Phase 5 follows the same rule for a whole second set of routes —
+`GET /attendance/today`, `POST /attendance/check-in`,
+`POST /attendance/check-out`, `GET /site-visits/today`,
+`POST /site-visits/start`, `POST /site-visits/{siteVisit}/end` and
+`GET /movement/today` — because recording your own day is not a privilege
+anybody grants you. Holding `attendance.view` gets you *your own rows and no
+others*; the policy, not a permission name, is what stops one employee
+reading another's attendance. `GET /attendance` and `GET /site-visits` are
+coarse-gated first, as elsewhere.
 
 ### 2.1 Authentication ✅ (Phase 3)
 
@@ -421,65 +432,235 @@ is a seeder change and not a migration.
 `photo_path` is never an accepted request field on any of these endpoints —
 profile-photo upload arrives with the documents phase.
 
-### 2.4 Attendance
+### 2.4 Attendance ✅ (Phase 5)
 
-| Method | Path | Notes |
+All paths are relative to `/api/v1`.
+
+| Method | Path | Gate |
 |---|---|---|
-| POST | `/attendance/check-in` | GPS + selfie + `client_uuid`; **server validates geofence** |
-| POST | `/attendance/check-out` | GPS + optional selfie |
-| GET | `/attendance/today` | Current user's today |
-| GET | `/attendance` | List with filters (HR) |
-| GET | `/attendance/{id}` | Detail with selfie (signed URL) |
-| POST | `/attendance/{id}/override` | HR only — requires reason, writes audit log |
-| POST | `/attendance/sync` | Batch offline sync with idempotency keys |
+| POST | `/attendance/check-in` | policy `checkIn` + `throttle:attendance` |
+| POST | `/attendance/check-out` | policy `checkOut` + `throttle:attendance` |
+| GET | `/attendance/today` | the caller's own day |
+| GET | `/attendance` | `permission:attendance.view`, then policy-scoped rows |
+| GET | `/attendance/{attendance}` | policy `view` |
+| GET | `/attendance/{attendance}/selfie` | policy `viewSelfie`, `Cache-Control: no-store` |
+
+**What the client may send.** Check-in is `multipart/form-data` and carries
+only what the phone in that person's hand could know:
+
+| Field | Rules |
+|---|---|
+| `site_id` | required, must exist **and** be an active assignment for the caller |
+| `latitude` / `longitude` | required, `-90..90` / `-180..180` |
+| `accuracy` | optional metres, `0..100000`; the geofence refuses anything above `hrms.attendance.max_gps_accuracy_metres` (default 100) |
+| `selfie` | required image, ≤ `hrms.storage.selfie_max_kilobytes` (5120 KB), MIME sniffed |
+| `client_event_id` | optional UUID — the idempotency key |
+| `source` | `online` or `offline`. `manual` is never accepted from a client |
+| `device_reference` | optional string, ≤ 100 chars |
+
+`employee_id`, `attendance_date`, `project_id`, distances, minutes and
+`status` are **not accepted fields**. There is nowhere to put them: the
+session names the employee, the clock names the day, and
+`AttendanceService` derives the rest.
 
 **Check-in request**
-```json
-{
-    "client_uuid": "9f1c2b7e-...",
-    "site_id": 4,
-    "latitude": 25.204849,
-    "longitude": 55.270783,
-    "accuracy": 12.5,
-    "captured_at": "2026-09-26T08:05:12+04:00",
-    "selfie": "<file>"
-}
+```http
+POST /api/v1/attendance/check-in
+Content-Type: multipart/form-data
+
+site_id=4
+latitude=12.971600
+longitude=77.594600
+accuracy=12.5
+client_event_id=9f1c2b7e-4a6d-4f2b-9c1e-0d3b5a7e9f11
+source=online
+device_reference=android-testphone
+selfie=@checkin.jpg;type=image/jpeg
 ```
 
-**Response — inside geofence**
+**Response — created (HTTP 201)**
 ```json
 {
     "success": true,
-    "message": "Checked in successfully.",
+    "message": "Checked in.",
     "data": {
-        "attendance_id": 1042,
-        "check_in_at": "2026-09-26 08:05:12",
-        "site": "Project A - Site 1",
-        "distance_metres": 34.2,
-        "status": "present"
+        "id": 1042,
+        "attendance_date": "2026-09-27",
+        "site": {"id": 4, "name": "Whitefield Yard", "code": "WFY-01"},
+        "project": {"id": 1, "name": "Metro Line 3", "code": "ML3"},
+        "check_in_at": "2026-09-27T09:05:00+00:00",
+        "check_in_latitude": "12.9716000",
+        "check_in_longitude": "77.5946000",
+        "check_in_accuracy": "12.50",
+        "check_in_distance": "34.20",
+        "has_selfie": true,
+        "scheduled_start_at": "2026-09-27T09:00:00+00:00",
+        "working_minutes": 0,
+        "late_minutes": 0,
+        "break_minutes": 0,
+        "overtime_minutes": 0,
+        "early_departure_minutes": 0,
+        "status": "present",
+        "source": "online"
     }
 }
 ```
 
-**Response — outside geofence (HTTP 422)**
+**Response — outside the geofence (HTTP 422)**
 ```json
 {
     "success": false,
-    "message": "You are outside the allowed area for this site.",
+    "message": "The given data was invalid.",
     "errors": {
-        "geofence": ["You are 482 m from the site. Maximum allowed is 100 m."]
+        "location": ["You are 412 m from Whitefield Yard; the allowed radius is 100 m."]
     }
 }
 ```
 
-### 2.5 Site Visits
+The `location` field carries every geofence refusal — `invalid_coordinates`,
+`poor_accuracy`, `site_not_configured` and `outside_geofence` — each with
+its own sentence. The distance inside the message is computed by the server
+from the coordinates it was sent; a distance field in the request would not
+be read.
 
-| Method | Path | Notes |
+**Other answers worth knowing**
+
+| Status | When |
+|---|---|
+| 201 | A replay of an already-accepted `client_event_id` — the original row, unchanged |
+| 403 | The site is not an active assignment for the caller, or the employee/site is inactive |
+| 409 | A second check-in on the same `(employee_id, attendance_date)`, or an open prior-day row |
+| 409 | A `client_event_id` reused with a different payload |
+| 422 | Geofence refusal (`location`), or a check-out with no check-in (`check_out`), or a check-out at a different site (`site_id`) |
+| 429 | `attendance` limiter — 30 write requests per minute, keyed by user |
+
+Check-out is the same shape minus `selfie` (`site_id`, `latitude`,
+`longitude`, `accuracy`, `client_event_id`, `source`, `device_reference`).
+It finalises `working_minutes`, `break_minutes`, `late_minutes`,
+`early_departure_minutes` and provisional `overtime_minutes`, and writes
+`present`, `late` or `incomplete` through `AttendanceStatusCalculator` —
+the single place status is decided.
+
+`GET /attendance/today` answers with:
+
+```json
+{
+    "date": "2026-09-27",
+    "server_time": "2026-09-27T09:12:41+00:00",
+    "employee_id": 7,
+    "attendance": { "…": "AttendanceResource, or null" },
+    "open_attendance": null,
+    "checked_in": true,
+    "checked_out": false,
+    "site": {"id": 4, "name": "Whitefield Yard", "code": "WFY-01",
+             "project_id": 1, "project_name": "Metro Line 3",
+             "latitude": "12.9716000", "longitude": "77.5946000",
+             "geofence_radius": "100.00"},
+    "sites": ["…one siteSummary per active assignment"],
+    "shift": {
+        "shift_id": 2,
+        "starts_at": "2026-09-27 09:00:00",
+        "ends_at": "2026-09-27 18:00:00",
+        "grace_minutes": 10,
+        "break_minutes": 60,
+        "minimum_working_minutes": 480,
+        "overtime_threshold_minutes": 30,
+        "crosses_midnight": false
+    },
+    "working_minutes": 74,
+    "late_minutes": 0,
+    "max_gps_accuracy_metres": 100,
+    "can_check_in": false,
+    "can_check_out": true,
+    "can_start_site_visit": true
+}
+```
+
+`geofence_radius` is already defaulted server-side (to
+`attendance.default_geofence_radius`, 100 m) when the site column is null,
+so the phone never has to invent a boundary. `max_gps_accuracy_metres` is
+sent down for the same reason: the advisory check on the device uses the
+server's number instead of a copy that would drift.
+
+`GET /attendance` goes through `PaginatedResponse` and accepts `date_from`,
+`date_to`, `employee_id`, `project_id`, `site_id`, `status` and `search`.
+A caller without `attendance.manage` or `employees.view` is pinned to their
+own rows regardless of the filters sent; a project manager or site
+supervisor is scoped to the projects they manage and the sites they run.
+
+**Selfies** live on the `local` disk at
+`storage/app/private/attendance-selfies/{employeeId}/{uuid}.jpg` and are
+streamed only by `GET /attendance/{attendance}/selfie` under the
+`viewSelfie` policy. No endpoint returns a path, a base64 blob or a public
+URL, and no image is ever collected from someone else's record. There is no
+facial recognition in this system.
+
+### 2.5 Site Visits & Movement ✅ (Phase 5)
+
+| Method | Path | Gate |
 |---|---|---|
-| POST | `/site-visits/start` | GPS + site + purpose |
-| POST | `/site-visits/{id}/end` | GPS + optional selfie |
-| GET | `/site-visits/timeline?date=` | Daily movement timeline |
-| GET | `/site-visits` | List with filters (manager/HR) |
+| POST | `/site-visits/start` | policy `start` + `throttle:attendance` |
+| POST | `/site-visits/{siteVisit}/end` | policy `end` + `throttle:attendance` |
+| GET | `/site-visits/today` | the caller's own episodes → `data.items` |
+| GET | `/site-visits` | `permission:attendance.view`, then policy-scoped |
+| GET | `/movement/today` | the caller's own day |
+
+`POST /site-visits/start` takes `site_id`, `latitude`, `longitude`,
+`accuracy`, `purpose` (required, ≤ 150 chars), optional `remarks`,
+`client_event_id` and `device_reference`. It answers **409** while one of
+the caller's visits is still open and **403** when the site is not assigned
+to them. `POST /site-visits/{siteVisit}/end` takes `latitude`, `longitude`,
+`accuracy`, optional `remarks` and `client_event_id` — no `site_id`, since
+the row already knows where it is.
+
+Both ends re-run the geofence against their own coordinates, so a visit
+that starts inside the boundary cannot be closed from outside it.
+
+A visit is a **bounded two-point episode** — a start and an end, each with
+its own coordinates and accuracy — never a track. There is no continuous
+location collection: nothing polls, nothing uploads in the background, and
+the app requests foreground permission only.
+
+`GET /movement/today` is the chronological day, one event per real thing
+that happened:
+
+```json
+{
+    "success": true,
+    "message": "Movement timeline retrieved.",
+    "data": {
+        "date": "2026-09-27",
+        "events": [
+            {"type": "check_in", "at": "2026-09-27T09:05:00+00:00",
+             "record_id": 1042, "site_id": 4, "site_name": "Whitefield Yard",
+             "project_id": 1, "project_name": "Metro Line 3",
+             "status": "present", "label": "Checked in at Whitefield Yard"},
+            {"type": "site_visit_start", "at": "2026-09-27T10:20:00+00:00",
+             "record_id": 300, "site_name": "Metro Line 3",
+             "status": "open", "label": "Started a site visit at Metro Line 3",
+             "purpose": "Material delivery"},
+            {"type": "site_visit_end", "at": "2026-09-27T11:05:00+00:00",
+             "record_id": 300, "status": "closed",
+             "label": "Ended the site visit at Metro Line 3",
+             "duration_minutes": 45},
+            {"type": "check_out", "at": "2026-09-27T18:02:00+00:00",
+             "record_id": 1042, "status": "present",
+             "label": "Checked out of Whitefield Yard",
+             "working_minutes": 537}
+        ]
+    }
+}
+```
+
+**What Phase 5 deliberately does not expose.** There is no
+`/attendance/{id}/override` endpoint and no batch `/attendance/sync`
+endpoint. Offline events arrive one at a time through `check-in`,
+`check-out` and `site-visits/start`, each carrying the `client_event_id`
+that makes the replay safe, and are revalidated exactly as though they had
+arrived live. `manually_adjusted` exists in the schema with a reserved
+status value so the future override/audit path can be added without
+migrating the table — but no UI, no endpoint and no permission gate around
+it yet.
 
 ### 2.6 Site Activity & Daily Reports
 
@@ -572,11 +753,19 @@ attached at the route as `throttle:{name}`. Never inline a number in a route.
 |---|---|---|---|
 | `POST /auth/login` | **5 / minute** | client IP | ✅ Phase 3 |
 | `POST /auth/forgot-password`, `POST /auth/reset-password` | **5 / 15 minutes** | client IP | ✅ Phase 3 |
-| Attendance endpoints | 30 / minute | — | ⬜ Phase 5 |
+| `POST /attendance/check-in`, `POST /attendance/check-out`, `POST /site-visits/start`, `POST /site-visits/{id}/end` | **30 / minute** | authenticated user id | ✅ Phase 5 |
 | General API | 60 / minute | — | ⬜ Planned |
 | Exports (PDF/Excel) | 10 / minute | — | ⬜ Phase 12 |
 
 Exceeded → **HTTP 429** in the standard envelope, with a `Retry-After` header.
+
+**Why attendance is keyed by user and not IP.** A site office is one NAT
+address shared by every crew member checking in within the same minute; an
+IP bucket would refuse the fourth person to reach the gate. Keying by user
+throttles the machine actually retrying, keeps a whole crew able to clock
+in together, and still bounds how fast one account can hammer the endpoints.
+The read routes are not throttled at all: they are cheap, and a limiter on
+`GET /attendance/today` would punish refreshes rather than abuse.
 
 **Why client IP and not email.** Keying login by `email` would let anyone with
 a connection flood one address and lock its real owner out of their own
@@ -594,30 +783,83 @@ letting the user tap into the same wall repeatedly.
 
 ## 4. File Upload Rules
 
-- `multipart/form-data`
-- Max selfie / photo size: **2 MB** (compressed client-side to ~200 KB before upload)
-- Allowed types: `jpg`, `jpeg`, `png`, `pdf` — validated by **MIME, extension and size** server-side
-- Filenames are **never** trusted; the server generates the stored name
-- Files land in **private storage**, returned only via signed/expiring URLs
+Phase 5 uploads exactly one kind of file: the **check-in selfie**.
+
+- `multipart/form-data`, field name `selfie`, on `POST /attendance/check-in` only
+- Max size **5120 KB** — `hrms.storage.selfie_max_kilobytes` (`HRMS_SELFIE_MAX_KB`)
+- Images only (`jpg`, `jpeg`, `png`, `webp`), validated three ways:
+  Laravel's declared-type rule, a `finfo` MIME sniff, and the byte ceiling.
+  The extension is not the arbiter and the client's `Content-Type` is not
+  believed.
+- Filenames are **never** taken from the request. The stored name is a
+  generated UUID under `attendance-selfies/{employeeId}/{uuid}.{ext}`, so no
+  two devices can collide and no upload can address a path outside that
+  directory. A failed check-in deletes the file it had already written.
+- **Private storage** (`local` disk → `storage/app/private`), reachable only
+  by `GET /api/v1/attendance/{attendance}/selfie` behind the `viewSelfie`
+  policy and served `Cache-Control: no-store`. No public URL, no signed URL,
+  no base64 in a JSON body, no way to enumerate the directory.
+- The check-in response carries `has_selfie`, never the bytes.
 - Requires `Accept: application/json`
+
+Nothing here feeds facial recognition. The photograph is evidence that a
+person stood at that gate at that moment; it is opened by a human during a
+dispute, never by a model, and never by someone who simply wants to look at
+another employee's file.
 
 ---
 
 ## 5. Offline Sync Contract
 
+There is **no batch endpoint**. Each queued event is replayed through the
+same route that would have carried it live, which is what keeps one code
+path responsible for the rules:
+
 ```
-POST /attendance/sync
-Body: { "actions": [ { "client_uuid", "type", "payload", ... } ] }
+POST /api/v1/attendance/check-in        (multipart)
+    client_event_id = 3d6f1a2c-…        generated BEFORE the first attempt
+    source          = offline
+    site_id, latitude, longitude, accuracy, selfie, device_reference
 ```
 
-Server behaviour for each action:
+`check-out` and `site-visits/start` behave the same way; `site-visits/end`
+carries its own `client_event_id` against the row's `end_client_event_id`.
 
-1. Look up `client_uuid` — if already processed, **return the original result**
-   (idempotent; no duplicate attendance)
-2. Re-validate geofence using the *provided* GPS — offline GPS is stored, never trusted
-3. Validate timing against a configurable tolerance window
-4. Accept → return `attendance_id`, client marks `synced`
-5. Reject → return reason, client marks `rejected` and shows it to the employee
+**Server behaviour, in order:**
+
+1. A `client_event_id` is looked up in the unique index that belongs to the
+   action (`attendances.client_event_id`,
+   `attendances.check_out_client_event_id`, `site_visits.client_event_id`,
+   `site_visits.end_client_event_id`). Found → the **original row** comes
+   back and nothing else is evaluated. Check-in replays answer **201**,
+   check-out and visit replays answer **200**.
+2. Not found → the request is validated as though it had arrived live:
+   active site assignment, geofence against the *provided* coordinates,
+   accuracy ceiling, selfie rules, duplicate-day and open-row checks.
+3. Accept → the row is inserted inside a transaction; the unique index makes
+   two simultaneous replays collapse to one row, and the loser re-reads and
+   returns the winner's answer.
+4. Reject → the standard error envelope. The client marks the event
+   `failed`, keeps it (and its selfie file), shows the reason, and lets the
+   person retry or drop it.
+
+Distances, minutes, employee, date and status are still derived server-side
+on a replay — an offline event is a claim about *where*, never about *when
+the day was*.
+
+> **Known characteristic:** `attendance_date` is taken from the server clock
+> at the moment the row is written. An event captured at 23:55 and synced
+> after midnight lands on the following day. The queue is ordered oldest
+> first, so a full day's backlog replays in the order it happened, but a
+> day that straddles midnight is not stitched back together.
+
+**Client behaviour:** every attempt gets a UUID before the request goes
+out; a network failure (`statusCode == 0`) queues the event with
+`sync_status = pending_sync`, the compressed selfie written to a local file
+and the event JSON to `SharedPreferences`. Any other failure — 403, 409,
+422 — is shown, not queued, because it will not get better by retrying.
+Syncing is manual ("Sync now"), oldest first, and stops at the first 0 or
+401.
 
 ---
 
@@ -629,13 +871,15 @@ Server behaviour for each action:
 | §2.1 Authentication | ✅ Phase 3 |
 | §2.2 Departments / Designations / Employees | ✅ Phase 4 |
 | §2.3 Projects / Sites / Assignments | ✅ Phase 4 |
-| §2.4–§2.12 Everything else | ⬜ Phases 5–12 |
+| §2.4 Attendance / §2.5 Site Visits & Movement | ✅ Phase 5 |
+| §2.6–§2.12 Everything else | ⬜ Phases 6–12 |
 | Rate limiting — auth routes | ✅ Phase 3 |
+| Rate limiting — attendance writes | ✅ Phase 5 |
 | Rate limiting — remaining scopes | ⬜ As their modules land |
 
-Backend proof: `php artisan test` → **190 passed (993 assertions)**; 38 routes
-under `api/*`. Flutter proof: `flutter analyze` clean, `flutter test` →
-**89 passed**.
+Backend proof: `php artisan test` → **308 passed (1384 assertions)**; 49 routes
+under `api/*`. Flutter proof: `dart format .` clean, `flutter analyze` clean,
+`flutter test` → **176 passed**.
 
 > To explore a running API later, use Laravel's generated OpenAPI/Swagger UI or
 > a tool such as Postman.

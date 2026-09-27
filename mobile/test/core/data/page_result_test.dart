@@ -7,8 +7,7 @@ import 'package:mobile/features/employees/domain/employee.dart';
 import 'package:mobile/features/projects/domain/project.dart';
 import 'package:mobile/features/sites/domain/site.dart';
 
-ApiEnvelope envelope(Object? data) =>
-    ApiEnvelope(message: 'ok', data: data);
+ApiEnvelope envelope(Object? data) => ApiEnvelope(message: 'ok', data: data);
 
 void main() {
   group('the list envelope', () {
@@ -82,9 +81,7 @@ void main() {
     test('refuses a meta block that is missing', () {
       expect(
         () => PageResult<int>.fromEnvelope(
-          envelope({
-            'items': <Object>[],
-          }),
+          envelope({'items': <Object>[]}),
           (json) => 0,
         ),
         throwsA(isA<ApiException>()),
@@ -108,11 +105,7 @@ void main() {
       final page = PageResult<int>.fromEnvelope(
         envelope({
           'items': <Object>[],
-          'meta': {
-            'current_page': '2',
-            'last_page': '7',
-            'total': '40',
-          },
+          'meta': {'current_page': '2', 'last_page': '7', 'total': '40'},
         }),
         (json) => 0,
       );

@@ -37,4 +37,26 @@ return [
         'decay_minutes' => (int) env('PASSWORD_RESET_RATE_LIMIT_DECAY_MINUTES', 15),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Attendance write throttling
+    |--------------------------------------------------------------------------
+    |
+    | Covers the four POSTs that record a fact about somebody's day:
+    | check-in, check-out, start visit, end visit. Generous compared with
+    | login — an honest worker may tap retry a few times on bad signal, and
+    | refusing a legitimate clock-in is a much worse failure than letting a
+    | burst through.
+    |
+    | Keyed by the authenticated user rather than by IP: crews share one
+    | address on site, and one device looping on a weak connection would
+    | otherwise throttle the whole crew out of clocking in.
+    |
+    */
+
+    'attendance' => [
+        'max_attempts' => (int) env('ATTENDANCE_RATE_LIMIT_MAX_ATTEMPTS', 30),
+        'decay_minutes' => (int) env('ATTENDANCE_RATE_LIMIT_DECAY_MINUTES', 1),
+    ],
+
 ];

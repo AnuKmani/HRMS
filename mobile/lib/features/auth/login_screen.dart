@@ -47,7 +47,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     // After this call there is nothing to do here: a success redirects via
     // the router, and a failure is already in `state` where the form draws it.
-    await ref.read(authControllerProvider.notifier).login(
+    await ref
+        .read(authControllerProvider.notifier)
+        .login(
           email: _emailController.text.trim(),
           password: _passwordController.text,
         );
@@ -139,8 +141,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           onPressed: busy
                               ? null
                               : () => setState(
-                                    () => _obscurePassword = !_obscurePassword,
-                                  ),
+                                  () => _obscurePassword = !_obscurePassword,
+                                ),
                         ),
                       ),
                       validator: _passwordError,

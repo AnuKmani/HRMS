@@ -26,7 +26,7 @@ abstract class TokenStore {
 /// previous token rather than accumulating entries.
 class SecureTokenStore implements TokenStore {
   SecureTokenStore({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+    : _storage = storage ?? const FlutterSecureStorage();
 
   static const String _key = 'hrms.auth.bearer_token';
 

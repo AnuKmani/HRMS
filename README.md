@@ -120,7 +120,9 @@ HRMS/
 │   │   │   └── storage/     #   token_store.dart, device_identity.dart
 │   │   ├── features/
 │   │   │   ├── auth/        #   models, repository, controller, login, splash
-│   │   │   └── home/        #   phase-4 landing spot
+│   │   │   ├── home/        #   permission-gated module tiles
+│   │   │   ├── employees/   #   departments, designations, projects, sites…
+│   │   │   └── attendance/  #   today screen, geofence, selfie, offline queue
 │   │   ├── app.dart         # MaterialApp.router
 │   │   └── main.dart        # ProviderScope + runApp
 │   └── test/                # fakes/, app_test.dart, feature + unit tests
@@ -128,19 +130,22 @@ HRMS/
 ├── backend/                 # Laravel REST API
 │   ├── app/
 │   │   ├── Http/
-│   │   │   ├── Controllers/Api/V1/   # AuthController, RoleController
-│   │   │   ├── Requests/             # Form Requests (auth so far)
-│   │   │   ├── Resources/            # UserResource, EmployeeBriefResource, RoleResource
+│   │   │   ├── Controllers/Api/V1/   # Auth, org, attendance, site visits, movement
+│   │   │   ├── Requests/             # Form Requests for every write endpoint
+│   │   │   ├── Resources/            # ApiResponse-backed resource classes
 │   │   │   └── Responses/            # ApiResponse — the response envelope
 │   │   ├── Models/          # Eloquent models
-│   │   ├── Services/        # Business logic (geofence, leave, payroll)
-│   │   ├── Policies/        # Authorization (Phase 4)
+│   │   ├── Services/        # Business logic (attendance, geofence, working time…)
+│   │   ├── Policies/        # Authorization — 8 policies
+│   │   ├── Support/         # Visibility scoping, Geo (haversine), ClientInput
 │   │   ├── Jobs/            # Queued work
 │   │   └── Notifications/   # FCM + database notifications
-│   ├── config/rate_limiting.php   # login + password-reset limits
+│   ├── config/
+│   │   ├── hrms.php         # visibility lists + attendance/storage config
+│   │   └── rate_limiting.php   # login, password-reset, attendance limits
 │   ├── database/migrations/
 │   ├── routes/api.php
-│   └── tests/               # Feature + Unit (120 tests)
+│   └── tests/               # Feature + Unit (308 tests)
 │
 ├── docs/                    # Project documentation
 │   ├── ARCHITECTURE.md
@@ -179,7 +184,7 @@ Access is controlled by **roles** *and* **granular permissions**. Hiding a butto
 
 Example permissions: `employees.view`, `employees.create`, `attendance.manage`, `leave.approve`, `payroll.manage`, `sites.manage`, `audit.view`.
 
-**Implemented (Phase 2):** 39 permissions, all named `resource.action`, seeded by
+**Implemented (Phase 2):** 40 permissions, all named `resource.action`, seeded by
 `RoleSeeder` + `PermissionSeeder` + `RolePermissionSeeder`. Super Admin holds every
 permission; each other role is an explicit allow-list, so anything absent is denied.
 See [`docs/SECURITY.md`](docs/SECURITY.md) §3.1 for the full catalogue and the
@@ -297,7 +302,7 @@ flutter test                 # 43 tests, no device or server required
 | Deliverable | Status |
 |---|---|
 | `spatie/laravel-permission` **^6.25** (the release line compatible with PHP 8.2 + Laravel 12) | ✅ |
-| 10 roles · 39 permissions · 163 role-permission grants | ✅ |
+| 10 roles · 40 permissions · 168 role-permission grants (167 until Phase 5 gave `attendance.view` to Employee) | ✅ |
 | Middleware aliases `permission` / `role` / `role_or_permission` registered | ✅ |
 | `settings` table + `SettingsService` — 12 seeded business rules | ✅ |
 | `departments`, `designations` | ✅ |
@@ -358,6 +363,39 @@ flutter test                 # 43 tests, no device or server required
 > re-sending a token whose purpose is to delete itself has no safe home to
 > live in. Covered honestly in [`docs/SECURITY.md`](docs/SECURITY.md) §2.
 
+### ✅ Phase 4 — First vertical slice (COMPLETE)
+
+Departments, designations, employees, projects, sites and employee-site
+assignments: Form Requests, API Resources, services with transactions, six
+policies, `employees.salary.view` separated from `employees.view`, plus the
+Flutter `data / domain / presentation` features behind a permission-gated
+home. Tests **190 passed (993 assertions)** after Phase 4.
+
+### ✅ Phase 5 — GPS attendance and site movement (COMPLETE)
+
+| Deliverable | Status |
+|---|---|
+| `attendances` + `site_visits` — 2 migrations, `DATETIME` (not `TIMESTAMP`), `UNIQUE (employee_id, attendance_date)` and four `client_event_id` unique keys | ✅ |
+| `GeofenceService` — coordinates, accuracy ceiling, per-site radius; **distance always computed, never accepted from the client** | ✅ |
+| `WorkingTimeCalculator` — late / working / break / overtime / early, normal **and** overnight, no arithmetic in controllers | ✅ |
+| `AttendanceStatusCalculator` — the only writer of `present` / `late` / `incomplete` / `missing_checkout` / `manually_adjusted` | ✅ |
+| `POST /attendance/check-in` · `check-out` · `GET /attendance/today` · `GET /attendance` · `GET /attendance/{id}` · `GET /attendance/{id}/selfie` | ✅ |
+| `POST /site-visits/start` · `{id}/end` · `GET /site-visits/today` · `GET /site-visits` · `GET /movement/today` | ✅ |
+| `AttendancePolicy` + `SiteVisitPolicy` — self-service routes carry **no** `permission:` middleware; row scope fails closed | ✅ |
+| Private selfies (`storage/app/private/attendance-selfies/{employeeId}/{uuid}.ext`), streamed only through the policy, `no-store`, no paths in JSON | ✅ |
+| Offline: `client_event_id` idempotency, replay through the same route, full re-validation on sync | ✅ |
+| Rate limit `attendance` 30/min/user on the four writes | ✅ |
+| Flutter `features/attendance/` — 6-state location flow, 5-state camera flow, advisory local geofence, offline queue with **Sync now** | ✅ |
+| Android manifest: fine/coarse location + camera, **no** background location | ✅ |
+| Tests: backend **308 passed (1384 assertions)** · Flutter **176 passed** · `pint --test` clean · `dart format` + `flutter analyze` clean | ✅ |
+| Docs updated: `API_DOCUMENTATION`, `ARCHITECTURE`, `DATABASE`, `SECURITY`, `FLUTTER_GUIDE`, `TESTING`, `USER_GUIDE` | ✅ |
+
+> **Deliberately not built in Phase 5:** attendance override and its audit
+> trail (the `manually_adjusted` status is reserved with no writer),
+> background/automatic sync (queueing is manual **Sync now**), site activity
+> reports, and any login audit — see [`docs/SECURITY.md`](docs/SECURITY.md)
+> §8.
+
 ### Planned Phases
 
 | Phase | Scope | Status |
@@ -365,11 +403,10 @@ flutter test                 # 43 tests, no device or server required
 | **1b** | Flutter toolchain + Flutter project skeleton | ✅ Done |
 | **2** | Core database schema + seeders (roles, permissions, settings) | ✅ Done |
 | **3** | Authentication (Sanctum) + Flutter auth feature | ✅ Done |
-| **4** | Employees, Projects, Sites, Assignments (first vertical slice) | ⬜ Next |
-| **4** | Employees, Projects, Sites, Assignments (first vertical slice) | ⬜ |
-| **5** | Attendance: geofence, selfie, check-in/out, audit | ⬜ |
-| **6** | Offline synchronization | ⬜ |
-| **7** | Site visits, movement timeline, activity & daily reports | ⬜ |
+| **4** | Employees, Projects, Sites, Assignments (first vertical slice) | ✅ Done |
+| **5** | Attendance: geofence, selfie, check-in/out, site visits, movement timeline, offline queue | ✅ Done |
+| **6** | *(absorbed into 5 — offline sync shipped there; reserved for automatic background sync)* | ⬜ |
+| **7** | Site activity reports & daily reports (PDF) | ⬜ Next |
 | **8** | Shifts, timesheets, overtime | ⬜ |
 | **9** | Leave, balances, sick-cert → LOP automation | ⬜ |
 | **10** | Holidays, documents + expiry, onboarding, training, assets | ⬜ |

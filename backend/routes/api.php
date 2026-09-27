@@ -1,14 +1,17 @@
 <?php
 
+use App\Http\Controllers\Api\V1\AttendanceController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\DepartmentController;
 use App\Http\Controllers\Api\V1\DesignationController;
 use App\Http\Controllers\Api\V1\EmployeeController;
 use App\Http\Controllers\Api\V1\EmployeeSiteAssignmentController;
+use App\Http\Controllers\Api\V1\MovementController;
 use App\Http\Controllers\Api\V1\PasswordResetController;
 use App\Http\Controllers\Api\V1\ProjectController;
 use App\Http\Controllers\Api\V1\RoleController;
 use App\Http\Controllers\Api\V1\SiteController;
+use App\Http\Controllers\Api\V1\SiteVisitController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -160,5 +163,56 @@ Route::prefix('v1')->group(function () {
             ->middleware('permission:assignments.manage');
         Route::put('employee-site-assignments/{assignment}', [EmployeeSiteAssignmentController::class, 'update'])
             ->middleware('permission:assignments.manage');
+
+        /* ----------------------------------------- Phase 5: attendance */
+
+        // Four routes below deliberately carry NO `permission:` middleware,
+        // and the reason is a real product decision rather than an omission:
+        //
+        //   GET  /attendance/today         the employee's own front door
+        //   POST /attendance/check-in      recording your own day is not a
+        //   POST /attendance/check-out     privilege anybody grants you
+        //   GET  /site-visits/today        likewise
+        //   POST /site-visits/start, /end  likewise
+        //
+        // AttendancePolicy and SiteVisitPolicy answer "is this a linked
+        // employee?" for those, and the *row scope* for everything that
+        // reads somebody else's record — where Visibility fails closed, so
+        // holding `attendance.view` grants your own rows and no others
+        // unless you are also trusted with the workforce.
+        //
+        // `throttle:attendance` is keyed by user, not IP: a site office
+        // shares one address and one stuck device must not throttle the
+        // whole crew (config/rate_limiting.php).
+
+        Route::get('attendance/today', [AttendanceController::class, 'today']);
+
+        Route::get('attendance', [AttendanceController::class, 'index'])
+            ->middleware('permission:attendance.view');
+
+        // Registered before `{attendance}` and restricted to digits so
+        // `today`, `check-in` and `check-out` can never be read as an id.
+        Route::get('attendance/{attendance}/selfie', [AttendanceController::class, 'selfie'])
+            ->whereNumber('attendance');
+        Route::get('attendance/{attendance}', [AttendanceController::class, 'show'])
+            ->whereNumber('attendance');
+
+        Route::post('attendance/check-in', [AttendanceController::class, 'checkIn'])
+            ->middleware('throttle:attendance');
+        Route::post('attendance/check-out', [AttendanceController::class, 'checkOut'])
+            ->middleware('throttle:attendance');
+
+        Route::get('site-visits/today', [SiteVisitController::class, 'today']);
+        Route::get('site-visits', [SiteVisitController::class, 'index'])
+            ->middleware('permission:attendance.view');
+        Route::post('site-visits/start', [SiteVisitController::class, 'store'])
+            ->middleware('throttle:attendance');
+        Route::post('site-visits/{siteVisit}/end', [SiteVisitController::class, 'end'])
+            ->whereNumber('siteVisit')
+            ->middleware('throttle:attendance');
+
+        // The day as one ordered list. Self-only, and no permission gate —
+        // see MovementController.
+        Route::get('movement/today', [MovementController::class, 'today']);
     });
 });

@@ -138,6 +138,14 @@ class RolePermissionSeeder extends Seeder
 
         'Employee' => [
             'dashboard.view',
+            // Their own attendance, and nothing else: `attendance.view` is
+            // the coarse gate that lets GET /attendance through, and
+            // Visibility::attendanceIsVisible() then narrows the rows to
+            // their own because this role is not listed as an overseer and
+            // holds neither employees.view nor attendance.manage. Without
+            // this grant an employee could not read back the day they
+            // themselves recorded.
+            'attendance.view',
             'leave.view', 'leave.request',
             'documents.view',
         ],

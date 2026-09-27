@@ -36,26 +36,30 @@ class Department {
     final parts = <String>[code];
 
     if (employeesCount != null) {
-      parts.add('$employeesCount ${employeesCount == 1 ? 'employee' : 'employees'}');
+      parts.add(
+        '$employeesCount ${employeesCount == 1 ? 'employee' : 'employees'}',
+      );
     }
 
     if (designationsCount != null) {
-      parts.add('$designationsCount ${designationsCount == 1 ? 'designation' : 'designations'}');
+      parts.add(
+        '$designationsCount ${designationsCount == 1 ? 'designation' : 'designations'}',
+      );
     }
 
     return parts.join(' · ');
   }
 
   factory Department.fromJson(Map<String, dynamic> json) => Department(
-        id: _int(json['id']) ?? 0,
-        name: json['name'] as String? ?? '',
-        code: json['code'] as String? ?? '',
-        description: json['description'] as String?,
-        status: json['status'] as String? ?? 'active',
-        designationsCount: _int(json['designations_count']),
-        employeesCount: _int(json['employees_count']),
-        createdAt: json['created_at'] as String?,
-      );
+    id: _int(json['id']) ?? 0,
+    name: json['name'] as String? ?? '',
+    code: json['code'] as String? ?? '',
+    description: json['description'] as String?,
+    status: json['status'] as String? ?? 'active',
+    designationsCount: _int(json['designations_count']),
+    employeesCount: _int(json['employees_count']),
+    createdAt: json['created_at'] as String?,
+  );
 }
 
 int? _int(Object? value) {

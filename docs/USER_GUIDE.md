@@ -1,9 +1,9 @@
 # User Guide
 
-> **Status:** Phase 4 — sign-in and the first management screens exist and are
-> usable. This guide describes the workflows each role will have once the
-> corresponding phase ships. Sections are marked with the phase that delivers
-> them; ✅ means it is in the app today.
+> **Status:** Phase 5 — sign-in, the organisation screens, and GPS attendance
+> with site visits exist and are usable. This guide describes the workflows
+> each role will have once the corresponding phase ships. Sections are marked
+> with the phase that delivers them; ✅ means it is in the app today.
 
 ---
 
@@ -80,7 +80,7 @@ Four things worth knowing:
 
 ## 3. Employee
 
-### 3.1 Checking in ⬜ Phase 5
+### 3.1 Checking in ✅ Phase 5
 
 Attendance is designed to take **one tap** — the screen is deliberately simple because
 it is used outdoors on a construction site.
@@ -88,11 +88,11 @@ it is used outdoors on a construction site.
 ```
 Today's Attendance
 
-Current Site:  Project A - Site 1
+Whitefield Yard · Metro Line 3
 
 GPS:
   ✓ Location detected
-  ✓ Within allowed area
+  ✓ Within allowed area (34 m of 100 m, advisory)
 
         [ CHECK IN ]
 ```
@@ -100,9 +100,12 @@ GPS:
 **What happens:**
 
 1. Open **Attendance**
-2. The app shows your currently assigned site
-3. Allow location permission when asked
-4. Wait for the location check — you will see whether you are within the allowed area
+2. The app shows your assigned site (and a picker if you have more than one)
+3. Allow location permission when asked — the reason is explained *before*
+   the system prompt: a geofence needs to know where you are standing
+4. Wait for the location check — you will see whether you are within the allowed area.
+   The phone's measurement is **advisory**; the server measures again when your request
+   arrives
 5. The front camera opens → take a selfie
 6. Preview it → **Retake** if needed, or confirm
 7. Tap **Check In**
@@ -110,45 +113,70 @@ GPS:
 **After check-in:**
 
 ```
-Checked in:  08:05 AM
-Working:     04h 25m
+Checked in:  09:05
+Working:     00h 12m
 
 [ SITE VISIT ]   [ CHECK OUT ]
 ```
 
 **If you are outside the allowed area:**
 
-> *"You are 482 m from the site. Maximum allowed is 100 m."*
+> *"You are 412 m from Whitefield Yard; the allowed radius is 100 m."*
 
-No attendance is recorded. If you believe this is wrong (GPS drift, wrong site
-assignment), contact your supervisor or HR — an authorized person can override it, and
-every override is logged.
+No attendance is recorded and no photograph is kept. If you believe this is
+wrong (GPS drift, wrong site assignment), contact your supervisor or HR.
 
-**Check-out works the same way** — you may check out at a *different* site from where
-you started.
+**If the app says location is off:**
 
-### 3.2 Working between sites ⬜ Phase 7
+| Message | What it means | What to do |
+|---|---|---|
+| *"Location access is off for this app."* | You denied it once | Tap to be asked again |
+| *"You chose not to share location."* | Denied permanently | Tap to open this app's Settings and choose **Allow only while using the app** |
+| *"Turn on location services."* | You allowed the permission, but the phone's location switch is off | Pull down the quick settings and turn on Location |
+| *"Your location is too inaccurate to prove you are here (±180 m)."* | The fix is weaker than the configured ceiling | Move into the open, away from the building; try again |
+
+None of these crash the app, and none of them record anything.
+
+**Check-out works the same way — at the site where you checked in.** The day
+belongs to one site, so checking out somewhere else is refused with a clear
+message. Moving to another site for part of the day is a **site visit**
+(§3.2), not a second check-in.
+
+**Two things the app will refuse, and why:**
+
+- A second check-in on the same day → *"You have already checked in today."*
+  One row per employee per day is enforced by the database.
+- Checking out with no check-in → *"No check-in to close."*
+
+### 3.2 Working between sites ✅ Phase 5
 
 If you move to another site during the workday, record it so your time is attributed
 correctly:
 
 ```
-08:05   Check-in          Site A
-10:30   Site visit start  Site B
-12:15   Site visit end    Site B
-14:00   Site visit start  Site C
-17:45   Check-out         Site C
+09:05   Check-in            Whitefield Yard
+10:20   Site visit start    Metro Line 3 · Material delivery
+11:05   Site visit end      Metro Line 3
+18:02   Check-out           Whitefield Yard
 ```
 
 1. Tap **Site Visit**
-2. Select the site and (optionally) the purpose
-3. Location is captured automatically
-4. When you leave, tap **End Visit**
+2. Select the site and enter the **purpose** (required — it is the reason the
+   record exists), plus remarks if you like
+3. Location is captured at that moment
+4. When you leave, tap **End Visit** — location is captured again, and the
+   visit gets its duration
 
-Your daily timeline shows the full movement history.
+Your daily timeline shows the full movement history (`GET /movement/today`),
+and only your own.
 
-> **Note:** the app does **not** track you continuously in the background. Location is
-> captured only when you perform one of these specific actions.
+A visit cannot start while another one is still open, and a visit started
+inside the boundary cannot be ended from outside it.
+
+> **Note:** the app does **not** track you continuously in the background. It
+> has no background location permission at all. Location is captured only
+> when you press one of these buttons, and nothing in between is recorded —
+> there is no trail of where you were at 11:30.
 
 ### 3.3 Site activity report ⬜ Phase 7
 
@@ -222,7 +250,7 @@ Track status: *Pending → Approved / Rejected*.
 
 ## 4. Site Supervisor
 
-> ⬜ Phase 7–8
+> ✅ Phase 5 (attendance viewing) · ⬜ Phase 7–8 (site reports, overtime, timesheets)
 
 | Capability | Detail |
 |---|---|
@@ -230,7 +258,7 @@ Track status: *Pending → Approved / Rejected*.
 | **Approve site activity reports** | Review reports from your team |
 | **Create / approve overtime** | First step in the overtime approval chain |
 | **Timesheet approval** | Verify hours for your team |
-| **View your site's attendance** | Who is on site today |
+| **View your site's attendance** ✅ | Who was on site, and when — restricted to the sites you run. You also see visits to your sites, and you cannot read a day recorded anywhere else |
 
 **Daily Site Report** can be exported as **PDF**.
 
@@ -251,7 +279,7 @@ Similar to Site Supervisor, focused on technical reporting:
 
 ## 6. Project Manager
 
-> ✅ Phase 4 (project & site management) · ⬜ Phase 12 (dashboard)
+> ✅ Phase 4 (project & site management) · ✅ Phase 5 (attendance & visits on your projects) · ⬜ Phase 12 (dashboard)
 
 **Dashboard:**
 - Projects and sites
@@ -264,22 +292,27 @@ Similar to Site Supervisor, focused on technical reporting:
 - Project details and status (Planned / Active / On Hold / Completed / Cancelled)
 - Sites within your projects, including geofence radius
 - Approval of overtime for your projects
+- **Attendance on the projects you manage** — every day recorded on your
+  projects and their sites, with the GPS distance and the photograph where
+  one was taken. A project's own days and nobody else's
 
 > Scope is limited to projects assigned to you — the server narrows your list,
-> so you are not shown projects you do not run.
+> so you are not shown projects you do not run. Asking for a colleague's
+> record by id is refused with `403`, whatever the filter says.
 
 ---
 
 ## 7. HR Executive
 
-> ✅ Phase 4 (employees, departments, designations) · ⬜ for documents, attendance, leave
+> ✅ Phase 4 (employees, departments, designations) · ✅ Phase 5 (attendance viewing) · ⬜ for documents, leave
 
 - Create and edit employee records
 - Manage departments and designations
 - Upload and organize employee documents
 - Track document expiry (passport, visa, Emirates ID, certificates)
 - Run onboarding and see missing documents
-- View attendance across the company
+- View attendance across the company — every employee, every day, with the
+  GPS distance and the photograph, filtered by date, project, site or status
 - First-level leave approval (depending on configured workflow)
 
 HR Executive may maintain the roster but **cannot delete an employee and cannot
@@ -289,14 +322,16 @@ see anyone's salary** — those two are separate permissions held elsewhere.
 
 ## 8. HR Admin
 
-> ✅ Phase 4 (employee management, site assignments) · ⬜ Phase 5 / 9
+> ✅ Phase 4 (employee management, site assignments) · ✅ Phase 5 (attendance viewing + configuration) · ⬜ Phase 9 (leave)
 
 Everything an HR Executive can do, plus:
 
 | Capability | Detail |
 |---|---|
-| **Attendance management** | View all employees, dates, times, projects, sites, GPS, selfies and status |
-| **Attendance override** | Correct an out-of-geofence or missing record — **reason required, audit-logged** |
+| **Attendance management** ✅ | View all employees, dates, times, projects, sites, GPS, selfies and status — filtered and paginated |
+| **Configure geofence radius** ✅ | Per site, no code changes needed |
+| **Configure working rules** ✅ | Start time, grace period, break, minimum hours, overtime threshold — read from settings, never hard-coded |
+| **Attendance override** | ⬜ **Not built yet.** Correcting an out-of-geofence or missing record is planned with a mandatory reason and an audit trail. Today the correct route is for the employee to re-check-in, or for you to note it with the record; nothing silently overwrites what happened |
 | **Configure geofence radius** | Per site, no code changes needed |
 | **Configure working rules** | Start time, grace period, minimum hours, overtime threshold |
 | **Leave approval & configuration** | Entitlement, carry-forward, max days, documents, workflow |
@@ -397,22 +432,32 @@ Construction sites often have poor connectivity. Attendance is built for this.
 
 **When you check in with no signal:**
 
-1. The record is saved **on your device**
-2. Your selfie is stored securely on your device
-3. The screen shows **"Pending Sync"**
-4. When connection returns (or you next open the app), it syncs automatically
-5. The status changes to **Synced**
+1. The app tries the request first — nothing is parked unnecessarily
+2. If the network fails, the event is saved **on your device** with a unique
+   event id, along with your compressed selfie
+3. The screen shows it under **Pending sync**
+4. Tap **Sync now** whenever you have signal (the app does not sync in the
+   background — it sends when you tell it to, oldest first)
+5. On success it disappears from the list
 
 **If sync fails or is rejected:**
 
-The record shows **"Rejected"** with the reason, for example:
+The record shows the reason, for example:
 
-> *"Outside the allowed area for this site."*
+> *"You are 412 m from Whitefield Yard; the allowed radius is 100 m."*
 
-Nothing is silently discarded, and you can retry or contact HR.
+It stays in the list marked **Failed** so you can read what happened, retry
+after moving, or show it to HR. Nothing is silently discarded.
 
-> **Important:** offline records are re-validated by the server. A device clock or
-> location that has been altered will not be accepted.
+**What is *not* queued:** a refusal — a `403`, a duplicate, or an invalid
+photo. Those are shown straight away, because asking again will not turn a
+no into a yes.
+
+> **Important:** offline records are re-validated by the server exactly as if
+> they had arrived live — the site assignment, the geofence and the accuracy
+> ceiling are all checked again. An altered device clock or a moved position
+> does not become acceptable by being sent later. Retrying sends the *same*
+> event id, so a lost reply can never become a second attendance record.
 
 ---
 
@@ -441,11 +486,16 @@ permission — contact your administrator.
 | Problem | What to try |
 |---|---|
 | "Location not detected" | Ensure GPS is on and permission granted; move away from tall structures |
+| "Your location is too inaccurate" | Move into the open; the ceiling is a configured value, not a guess |
 | "Outside the allowed area" | Confirm you are at your assigned site; contact HR if the site is wrong |
+| "Turn on location services" | Your permission is fine — the phone's Location switch is off |
+| "You chose not to share location" | Open this app's Settings → Location → **Allow only while using the app** |
 | Camera permission denied | Enable camera access in system settings for this app |
+| "No camera available" | The device has no front-facing camera (or it is in use) — ask HR to record it another way |
+| "You have already checked in today" | One row per day; check out, or contact HR if the row is wrong |
 | "Session expired" | Log in again |
-| "No connection" | Your record is saved locally and will sync automatically |
-| Sync shows "Rejected" | Read the reason shown; contact HR if it appears incorrect |
+| "No connection" | Your record is queued on the device — tap **Sync now** when you have signal |
+| Sync shows a reason | Read it; it is shown and kept, not discarded. Move, fix the cause, then retry |
 | Notification not arriving | Check notification preferences and device notification settings |
 
 ---
@@ -457,9 +507,10 @@ permission — contact your administrator.
 | Foundation & documentation | 1 | ✅ Written |
 | Authentication | 3 | ✅ |
 | Employee / Project / Site management | 4 | ✅ |
-| Attendance + geofence + selfie | 5 | ⬜ |
-| Offline sync | 6 | ⬜ |
-| Site visits & reports | 7 | ⬜ |
+| Attendance + geofence + selfie | 5 | ✅ |
+| Offline sync | 5 | ✅ (manual **Sync now**; automatic background sync not built) |
+| Site visits & daily movement timeline | 5 | ✅ |
+| Site activity reports & PDF export | 7 | ⬜ |
 | Shifts, timesheets, overtime | 8 | ⬜ |
 | Leave & LOP | 9 | ⬜ |
 | Documents, training, assets | 10 | ⬜ |

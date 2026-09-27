@@ -67,8 +67,7 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
 
       setState(() {
         _loading = false;
-        _message =
-            'Something went wrong while loading this employee. Please try again.';
+        _message = 'Something went wrong while loading this employee. Please try again.';
       });
     }
   }
@@ -107,9 +106,8 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
     } on ApiException catch (failure) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(failure.message)),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(failure.message)));
     }
   }
 
@@ -168,7 +166,9 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
     // does not depend on that omission alone. `employees.view` alone has never
     // been enough to see a salary.
     final showSalary =
-        scope.canViewSalary && employee.salaryVisible && employee.salary != null;
+        scope.canViewSalary &&
+        employee.salaryVisible &&
+        employee.salary != null;
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -200,10 +200,7 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
                       style: theme.textTheme.titleLarge,
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      employee.summary,
-                      style: theme.textTheme.bodyMedium,
-                    ),
+                    Text(employee.summary, style: theme.textTheme.bodyMedium),
                   ],
                 ),
               ),
@@ -213,10 +210,7 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
           _section('Employment', [
             _row('Employee code', employee.employeeCode),
             _row('Status', employee.employmentStatus.replaceAll('_', ' ')),
-            _row(
-              'Type',
-              employee.employmentType.replaceAll('_', ' '),
-            ),
+            _row('Type', employee.employmentType.replaceAll('_', ' ')),
             _row('Joining date', employee.joiningDate),
             _row('Reporting manager', employee.reportingManagerName),
           ]),
@@ -256,8 +250,8 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
                       key: const ValueKey('detail-edit'),
                       icon: const Icon(Icons.edit_outlined),
                       label: const Text('Edit'),
-                      onPressed: () => context
-                          .push('/employees/${employee.id}/edit'),
+                      onPressed: () =>
+                          context.push('/employees/${employee.id}/edit'),
                     ),
                   ),
                 if (scope.canUpdateEmployees && scope.canDeleteEmployees)
@@ -282,24 +276,22 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
   }
 
   Widget _section(String title, List<Widget> rows) => Padding(
-        padding: const EdgeInsets.only(bottom: 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border.all(color: Theme.of(context).dividerColor),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                children: rows,
-              ),
-            ),
-          ],
+    padding: const EdgeInsets.only(bottom: 24),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border.all(color: Theme.of(context).dividerColor),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(children: rows),
         ),
-      );
+      ],
+    ),
+  );
 
   Widget _row(String label, String? value, {Key? key}) {
     final resolved = (value == null || value.trim().isEmpty) ? '—' : value;
@@ -311,16 +303,10 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
         children: [
           SizedBox(
             width: 140,
-            child: Text(
-              label,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
+            child: Text(label, style: Theme.of(context).textTheme.bodySmall),
           ),
           Expanded(
-            child: Text(
-              resolved,
-              key: key ?? ValueKey('detail-row-$label'),
-            ),
+            child: Text(resolved, key: key ?? ValueKey('detail-row-$label')),
           ),
         ],
       ),

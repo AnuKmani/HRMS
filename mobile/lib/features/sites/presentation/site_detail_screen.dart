@@ -109,9 +109,7 @@ class _SiteDetailScreenState extends ConsumerState<SiteDetailScreen> {
     final scope = ref.watch(permissionScopeProvider);
 
     if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     final site = _site;
@@ -242,22 +240,22 @@ class _SiteDetailScreenState extends ConsumerState<SiteDetailScreen> {
   }
 
   Widget _section(String title, List<Widget> rows) => Padding(
-        padding: const EdgeInsets.only(bottom: 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border.all(color: Theme.of(context).dividerColor),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(children: rows),
-            ),
-          ],
+    padding: const EdgeInsets.only(bottom: 24),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border.all(color: Theme.of(context).dividerColor),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(children: rows),
         ),
-      );
+      ],
+    ),
+  );
 
   Widget _row(String label, String? value, {Key? key}) {
     final resolved = (value == null || value.trim().isEmpty) ? '—' : value;

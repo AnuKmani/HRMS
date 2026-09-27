@@ -9,8 +9,9 @@ import '../../core/storage/token_store.dart';
 import 'auth_repository.dart';
 import 'auth_state.dart';
 
-final authControllerProvider =
-    NotifierProvider<AuthController, AuthState>(AuthController.new);
+final authControllerProvider = NotifierProvider<AuthController, AuthState>(
+  AuthController.new,
+);
 
 /// Owns the session: restoring it at launch, exchanging credentials for one,
 /// ending it, and reacting to the server saying one has stopped being valid.
@@ -76,7 +77,8 @@ class AuthController extends Notifier<AuthState> {
       state = AuthState.signedOut(message: failure.message);
     } catch (_) {
       state = AuthState.signedOut(
-        message: 'We could not reach the server to restore your session. '
+        message:
+            'We could not reach the server to restore your session. '
             'Check your connection and sign in again.',
       );
     }
@@ -87,10 +89,7 @@ class AuthController extends Notifier<AuthState> {
   /// Never throws: this is called from a button, and an unhandled exception
   /// there would leave the form spinning forever with no way to find out why.
   /// Every failure lands in [state] where the form can draw it.
-  Future<bool> login({
-    required String email,
-    required String password,
-  }) async {
+  Future<bool> login({required String email, required String password}) async {
     state = const AuthState(status: AuthStatus.authenticating);
 
     try {

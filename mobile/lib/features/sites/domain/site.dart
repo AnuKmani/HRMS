@@ -73,25 +73,25 @@ class Site {
   }
 
   factory Site.fromJson(Map<String, dynamic> json) => Site(
-        id: _int(json['id']) ?? 0,
-        name: json['name'] as String? ?? '',
-        code: json['code'] as String? ?? '',
-        address: json['address'] as String?,
-        projectId: _int(json['project_id']),
-        projectName: _nested(json['project'], 'name'),
-        latitude: _decimal(json['latitude']),
-        longitude: _decimal(json['longitude']),
-        geofenceRadius: _decimal(json['geofence_radius']),
-        siteManagerId: _int(json['site_manager_id']),
-        siteManagerName: _nested(json['site_manager'], 'full_name'),
-        siteSupervisorId: _int(json['site_supervisor_id']),
-        siteSupervisorName: _nested(json['site_supervisor'], 'full_name'),
-        shiftId: _int(json['shift_id']),
-        shiftName: _nested(json['shift'], 'name'),
-        workingHoursSettingId: _int(json['working_hours_setting_id']),
-        status: json['status'] as String?,
-        createdAt: json['created_at'] as String?,
-      );
+    id: _int(json['id']) ?? 0,
+    name: json['name'] as String? ?? '',
+    code: json['code'] as String? ?? '',
+    address: json['address'] as String?,
+    projectId: _int(json['project_id']),
+    projectName: _nested(json['project'], 'name'),
+    latitude: _decimal(json['latitude']),
+    longitude: _decimal(json['longitude']),
+    geofenceRadius: _decimal(json['geofence_radius']),
+    siteManagerId: _int(json['site_manager_id']),
+    siteManagerName: _nested(json['site_manager'], 'full_name'),
+    siteSupervisorId: _int(json['site_supervisor_id']),
+    siteSupervisorName: _nested(json['site_supervisor'], 'full_name'),
+    shiftId: _int(json['shift_id']),
+    shiftName: _nested(json['shift'], 'name'),
+    workingHoursSettingId: _int(json['working_hours_setting_id']),
+    status: json['status'] as String?,
+    createdAt: json['created_at'] as String?,
+  );
 }
 
 int? _int(Object? value) {

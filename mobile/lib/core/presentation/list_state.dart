@@ -98,18 +98,17 @@ class ListState<T> {
     int? perPage,
     int? total,
     bool? loadingMore,
-  }) =>
-      ListState<T>(
-        status: status ?? this.status,
-        items: items ?? this.items,
-        message: message ?? this.message,
-        query: query ?? this.query,
-        page: page ?? this.page,
-        lastPage: lastPage ?? this.lastPage,
-        perPage: perPage ?? this.perPage,
-        total: total ?? this.total,
-        loadingMore: loadingMore ?? this.loadingMore,
-      );
+  }) => ListState<T>(
+    status: status ?? this.status,
+    items: items ?? this.items,
+    message: message ?? this.message,
+    query: query ?? this.query,
+    page: page ?? this.page,
+    lastPage: lastPage ?? this.lastPage,
+    perPage: perPage ?? this.perPage,
+    total: total ?? this.total,
+    loadingMore: loadingMore ?? this.loadingMore,
+  );
 }
 
 /// The behaviour every list screen shares: fetch page one, ask for more,
@@ -252,9 +251,7 @@ abstract class PagedListController<T> extends Notifier<ListState<T>> {
 
       state = state.copyWith(
         status: ListStatus.ready,
-        items: reset
-            ? result.items
-            : <T>[...state.items, ...result.items],
+        items: reset ? result.items : <T>[...state.items, ...result.items],
         page: result.currentPage,
         lastPage: result.lastPage,
         perPage: result.perPage,

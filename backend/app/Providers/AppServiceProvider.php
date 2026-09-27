@@ -60,5 +60,17 @@ class AppServiceProvider extends ServiceProvider
                 (int) config('rate_limiting.password_reset.max_attempts'),
             )->by('password_reset:'.$request->ip());
         });
+
+        // Attendance writes. Keyed by the authenticated user rather than by
+        // IP, because a crew on one site shares an address and one device
+        // retrying on a weak signal must not stop everyone else clocking in.
+        // Unauthenticated traffic falls back to the IP — it never reaches
+        // these routes anyway, since auth:sanctum runs first.
+        RateLimiter::for('attendance', function (Request $request) {
+            return Limit::perMinutes(
+                (int) config('rate_limiting.attendance.decay_minutes'),
+                (int) config('rate_limiting.attendance.max_attempts'),
+            )->by('attendance:'.($request->user()?->getAuthIdentifier() ?? $request->ip()));
+        });
     }
 }

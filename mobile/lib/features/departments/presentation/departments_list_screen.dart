@@ -37,15 +37,15 @@ class DepartmentsListScreen extends ConsumerWidget {
         provider: departmentsListProvider,
         searchHint: 'Search departments',
         emptyMessage: 'No departments yet.',
-        emptyHint: 'Departments are the first thing an organisation chart needs.',
+        emptyHint:
+            'Departments are the first thing an organisation chart needs.',
         itemBuilder: (context, department, index) => ListTile(
           key: ValueKey('department-${department.id}'),
           title: Text(department.name),
           subtitle: Text(department.summary),
           trailing: department.isActive ? null : const _InactiveTag(),
-          onTap: () => canManage
-              ? context.push('/departments/${department.id}')
-              : null,
+          onTap: () =>
+              canManage ? context.push('/departments/${department.id}') : null,
         ),
       ),
     );

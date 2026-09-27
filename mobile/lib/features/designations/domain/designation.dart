@@ -43,27 +43,25 @@ class Designation {
     parts.add(department?.name ?? 'No department');
 
     if (employeesCount != null) {
-      parts.add(
-        '$employeesCount ${employeesCount == 1 ? 'person' : 'people'}',
-      );
+      parts.add('$employeesCount ${employeesCount == 1 ? 'person' : 'people'}');
     }
 
     return parts.join(' · ');
   }
 
   factory Designation.fromJson(Map<String, dynamic> json) => Designation(
-        id: _int(json['id']) ?? 0,
-        name: json['name'] as String? ?? '',
-        code: json['code'] as String? ?? '',
-        description: json['description'] as String?,
-        status: json['status'] as String? ?? 'active',
-        departmentId: _int(json['department_id']),
-        department: json['department'] is Map<String, dynamic>
-            ? Department.fromJson(json['department']! as Map<String, dynamic>)
-            : null,
-        employeesCount: _int(json['employees_count']),
-        createdAt: json['created_at'] as String?,
-      );
+    id: _int(json['id']) ?? 0,
+    name: json['name'] as String? ?? '',
+    code: json['code'] as String? ?? '',
+    description: json['description'] as String?,
+    status: json['status'] as String? ?? 'active',
+    departmentId: _int(json['department_id']),
+    department: json['department'] is Map<String, dynamic>
+        ? Department.fromJson(json['department']! as Map<String, dynamic>)
+        : null,
+    employeesCount: _int(json['employees_count']),
+    createdAt: json['created_at'] as String?,
+  );
 }
 
 int? _int(Object? value) {

@@ -50,8 +50,7 @@ class _ProjectFormScreenState extends ConsumerState<ProjectFormScreen> {
 
   bool get _isCreate => widget.projectId == null;
 
-  ProjectsRepository get _repository =>
-      ref.read(projectsRepositoryProvider);
+  ProjectsRepository get _repository => ref.read(projectsRepositoryProvider);
 
   @override
   void initState() {
@@ -266,8 +265,9 @@ class _ProjectFormScreenState extends ConsumerState<ProjectFormScreen> {
                       isRequired: true,
                       options: _projectStatuses,
                       value: _status,
-                      onChanged:
-                          _saving ? (_) {} : (v) => setState(() => _status = v),
+                      onChanged: _saving
+                          ? (_) {}
+                          : (v) => setState(() => _status = v),
                       errorText: _errors['status'],
                     ),
                     const SizedBox(height: 8),
@@ -278,8 +278,7 @@ class _ProjectFormScreenState extends ConsumerState<ProjectFormScreen> {
                           ? const SizedBox(
                               width: 20,
                               height: 20,
-                              child:
-                                  CircularProgressIndicator(strokeWidth: 2),
+                              child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : Text(_isCreate ? 'Create' : 'Save changes'),
                     ),

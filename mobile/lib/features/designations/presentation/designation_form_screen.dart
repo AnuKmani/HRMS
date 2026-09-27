@@ -214,8 +214,9 @@ class _DesignationFormScreenState extends ConsumerState<DesignationFormScreen> {
                         StatusOption('inactive', 'Inactive'),
                       ],
                       value: _status,
-                      onChanged:
-                          _saving ? (_) {} : (v) => setState(() => _status = v),
+                      onChanged: _saving
+                          ? (_) {}
+                          : (v) => setState(() => _status = v),
                       errorText: _errors['status'],
                     ),
                     const SizedBox(height: 8),
@@ -226,8 +227,7 @@ class _DesignationFormScreenState extends ConsumerState<DesignationFormScreen> {
                           ? const SizedBox(
                               width: 20,
                               height: 20,
-                              child:
-                                  CircularProgressIndicator(strokeWidth: 2),
+                              child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : Text(_isCreate ? 'Create' : 'Save changes'),
                     ),

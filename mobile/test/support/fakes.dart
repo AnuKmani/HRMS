@@ -125,16 +125,15 @@ AuthUser buildUser({
   List<String> roles = const ['Employee'],
   List<String> permissions = const ['attendance.view'],
   EmployeeBrief? employee,
-}) =>
-    AuthUser(
-      id: id,
-      name: name,
-      email: email,
-      status: status,
-      roles: roles,
-      permissions: permissions,
-      employee: employee,
-    );
+}) => AuthUser(
+  id: id,
+  name: name,
+  email: email,
+  status: status,
+  roles: roles,
+  permissions: permissions,
+  employee: employee,
+);
 
 /// The providers every auth test shares — a fake server, a fake keystore, and
 /// a device label that cannot collide with anything — wired into a widget tree.
@@ -149,29 +148,27 @@ Widget scopedAuth({
   required InMemoryTokenStore tokenStore,
   required Widget child,
   DeviceIdentity identity = const FixedDeviceIdentity('test-device'),
-}) =>
-    ProviderScope(
-      overrides: [
-        authRepositoryProvider.overrideWithValue(repository),
-        tokenStoreProvider.overrideWithValue(tokenStore),
-        deviceIdentityProvider.overrideWithValue(identity),
-      ],
-      child: child,
-    );
+}) => ProviderScope(
+  overrides: [
+    authRepositoryProvider.overrideWithValue(repository),
+    tokenStoreProvider.overrideWithValue(tokenStore),
+    deviceIdentityProvider.overrideWithValue(identity),
+  ],
+  child: child,
+);
 
 /// The same wiring, for tests that want the providers without a widget tree.
 ProviderContainer authContainer({
   required FakeAuthRepository repository,
   required InMemoryTokenStore tokenStore,
   DeviceIdentity identity = const FixedDeviceIdentity('test-device'),
-}) =>
-    ProviderContainer(
-      overrides: [
-        authRepositoryProvider.overrideWithValue(repository),
-        tokenStoreProvider.overrideWithValue(tokenStore),
-        deviceIdentityProvider.overrideWithValue(identity),
-      ],
-    );
+}) => ProviderContainer(
+  overrides: [
+    authRepositoryProvider.overrideWithValue(repository),
+    tokenStoreProvider.overrideWithValue(tokenStore),
+    deviceIdentityProvider.overrideWithValue(identity),
+  ],
+);
 
 const ApiException invalidCredentials = ApiException(
   statusCode: 401,

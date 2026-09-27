@@ -54,8 +54,7 @@ class PermissionScope {
   /// to (Super Admin, HR Admin, Payroll Admin, Finance).
   bool get canViewSalary => can('employees.salary.view');
 
-  bool get canEditEmployees =>
-      canCreateEmployees || canUpdateEmployees;
+  bool get canEditEmployees => canCreateEmployees || canUpdateEmployees;
 
   /* --------------------------------------------------- departments */
 

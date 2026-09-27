@@ -36,15 +36,15 @@ class EmployeeBrief {
   final String employmentStatus;
 
   factory EmployeeBrief.fromJson(Map<String, dynamic> json) => EmployeeBrief(
-        id: json['id'] as int,
-        employeeCode: json['employee_code'] as String,
-        fullName: json['full_name'] as String,
-        photoPath: json['photo_path'] as String?,
-        department: json['department'] as String?,
-        designation: json['designation'] as String?,
-        employmentType: json['employment_type'] as String,
-        employmentStatus: json['employment_status'] as String,
-      );
+    id: json['id'] as int,
+    employeeCode: json['employee_code'] as String,
+    fullName: json['full_name'] as String,
+    photoPath: json['photo_path'] as String?,
+    department: json['department'] as String?,
+    designation: json['designation'] as String?,
+    employmentType: json['employment_type'] as String,
+    employmentStatus: json['employment_status'] as String,
+  );
 }
 
 /// The signed-in user, matching `UserResource`.
@@ -88,16 +88,16 @@ class AuthUser {
   bool can(String permission) => permissions.contains(permission);
 
   factory AuthUser.fromJson(Map<String, dynamic> json) => AuthUser(
-        id: json['id'] as int,
-        name: json['name'] as String,
-        email: json['email'] as String,
-        status: json['status'] as String? ?? 'active',
-        roles: _stringList(json['roles']),
-        permissions: _stringList(json['permissions']),
-        employee: json['employee'] is Map<String, dynamic>
-            ? EmployeeBrief.fromJson(json['employee']! as Map<String, dynamic>)
-            : null,
-      );
+    id: json['id'] as int,
+    name: json['name'] as String,
+    email: json['email'] as String,
+    status: json['status'] as String? ?? 'active',
+    roles: _stringList(json['roles']),
+    permissions: _stringList(json['permissions']),
+    employee: json['employee'] is Map<String, dynamic>
+        ? EmployeeBrief.fromJson(json['employee']! as Map<String, dynamic>)
+        : null,
+  );
 }
 
 /// A successful POST /auth/login.
@@ -127,5 +127,8 @@ class LoginResult {
 List<String> _stringList(Object? value) {
   if (value is! List) return const <String>[];
 
-  return <String>[for (final item in value) if (item is String) item];
+  return <String>[
+    for (final item in value)
+      if (item is String) item,
+  ];
 }

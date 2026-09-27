@@ -70,21 +70,21 @@ class Project {
   }
 
   factory Project.fromJson(Map<String, dynamic> json) => Project(
-        id: _int(json['id']) ?? 0,
-        name: json['name'] as String? ?? '',
-        code: json['code'] as String? ?? '',
-        client: json['client'] as String?,
-        description: json['description'] as String?,
-        location: json['location'] as String?,
-        projectManagerId: _int(json['project_manager_id']),
-        projectManagerName: _nested(json['project_manager'], 'full_name'),
-        startDate: json['start_date'] as String?,
-        endDate: json['end_date'] as String?,
-        status: json['status'] as String? ?? 'planned',
-        sitesCount: _int(json['sites_count']),
-        employeesCount: _int(json['employees_count']),
-        createdAt: json['created_at'] as String?,
-      );
+    id: _int(json['id']) ?? 0,
+    name: json['name'] as String? ?? '',
+    code: json['code'] as String? ?? '',
+    client: json['client'] as String?,
+    description: json['description'] as String?,
+    location: json['location'] as String?,
+    projectManagerId: _int(json['project_manager_id']),
+    projectManagerName: _nested(json['project_manager'], 'full_name'),
+    startDate: json['start_date'] as String?,
+    endDate: json['end_date'] as String?,
+    status: json['status'] as String? ?? 'planned',
+    sitesCount: _int(json['sites_count']),
+    employeesCount: _int(json['employees_count']),
+    createdAt: json['created_at'] as String?,
+  );
 }
 
 int? _int(Object? value) {

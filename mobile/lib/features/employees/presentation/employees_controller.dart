@@ -7,8 +7,8 @@ import '../domain/employee.dart';
 
 final employeesListProvider =
     NotifierProvider<EmployeesListController, ListState<Employee>>(
-  EmployeesListController.new,
-);
+      EmployeesListController.new,
+    );
 
 /// Employees as an option list — reporting managers, site supervisors,
 /// project managers.
@@ -17,20 +17,21 @@ final employeesListProvider =
 /// into a dropdown must not rewrite the filter the list screen is drawing.
 final employeesPickerProvider =
     NotifierProvider<EmployeesPickerController, ListState<Employee>>(
-  EmployeesPickerController.new,
-);
+      EmployeesPickerController.new,
+    );
 
 class EmployeesListController extends PagedListController<Employee> {
   @override
   Future<PageResult<Employee>> fetch({
     required int page,
     required Map<String, Object?> query,
-  }) =>
-      ref.watch(employeesRepositoryProvider).list(page: page, query: query);
+  }) => ref.watch(employeesRepositoryProvider).list(page: page, query: query);
 }
 
 class EmployeesPickerController extends EmployeesListController {
   @override
-  Map<String, Object?> get baseQuery =>
-      const <String, Object?>{'per_page': 100, 'sort': 'first_name'};
+  Map<String, Object?> get baseQuery => const <String, Object?>{
+    'per_page': 100,
+    'sort': 'first_name',
+  };
 }

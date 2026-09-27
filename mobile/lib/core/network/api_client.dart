@@ -46,14 +46,14 @@ class ApiEnvelope {
 /// password on the login form can never be mistaken for an expired session.
 class ApiClient {
   ApiClient({required String baseUrl, required TokenStore tokenStore})
-      : dio = Dio(
-          BaseOptions(
-            baseUrl: baseUrl,
-            connectTimeout: const Duration(seconds: 10),
-            receiveTimeout: const Duration(seconds: 15),
-            headers: <String, String>{'Accept': 'application/json'},
-          ),
-        ) {
+    : dio = Dio(
+        BaseOptions(
+          baseUrl: baseUrl,
+          connectTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 15),
+          headers: <String, String>{'Accept': 'application/json'},
+        ),
+      ) {
     dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
@@ -84,7 +84,8 @@ class ApiClient {
 
   final Dio dio;
 
-  final StreamController<void> _sessionRejected = StreamController<void>.broadcast();
+  final StreamController<void> _sessionRejected =
+      StreamController<void>.broadcast();
 
   /// Fires when the server rejects a token this app sent.
   ///
@@ -97,6 +98,25 @@ class ApiClient {
 
   Future<ApiEnvelope> post(String path, {Object? body}) =>
       _send(() => dio.post<dynamic>(path, data: body));
+
+  /// A POST carrying a file — the check-in selfie, and nothing else today.
+  ///
+  /// Written as a separate verb rather than letting `post` guess: `post`
+  /// sends JSON, and a `FormData` handed to a JSON endpoint would arrive as
+  /// an empty body with a multipart header, which is the kind of failure
+  /// that looks like a server bug for an hour. Fields and the file are
+  /// named explicitly so the caller's payload is readable at the call site.
+  Future<ApiEnvelope> postMultipart(
+    String path, {
+    required Map<String, Object?> fields,
+    Map<String, MultipartFile>? files,
+  }) {
+    final form = <String, Object?>{...fields};
+
+    files?.forEach((name, file) => form[name] = file);
+
+    return _send(() => dio.post<dynamic>(path, data: FormData.fromMap(form)));
+  }
 
   Future<ApiEnvelope> put(String path, {Object? body}) =>
       _send(() => dio.put<dynamic>(path, data: body));
@@ -137,7 +157,8 @@ class ApiClient {
     // repository on a shape nobody verified.
     throw ApiException(
       statusCode: response.statusCode ?? 0,
-      message: 'The server sent a response this app does not understand. '
+      message:
+          'The server sent a response this app does not understand. '
           'Please check for an app update.',
     );
   }

@@ -54,7 +54,7 @@ class PageResult<T> {
       hasNext: rawMeta['has_next'] is bool
           ? rawMeta['has_next']! as bool
           : _int(rawMeta['current_page'], fallback: 1) <
-              _int(rawMeta['last_page'], fallback: 1),
+                _int(rawMeta['last_page'], fallback: 1),
     );
   }
 

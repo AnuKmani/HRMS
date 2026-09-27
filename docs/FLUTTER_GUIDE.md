@@ -1,9 +1,13 @@
 # Flutter Guide
 
-> **Status:** Phase 4 — Flutter is installed (on `F:`), the project exists, and the
-> first business slice is built and tested (`flutter analyze` clean, `flutter test`
-> **89 passed**). This guide explains the concepts and patterns the app uses, written
-> for someone who knows PHP/Laravel but is new to Flutter/Dart.
+> **Status:** Phase 5 — Flutter is installed (on `F:`), the project exists, and
+> two business slices are built and tested: the organisation modules and GPS
+> attendance. `dart format .` clean, `flutter analyze` clean, `flutter test`
+> **176 passed**. This guide explains the concepts and patterns the app uses,
+> written for someone who knows PHP/Laravel but is new to Flutter/Dart.
+> Sections that were written as a plan in Phase 4 — the offline queue, the
+> location and camera permission flows, the `attendance/` folder — are now
+> describing shipped code, and say so.
 
 ---
 
@@ -108,7 +112,8 @@ class AttendanceScreen extends ConsumerWidget {
 **What it is:** a screen that rebuilds automatically when its data changes.
 **Why `ConsumerWidget` instead of `StatelessWidget`:** it lets the widget *watch* a
 Riverpod provider. Plain widgets cannot access providers.
-**Where it belongs:** `features/attendance/presentation/attendance_screen.dart`.
+**Where it belongs:** `features/attendance/presentation/attendance_screen.dart` —
+which exists, and is where the example below was taken from.
 
 **Every screen must handle four states:** loading, error, empty, data. `core/widgets/`
 provides shared `LoadingView`, `ErrorView`, `EmptyState` for this.
@@ -239,7 +244,10 @@ class AttendanceRepositoryImpl implements AttendanceRepository {
 }
 ```
 
-**Where it belongs:** `features/attendance/data/repositories/attendance_repository.dart`.
+**Where it belongs:** the contract in `features/attendance/domain/attendance_repository.dart`,
+the Dio implementation beside it in `features/attendance/data/api_attendance_repository.dart`.
+That split is what lets a widget test hand the screen a scripted repository that
+records every call instead of a socket.
 
 **Why this matters for offline:** when you add offline support you change *this class*.
 The screen and the provider stay untouched.
@@ -370,9 +378,11 @@ Never show a raw exception to a user. Log it for developers instead.
 | Data | Storage |
 |---|---|
 | Auth token | **`flutter_secure_storage`** (Keychain / Keystore) |
-| User profile, cached lists | Drift (SQLite) |
+| User profile, cached lists | Drift (SQLite) — *planned; nothing needs it yet* |
 | Non-sensitive flags (theme, last tab) | `shared_preferences` |
-| Queued attendance + selfies | Drift + app-private directory |
+| Queued attendance events | `shared_preferences` — one JSON blob under `attendance.offline_queue.v1` |
+| Queued selfies | app-private documents dir, `attendance-offline-selfies/{uuid}.jpg` |
+| Live selfie (before submit) | app-private temp dir, deleted on success or discard |
 
 **Never** store a password or token in `shared_preferences` — it is written as plain
 XML/plist on disk.
@@ -480,26 +490,63 @@ as a nullable `int?`, `null` meaning create.
 
 ## 10. Offline queue design
 
+**As built in Phase 5 ✅** — `features/attendance/data/offline_queue.dart`:
+
 ```
 Check-in happens with no signal
         ↓
-Compress selfie (~200 KB) → app-private storage
+Compress selfie → app-private documents dir
+attendance-offline-selfies/{clientEventId}.jpg
         ↓
-Insert into Drift `pending_actions`
-   { local_uuid, type, payload_json, selfie_path,
-     gps_lat, gps_lng, accuracy, client_timestamp, status='pending' }
+POST /attendance/check-in  (the request is attempted, not parked)
         ↓
-UI shows "Pending Sync" badge
+network failure (statusCode == 0)
+   ├─ any other failure (403 / 409 / 422 / 429) → NOT queued — it is shown,
+   │  because retrying will not turn a refusal into an acceptance
+   └─ only a transport failure queues:
+        OfflineEvent {
+          clientEventId,        ← minted BEFORE the first attempt
+          action,               check_in | check_out | start_visit
+          siteId, purpose, remarks,
+          latitude, longitude, accuracy,
+          capturedAt,           ← device clock, for the person to read
+          deviceReference,
+          selfiePath,           ← local file, not bytes in the blob
+          syncStatus: pending_sync,
+          attempts, lastError
+        }
         ↓
-Connectivity returns (or app reopens) → upload batch
+UI shows the queued events with a "Sync now" action
         ↓
-Laravel re-validates: geofence, duplicate, timing
-   ├─ accepted → server returns attendance_id → status='synced'
-   └─ rejected → status='rejected' + reason → shown to the employee
+Manual replay, oldest first
+        ↓
+Laravel re-validates everything as if live: assignment, geofence,
+accuracy ceiling, duplicate-day, open-row
+   ├─ accepted → 201/200 with the row → removed from the queue
+   ├─ rejected → 4xx with a message → syncStatus = 'failed', kept for reading
+   └─ 0 / 401 → stop; the rest stay 'pending_sync'
 ```
 
-**Why Drift and not simple key-value storage:** attendance is relational and needs
-transactions plus a **unique constraint on `local_uuid`** so a retry can never duplicate.
+**Why preferences and not Drift.** The queue is a *list of outbound
+messages*, not a set of relations: each event is self-contained, nothing
+joins to anything, and it disappears once sent. The duplicate-prevention
+unique constraint lives **on the server** (`client_event_id`), which is
+where it has to live — a local constraint only stops a device from
+duplicating itself, not two devices or a lost reply. A whole SQL engine for
+a list that is emptied daily is a dependency with no work to do.
+
+`OfflineQueueStore` is an interface, so a later module that *is* relational
+(timesheets, payroll runs) can put a Drift implementation behind the same
+name and nothing above it changes.
+
+**Two properties the tests hold:**
+
+1. **A replay is byte-identical in identity.** Retrying re-sends the *same*
+   `clientEventId` — never a fresh one — so the server can recognise it as
+   the same event rather than as a second day.
+2. **A refusal does not accumulate.** A rejected replay marks `failed` and
+   keeps the event and its selfie, so the reason can be read and the person
+   can decide, instead of an endlessly retrying loop.
 
 ---
 
@@ -535,6 +582,49 @@ it is built to hold, each of them under test:
 **Remember:** this only controls *visibility*. The API enforces the real rule and
 returns `403` if the app is bypassed — which is why every form and detail screen
 has a test that renders that `403` as a refusal rather than as a broken page.
+
+### 11.1 OS permissions (Phase 5 ✅) — a different kind of permission
+
+`PermissionScope` answers *"may this account do this?"*. Android and iOS ask
+*"may this app use this hardware?"*. The two are unrelated: an account may be
+allowed to check in while the handset refuses to hand over a location. Both
+answers have to be drawn, and they are drawn differently.
+
+`LocationStatus` (`features/attendance/data/device_location.dart`) is an
+enum with a message attached to each value — the screen never has to invent
+one:
+
+| Status | What the screen shows |
+|---|---|
+| `notDetermined` | Ask, with a plain-language reason **first** — why a geofence needs a fix |
+| `denied` | "Location access is off for this app." + a way to request again |
+| `permanentlyDenied` | "You chose not to share location." + a button to Settings, plus the pre-filled "Allow only while using the app" guide |
+| `restricted` | Platform-managed (parental controls / MDM) — explain, do not offer Settings as if it would help |
+| `servicesOff` | The OS granted permission but the **location switch is off**. A separate state, because "you said yes but the radio is off" is a different fix from "you said no" |
+| `granted` | A fix with accuracy — usable or not, decided by `LocationFix.isUsable` |
+
+Five rules the implementation holds:
+
+1. **Foreground only.** `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION` and
+   `CAMERA` are declared; `ACCESS_BACKGROUND_LOCATION` is not. Nothing
+   requests a permission the feature does not use.
+2. **The reason precedes the dialog.** The system prompt is a yes/no; the
+   person needs a sentence explaining what for before it appears.
+3. **Advisory, labelled as advisory.** `LocalGeofence.assess()` computes the
+   distance so the user learns they are outside the radius *before* taking a
+   selfie they would rather not take — and the UI says the server measures
+   again. The client never decides; it only warns.
+4. **A denial never blocks the app.** The attendance screen explains and
+   points at Settings; the rest of the application keeps working.
+5. **No crash, no silent loop.** Every status is a state the UI renders;
+   there is no code path where a missing permission surfaces as an
+   unhandled exception or a request fired into nothing.
+
+Camera permission is the same shape: `CameraStatus` distinguishes
+`notDetermined` / `denied` / `permanentlyDenied` / `unavailable` (no
+front-facing camera, or the simulator has none) / `ready`, each with its own
+message and its own way forward — including "no camera" being an honest
+answer rather than a black preview.
 
 ---
 
@@ -602,8 +692,11 @@ parsing without a socket.
 
 `auth/` stays flat because five files do not need four directories. The nested
 shape starts paying for itself exactly when a feature grows local sources of
-its own — which the Phase 4 modules did, and which `attendance/` will when the
-offline queue arrives in Phase 6.
+its own — which the Phase 4 modules did, and which `attendance/` did in Phase
+5: it is the first feature with sources that are not repositories
+(`device_location.dart`, `selfie_camera.dart`, `offline_queue.dart`,
+`local_geofence.dart`), and each of those is a seam a test replaces with a
+fake instead of with a permission it does not have.
 
 ---
 
@@ -656,10 +749,15 @@ flutter build appbundle         # build an AAB for Play Store
 | Add a package | `flutter pub add <package>` |
 | Remove a package | `flutter pub remove <package>` |
 | Upgrade packages | `flutter pub upgrade` |
-| Format code | `dart format lib` |
+| Format code | `dart format .` (from `mobile/`) |
 | Analyze | `flutter analyze` |
 | Test coverage | `flutter test --coverage` |
 | Clean build | `flutter clean` (use when builds behave oddly) |
+
+> **Format from `mobile/`, not `mobile/lib`.** `dart format .` covers the
+> tests too, and `flutter analyze` will happily pass on files a formatter
+> would rewrite. The gate before a commit is all three in order:
+> `dart format .`, `flutter analyze`, `flutter test`.
 
 ---
 
@@ -668,12 +766,17 @@ flutter build appbundle         # build an AAB for Play Store
 | ❌ Don't | ✅ Do instead |
 |---|---|
 | Call Dio directly inside a `build()` method | Call a Repository via a provider |
-| Validate geofence only in Flutter | Always let Laravel make the final decision |
+| Validate geofence only in Flutter | Always let Laravel make the final decision — the phone *advises*, the request carries coordinates, the server decides |
 | Store tokens in `shared_preferences` | Use `flutter_secure_storage` |
 | Show raw exceptions to users | Map to friendly messages, log the details |
 | Skip loading/error/empty states | Use the shared widgets from `core/widgets/` |
-| Hard-code site coordinates or radii | Read them from the API |
+| Hard-code site coordinates or radii | Read them from the API — `site.geofence_radius` and `max_gps_accuracy_metres` arrive already defaulted |
 | Rebuild everything for a small change | Watch only the specific provider you need |
+| Mint a new `clientEventId` on a retry | Re-send the one that was generated before the first attempt, or the server sees a second event |
+| Queue a 403/409/422 | Queue only a transport failure; a refusal will not become an acceptance by being asked again |
+| Convert a server timestamp to local time for display | Slice it (`'HH:mm'.substring(0, 5)` on the wall-clock string the server sent) — the day the server assigned and the time it recorded must not be shifted by the phone's zone |
+| Dispose a `TextEditingController` while its dialog is still animating out | Let the dialog own its controllers and dispose them itself |
+| Assume `flutter test` can rasterise a camera frame | Script the camera to return real bytes (a 1×1 PNG) and assert on the logic |
 
 ---
 
@@ -684,14 +787,23 @@ flutter build appbundle         # build an AAB for Play Store
 | This guide (concepts + patterns) | ✅ Written |
 | Flutter SDK install (on `F:`) | ✅ Phase 1b |
 | Flutter project skeleton | ✅ Phase 1b |
-| Packages: `flutter_riverpod` 3.4.3 · `dio` 5.11.1 · `go_router` 18.0.1 · `flutter_secure_storage` 11.2.0 | ✅ Phase 3 — **no Phase 4 additions** |
+| Packages: `flutter_riverpod` 3.4.3 · `dio` 5.11.1 · `go_router` 18.0.1 · `flutter_secure_storage` 11.2.0 | ✅ Phase 3 |
+| Packages: `geolocator` ^14.1.0 · `camera` ^0.12.1 · `image` ^4.10.1 · `shared_preferences` ^2.5.5 · `path_provider` ^2.1.6 | ✅ Phase 5 — five additions, each checked for Dart 3.13 / Flutter 3.47 compatibility before it was added |
+| Packages deliberately **not** added | ✅ Phase 5 — `connectivity_plus` (the queue learns a failure is transport-level from the failed request itself; a connectivity plugin would report "online" at a captive portal) and `permission_handler` (it drags in platform channels the two permissions we need do not require — `geolocator` and `camera` already surface their own statuses) |
 | `core/` — config, network, storage, router | ✅ Phase 3 |
 | `core/data` page envelope · `core/permissions` scope · `core/presentation` list + form widgets | ✅ Phase 4 |
 | Auth feature — controller, repository, models, login + splash screens | ✅ Phase 3 |
 | Router guard (`refreshListenable`) + session restore | ✅ Phase 3 |
 | Module routes + permission-gated home tiles | ✅ Phase 4 |
 | Employees / departments / designations / projects / sites — 13 screens | ✅ Phase 4 |
+| `features/attendance/` — data · domain · presentation (3 layers) | ✅ Phase 5 |
+| Attendance screen — today, site picker, CHECK IN / SITE VISIT / CHECK OUT, loading / disabled / error states | ✅ Phase 5 |
+| Location permission flow (6 states incl. GPS-off) + advisory local geofence | ✅ Phase 5 |
+| Camera permission flow + capture → preview → retake → compress → submit | ✅ Phase 5 |
+| Offline queue (event UUID, `pending_sync`, manual Sync now, `clientEventId` reuse) | ✅ Phase 5 |
+| Android manifest — fine/coarse location + camera, **no** background location | ✅ Phase 5 |
+| `dart format .` | ✅ clean (88 files) |
 | `flutter analyze` | ✅ clean |
-| `flutter test` | ✅ **89 passed** |
-| Local database (Drift) + offline queue | ⬜ Phase 6 |
+| `flutter test` | ✅ **176 passed** |
+| Local database (Drift) + relational offline cache | ⬜ Not started — Phase 5 proved the queue does not need it (§10); revisit when a module is genuinely relational |
 | Shared widgets under `core/widgets/` | ⬜ The list and form widgets live in `core/presentation/` today; the split is worth it once a second, differently-shaped widget set appears |

@@ -14,22 +14,22 @@ import '../../../support/phase4.dart';
 /// called either way, and a router that could not resolve it would throw and
 /// fail the test for the wrong reason.
 GoRouter formRouter(String initialLocation) => GoRouter(
-      initialLocation: initialLocation,
-      routes: [
-        GoRoute(path: '/', builder: (_, _) => const SizedBox()),
-        GoRoute(path: '/departments', builder: (_, _) => const SizedBox()),
-        GoRoute(
-          path: '/departments/new',
-          builder: (_, _) => const DepartmentFormScreen(),
-        ),
-        GoRoute(
-          path: '/departments/:id',
-          builder: (_, state) => DepartmentFormScreen(
-            departmentId: int.parse(state.pathParameters['id']!),
-          ),
-        ),
-      ],
-    );
+  initialLocation: initialLocation,
+  routes: [
+    GoRoute(path: '/', builder: (_, _) => const SizedBox()),
+    GoRoute(path: '/departments', builder: (_, _) => const SizedBox()),
+    GoRoute(
+      path: '/departments/new',
+      builder: (_, _) => const DepartmentFormScreen(),
+    ),
+    GoRoute(
+      path: '/departments/:id',
+      builder: (_, state) => DepartmentFormScreen(
+        departmentId: int.parse(state.pathParameters['id']!),
+      ),
+    ),
+  ],
+);
 
 const invalid = ApiException(
   statusCode: 422,
@@ -65,7 +65,10 @@ void main() {
         const Department(id: 99, name: 'New', code: 'NEW', status: 'active');
   });
 
-  Future<void> pumpForm(WidgetTester tester, {String at = '/departments/new'}) async {
+  Future<void> pumpForm(
+    WidgetTester tester, {
+    String at = '/departments/new',
+  }) async {
     useTallScreen(tester);
     await tester.pumpWidget(
       scopedPhase4(
@@ -90,8 +93,9 @@ void main() {
     await tester.enterText(find.byType(TextField).at(2), description);
   }
 
-  testWidgets('a half-filled form is refused before anything is sent',
-      (tester) async {
+  testWidgets('a half-filled form is refused before anything is sent', (
+    tester,
+  ) async {
     await pumpForm(tester);
 
     await tester.tap(find.byKey(const ValueKey('form-save')));
@@ -104,28 +108,36 @@ void main() {
     expect(find.byKey(const ValueKey('form-error')), findsNothing);
   });
 
-  testWidgets('a valid create sends trimmed values and an empty description as null',
-      (tester) async {
-    await pumpForm(tester);
+  testWidgets(
+    'a valid create sends trimmed values and an empty description as null',
+    (tester) async {
+      await pumpForm(tester);
 
-    await fill(tester, name: '  Finance  ', code: ' FIN ', description: '   ');
-    await tester.tap(find.byKey(const ValueKey('form-save')));
-    await advance(tester);
+      await fill(
+        tester,
+        name: '  Finance  ',
+        code: ' FIN ',
+        description: '   ',
+      );
+      await tester.tap(find.byKey(const ValueKey('form-save')));
+      await advance(tester);
 
-    expect(script.createCalls, 1);
-    expect(script.lastBody, {
-      'name': 'Finance',
-      'code': 'FIN',
-      'description': null,
-      'status': 'active',
-    });
+      expect(script.createCalls, 1);
+      expect(script.lastBody, {
+        'name': 'Finance',
+        'code': 'FIN',
+        'description': null,
+        'status': 'active',
+      });
 
-    // Navigated away rather than staying on a form that was already saved.
-    expect(find.byKey(const ValueKey('form-save')), findsNothing);
-  });
+      // Navigated away rather than staying on a form that was already saved.
+      expect(find.byKey(const ValueKey('form-save')), findsNothing);
+    },
+  );
 
-  testWidgets('a 422 from the server lands on the field it names',
-      (tester) async {
+  testWidgets('a 422 from the server lands on the field it names', (
+    tester,
+  ) async {
     await pumpForm(tester);
     await fill(tester);
 
@@ -151,8 +163,9 @@ void main() {
     expect(find.byKey(const ValueKey('form-error')), findsNothing);
   });
 
-  testWidgets('a 403 says so, and does not blame a field for it',
-      (tester) async {
+  testWidgets('a 403 says so, and does not blame a field for it', (
+    tester,
+  ) async {
     await pumpForm(tester);
     await fill(tester);
 
@@ -168,8 +181,9 @@ void main() {
     expect(script.createCalls, 1);
   });
 
-  testWidgets('editing loads the record, then puts it back with the same id',
-      (tester) async {
+  testWidgets('editing loads the record, then puts it back with the same id', (
+    tester,
+  ) async {
     await pumpForm(tester, at: '/departments/7');
 
     expect(script.findCalls, 1);
@@ -181,10 +195,14 @@ void main() {
     // both a field's contents and its hint, and this field's hint is the same
     // sentence as its value, so any finder built on visible text would count
     // it twice and prove nothing about which one was loaded.
-    expect(tester.widget<TextField>(find.byType(TextField).at(0)).controller?.text,
-        'Human Resources');
-    expect(tester.widget<TextField>(find.byType(TextField).at(2)).controller?.text,
-        'Hiring and policy.');
+    expect(
+      tester.widget<TextField>(find.byType(TextField).at(0)).controller?.text,
+      'Human Resources',
+    );
+    expect(
+      tester.widget<TextField>(find.byType(TextField).at(2)).controller?.text,
+      'Hiring and policy.',
+    );
 
     // Status came through as `inactive` — the chips must show that, not the
     // `active` a screen that ignored the response would have defaulted to.

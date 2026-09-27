@@ -8,23 +8,23 @@ import 'package:mobile/features/employees/presentation/employee_form_screen.dart
 import '../../../support/phase4.dart';
 
 GoRouter formRouter(String initialLocation) => GoRouter(
-      initialLocation: initialLocation,
-      routes: [
-        GoRoute(path: '/', builder: (_, _) => const SizedBox()),
-        GoRoute(path: '/employees', builder: (_, _) => const SizedBox()),
-        GoRoute(
-          path: '/employees/new',
-          builder: (_, _) => const EmployeeFormScreen(),
-        ),
-        GoRoute(path: '/employees/:id', builder: (_, _) => const SizedBox()),
-        GoRoute(
-          path: '/employees/:id/edit',
-          builder: (_, state) => EmployeeFormScreen(
-            employeeId: int.parse(state.pathParameters['id']!),
-          ),
-        ),
-      ],
-    );
+  initialLocation: initialLocation,
+  routes: [
+    GoRoute(path: '/', builder: (_, _) => const SizedBox()),
+    GoRoute(path: '/employees', builder: (_, _) => const SizedBox()),
+    GoRoute(
+      path: '/employees/new',
+      builder: (_, _) => const EmployeeFormScreen(),
+    ),
+    GoRoute(path: '/employees/:id', builder: (_, _) => const SizedBox()),
+    GoRoute(
+      path: '/employees/:id/edit',
+      builder: (_, state) => EmployeeFormScreen(
+        employeeId: int.parse(state.pathParameters['id']!),
+      ),
+    ),
+  ],
+);
 
 const denied = ApiException(
   statusCode: 403,
@@ -86,8 +86,9 @@ void main() {
   }
 
   group('the salary field', () {
-    testWidgets('is not drawn for a role that may not see payroll',
-        (tester) async {
+    testWidgets('is not drawn for a role that may not see payroll', (
+      tester,
+    ) async {
       await pumpForm(
         tester,
         permissions: const ['employees.view', 'employees.update'],
@@ -105,12 +106,15 @@ void main() {
 
       expect(find.text('Salary'), findsOneWidget);
       expect(find.text('Compensation'), findsOneWidget);
-      expect(find.text('Visible only to roles allowed to see payroll.'),
-          findsOneWidget);
+      expect(
+        find.text('Visible only to roles allowed to see payroll.'),
+        findsOneWidget,
+      );
     });
 
-    testWidgets('is not sent in the body when it is not on screen',
-        (tester) async {
+    testWidgets('is not sent in the body when it is not on screen', (
+      tester,
+    ) async {
       await pumpForm(
         tester,
         permissions: const ['employees.update'],
@@ -120,8 +124,10 @@ void main() {
       expect(script.findCalls, 1);
       // Read the controller, not the text on screen: the employee-code hint is
       // the same sentence as its value, so a text finder counts twice.
-      expect(tester.widget<TextField>(find.byType(TextField).at(0)).controller?.text,
-          'EMP-1001');
+      expect(
+        tester.widget<TextField>(find.byType(TextField).at(0)).controller?.text,
+        'EMP-1001',
+      );
 
       await tester.tap(find.byKey(const ValueKey('form-save')));
       await advance(tester);
@@ -156,8 +162,9 @@ void main() {
     });
   });
 
-  testWidgets('an untouched create form never reaches the server',
-      (tester) async {
+  testWidgets('an untouched create form never reaches the server', (
+    tester,
+  ) async {
     await pumpForm(
       tester,
       permissions: const ['employees.create', 'employees.salary.view'],

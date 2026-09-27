@@ -67,8 +67,9 @@ class StatusField extends StatelessWidget {
               child: Text(
                 errorText!,
                 key: const ValueKey('status-error'),
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.error),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.error,
+                ),
               ),
             )
           else if (helper != null)

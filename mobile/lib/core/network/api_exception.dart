@@ -71,11 +71,11 @@ ApiException apiExceptionFrom(DioException failure) {
     DioExceptionType.connectionTimeout ||
     DioExceptionType.sendTimeout ||
     DioExceptionType.receiveTimeout ||
-    DioExceptionType.connectionError =>
-      const ApiException(
-        statusCode: 0,
-        message: 'Could not reach the server. Check your connection and try again.',
-      ),
+    DioExceptionType.connectionError => const ApiException(
+      statusCode: 0,
+      message:
+          'Could not reach the server. Check your connection and try again.',
+    ),
     _ => _unexpectedResponse(response),
   };
 }
@@ -147,6 +147,7 @@ Duration? _retryAfter(Response<dynamic>? response) {
 /// second bucket.
 const ApiException unexpectedShapeException = ApiException(
   statusCode: 0,
-  message: 'The server sent a response this app does not understand. '
+  message:
+      'The server sent a response this app does not understand. '
       'Please check for an app update.',
 );

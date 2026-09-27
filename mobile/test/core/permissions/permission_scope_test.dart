@@ -62,8 +62,10 @@ void main() {
     // The one that matters most: "no session" must never read as "may see
     // payroll", however the permission list is spelled elsewhere.
     expect(scope.canViewSalary, isFalse);
-    expect(scope.canAny(const ['employees.view', 'employees.salary.view']),
-        isFalse);
+    expect(
+      scope.canAny(const ['employees.view', 'employees.salary.view']),
+      isFalse,
+    );
   });
 
   test('can / canAny / canAll behave the way the screens phrase them', () {

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/attendance/presentation/attendance_screen.dart';
 import '../../features/auth/auth_controller.dart';
 import '../../features/auth/auth_state.dart';
 import '../../features/auth/login_screen.dart';
@@ -51,8 +52,7 @@ final routerProvider = Provider<GoRouter>((ref) {
   ///
   /// The `(\d+)` pattern on each route means this cannot throw for a
   /// well-formed URL; a malformed one never reaches the builder.
-  int idOf(GoRouterState state) =>
-      int.parse(state.pathParameters['id']!);
+  int idOf(GoRouterState state) => int.parse(state.pathParameters['id']!);
 
   final router = GoRouter(
     initialLocation: '/',
@@ -83,21 +83,23 @@ final routerProvider = Provider<GoRouter>((ref) {
       return location == '/login' ? null : '/login';
     },
     routes: [
+      GoRoute(path: '/', builder: (context, state) => const SplashScreen()),
+      GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
+      GoRoute(path: '/home', builder: (context, state) => const HomeScreen()),
+
+      /* ------------------------------------------------------ attendance */
+
+      // The only Phase 5 route, and the only one without an `:id` form:
+      // this screen is always and only the caller's own day, so there is
+      // nothing to look up. Reachable by every signed-in user with an
+      // employee record — checking yourself in is not a privilege — and the
+      // API behind it answers 403 for anyone without one.
       GoRoute(
-        path: '/',
-        builder: (context, state) => const SplashScreen(),
-      ),
-      GoRoute(
-        path: '/login',
-        builder: (context, state) => const LoginScreen(),
-      ),
-      GoRoute(
-        path: '/home',
-        builder: (context, state) => const HomeScreen(),
+        path: '/attendance',
+        builder: (context, state) => const AttendanceScreen(),
       ),
 
       /* ------------------------------------------------------ employees */
-
       GoRoute(
         path: '/employees',
         builder: (context, state) => const EmployeesListScreen(),
@@ -118,7 +120,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
 
       /* ---------------------------------------------------- departments */
-
       GoRoute(
         path: '/departments',
         builder: (context, state) => const DepartmentsListScreen(),
@@ -134,7 +135,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
 
       /* --------------------------------------------------- designations */
-
       GoRoute(
         path: '/designations',
         builder: (context, state) => const DesignationsListScreen(),
@@ -150,7 +150,6 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
 
       /* ------------------------------------------------------- projects */
-
       GoRoute(
         path: '/projects',
         builder: (context, state) => const ProjectsListScreen(),
@@ -166,12 +165,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/projects/:id/edit',
-        builder: (context, state) =>
-            ProjectFormScreen(projectId: idOf(state)),
+        builder: (context, state) => ProjectFormScreen(projectId: idOf(state)),
       ),
 
       /* ---------------------------------------------------------- sites */
-
       GoRoute(
         path: '/sites',
         builder: (context, state) => const SitesListScreen(),
@@ -186,8 +183,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/sites/:id/edit',
-        builder: (context, state) =>
-            SiteFormScreen(siteId: idOf(state)),
+        builder: (context, state) => SiteFormScreen(siteId: idOf(state)),
       ),
     ],
   );

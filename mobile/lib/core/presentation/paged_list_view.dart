@@ -97,10 +97,7 @@ class PagedListView<T> extends ConsumerWidget {
     }
 
     if (state.showError) {
-      return _ListError(
-        message: state.message,
-        onRetry: controller.reload,
-      );
+      return _ListError(message: state.message, onRetry: controller.reload);
     }
 
     if (state.isEmpty) {
@@ -235,10 +232,7 @@ class _ListBanner extends StatelessWidget {
                 style: TextStyle(color: scheme.onErrorContainer),
               ),
             ),
-            TextButton(
-              onPressed: onRetry,
-              child: const Text('Retry'),
-            ),
+            TextButton(onPressed: onRetry, child: const Text('Retry')),
           ],
         ),
       ),

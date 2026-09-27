@@ -91,8 +91,7 @@ class _EmployeeFormScreenState extends ConsumerState<EmployeeFormScreen> {
 
   bool get _isCreate => widget.employeeId == null;
 
-  EmployeesRepository get _repository =>
-      ref.read(employeesRepositoryProvider);
+  EmployeesRepository get _repository => ref.read(employeesRepositoryProvider);
 
   @override
   void initState() {
@@ -280,9 +279,7 @@ class _EmployeeFormScreenState extends ConsumerState<EmployeeFormScreen> {
     final scope = ref.watch(permissionScopeProvider);
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_isCreate ? 'New employee' : 'Edit employee'),
-      ),
+      appBar: AppBar(title: Text(_isCreate ? 'New employee' : 'Edit employee')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : SafeArea(
@@ -496,8 +493,9 @@ class _EmployeeFormScreenState extends ConsumerState<EmployeeFormScreen> {
                         label: 'Salary',
                         controller: _salary,
                         enabled: !_saving,
-                        keyboardType:
-                            const TextInputType.numberWithOptions(decimal: true),
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
                         errorText: _errors['salary'],
                         helper: 'Visible only to roles allowed to see payroll.',
                       ),
@@ -510,8 +508,7 @@ class _EmployeeFormScreenState extends ConsumerState<EmployeeFormScreen> {
                           ? const SizedBox(
                               width: 20,
                               height: 20,
-                              child:
-                                  CircularProgressIndicator(strokeWidth: 2),
+                              child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : Text(_isCreate ? 'Create' : 'Save changes'),
                     ),
@@ -523,11 +520,11 @@ class _EmployeeFormScreenState extends ConsumerState<EmployeeFormScreen> {
   }
 
   Widget _sectionTitle(String title) => Padding(
-        padding: const EdgeInsets.only(top: 8, bottom: 12),
-        child: Text(
-          title,
-          key: ValueKey('section-$title'),
-          style: Theme.of(context).textTheme.titleSmall,
-        ),
-      );
+    padding: const EdgeInsets.only(top: 8, bottom: 12),
+    child: Text(
+      title,
+      key: ValueKey('section-$title'),
+      style: Theme.of(context).textTheme.titleSmall,
+    ),
+  );
 }

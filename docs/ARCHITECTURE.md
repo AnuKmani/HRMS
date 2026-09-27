@@ -12,7 +12,7 @@
 ```
 ┌────────────────────────┐
 │    Flutter Mobile App  │   Riverpod → Repository → Dio
-│   (Android first)      │   Offline queue → Drift/SQLite
+│   (Android first)      │   Offline queue → SharedPreferences + files
 └───────────┬────────────┘
             │  HTTPS  (token: Sanctum)
 ┌───────────▼────────────┐
@@ -53,21 +53,44 @@ The mobile app is a *client*, never a *trust source*.
 
 Every rule in §2.1 is enforced by a Laravel **Service** or **Policy**.
 
+**Implemented in Phase 5 ✅** — the geofence row in the table above is now a
+real thing: `GeofenceService` (server) and `LocalGeofence` (Flutter) agree
+on the arithmetic, but only `GeofenceService` decides. The request carries
+`latitude`, `longitude` and `accuracy`; it never carries a distance, a
+status or an `employee_id`, because there are no such fields in
+`StoreCheckInRequest` to put them in.
+
 ### 2.2 Business rules are configurable, not hard-coded
 
 Stored in a `settings` table and in entity configuration — working hours, grace period,
 overtime threshold, geofence radius, sick-certificate deadline, leave entitlements,
 carry-forward limits, approval workflows, notification timing.
 
+**Implemented in Phase 5 ✅** — the schedule behind every check-in comes from
+the site's active `shifts` row, falling back to the seeded
+`working_hours.default`, `attendance.grace_period_minutes`,
+`attendance.overtime_threshold_minutes` and
+`attendance.default_geofence_radius`. There is no `08:00`, no `17:30` and no
+`15` anywhere in `app/`.
+
 ### 2.3 Append-only where history matters
 
 Site assignments, attendance overrides, approvals and payroll runs are **never overwritten**.
 A new record is written with dates and an actor so the history stays auditable.
 
-### 2.4 Design for poor connectivity
+`attendances` and `site_visits` follow this: a check-out *adds* columns to
+the row the check-in created; it never rewrites the arrival, the site or the
+photograph.
+
+### 2.4 Design for poor connectivity ✅ (Phase 5)
 
 Construction sites lose signal. Attendance must queue locally, sync safely, and never
 create duplicates.
+
+Built as `OfflineQueue` + `OfflineQueueStore` in Flutter: one JSON blob of
+events in `SharedPreferences`, selfies as files, statuses `pending_sync` /
+`failed`, and a `client_event_id` generated before the first attempt so a
+retry cannot become a second day.
 
 ---
 
@@ -243,13 +266,45 @@ their own records is the Policy's job. **Implemented in Phase 4 ✅**: six polic
 `Controller` using `AuthorizesRequests`. Never use a permission alone to decide
 *which* rows to return.
 
+**Implemented in Phase 5 ✅** — two more policies, `Attendance` and `SiteVisit`,
+and one deliberate exception to the middleware rule:
+
+| Route | Gate |
+|---|---|
+| `GET /attendance`, `GET /site-visits` | `permission:attendance.view` **then** policy row scope |
+| `GET /attendance/today`, `POST /attendance/check-in`, `POST /attendance/check-out`, `GET /site-visits/today`, `POST /site-visits/start`, `POST /site-visits/{id}/end`, `GET /movement/today` | policy only — no `permission:` middleware |
+
+Recording that you arrived is not a privilege anyone grants you, so an
+employee with no attendance permission at all can still check themselves
+in. What they cannot do is *read*: `AttendancePolicy::viewAny()` grants
+`attendance.manage` or `employees.view`, or — for someone holding neither —
+pins the query to their own employee id. `Visibility::attendanceFor()` does
+the same scoping inside the query, and both are backed by
+`config('hrms.visibility.attendance')`, which lists Project Manager, Site
+Supervisor and Site Engineer as the roles that may see beyond their own
+rows. There is no unscoped `attendance.manage` path: a PM is narrowed to the
+projects where they are the `project_manager_id`, a Site Supervisor to the
+sites where they are `site_manager_id` or `site_supervisor_id`.
+
+The scoping is **fail-closed**: when neither of those two sets is non-empty,
+the `WHERE EXISTS` clause that would have widened the rows is not applied at
+all rather than applied without a predicate — a bug of exactly that shape
+was found and fixed in Phase 5 while writing these tests.
+
+Permissions added by this phase: `attendance.view` is now held by the
+`Employee` role (168 grants, up from 167). `attendance.manage` is unchanged
+— held by Super Admin, HR Admin, HR Executive and Site Supervisor, and still
+withheld from Project Manager, Site Engineer, Payroll Admin, Finance,
+Management and Employee, none of whom need to edit anybody's day to do their
+job.
+
 #### Roles and permissions
 
 | | |
 |---|---|
 | Roles | 10 — Super Admin, HR Admin, HR Executive, Payroll Admin, Project Manager, Site Engineer, Site Supervisor, Finance, Management, Employee |
 | Permissions | 40, all named `resource.action` (lowercase) |
-| Grants | 167 rows in `role_has_permissions` |
+| Grants | 168 rows in `role_has_permissions` (Phase 5 added `attendance.view` to `Employee`) |
 | Seeders | `RoleSeeder` → `PermissionSeeder` → `RolePermissionSeeder` (order matters) |
 
 Permission catalogue lives in one place — `PermissionSeeder::PERMISSIONS`, grouped by
@@ -304,7 +359,7 @@ Repository                            ← decides: network or local DB?
    ↓
 ApiService (Dio)  ──────────────┐
    ↓                           │
-Local DB (Drift / SQLite)  ← offline queue
+Local storage (prefs + files)  ← offline queue
    ↓
 Laravel REST API
 ```
@@ -326,10 +381,26 @@ changing the Repository — not the screen and not the provider.
 attaching the token, handling `401` (session expired), mapping `422` field errors,
 retries, timeouts and logging.
 
-**Local DB (Drift/SQLite)** — offline storage. Attendance data is *relational*
-(attendance ↔ site ↔ project ↔ employee ↔ sync status), needs transactions, and needs a
-unique constraint for duplicate prevention — hence a real database rather than key-value
-storage.
+**Local storage** — offline. The original sketch called for Drift/SQLite, and
+the reason still holds for anything *relational*: attendance against sites,
+projects and employees, needing transactions and a unique constraint. What
+Phase 5 actually built is narrower than that and deliberately so:
+
+```
+AttendanceOfflineEvent  ← one JSON blob under a single SharedPreferences key
+selfie bytes            ← <docs>/attendance-offline-selfies/{uuid}.jpg
+```
+
+A queue of outbound events is a list, not a set of relations — each row is
+already self-contained (the action, the site, the coordinates, the accuracy,
+the device id, the `client_event_id`, the sync status, the last error), and
+the duplicate-prevention unique index lives **on the server**, which is where
+it has to live anyway. Adding a relational engine to hold a list of things
+that are about to be deleted would have been a dependency bought for one
+feature that does not need it. Drift stays the plan for the modules that
+really are relational (timesheets, payroll runs) — and when those land, the
+queue moves with them behind the same `OfflineQueueStore` interface, so
+nothing above it changes.
 
 ### 4.3 Feature-first folder layout
 
@@ -395,7 +466,8 @@ mobile/lib/
 │   ├── departments/
 │   ├── designations/
 │   ├── projects/
-│   └── sites/
+│   ├── sites/
+│   └── attendance/                     # ← Phase 5, three-layer (below)
 └── main.dart
 ```
 
@@ -423,9 +495,36 @@ features/employees/
 
 The split matters for one reason above the others: `domain/` holds a
 *contract*, so a test can substitute a scripted repository that records what
-the screen asked for without the screen knowing. `attendance/` should take
-this same shape in Phase 5–6 when it grows an offline queue, rather than the
-`providers/` + `application/` layout sketched earlier.
+the screen asked for without the screen knowing. **`attendance/` took this
+shape in Phase 5 ✅**, and it is where the offline queue lives:
+
+```
+features/attendance/
+├── data/
+│   ├── api_attendance_repository.dart   # Dio: today, check-in, check-out, visits, movement
+│   ├── offline_queue.dart               # OfflineEvent, OfflineQueue, OfflineQueueStore
+│   ├── device_location.dart             # LocationGateway → geolocator
+│   ├── selfie_camera.dart               # CameraGateway → front camera, permission states
+│   ├── selfie_compressor.dart           # image package, isolate-safe
+│   └── client_event_id.dart             # one UUID generator for idempotency
+├── domain/
+│   ├── attendance_repository.dart       # the contract the fakes implement
+│   ├── attendance_record.dart           # AttendanceRecord
+│   ├── assigned_site.dart               # AssignedSite (+ geofence inputs)
+│   ├── today_status.dart                # TodayStatus, the day's whole payload
+│   ├── movement_event.dart              # MovementEvent
+│   ├── location_fix.dart                # lat/lng/accuracy, isUsable
+│   └── local_geofence.dart              # advisory haversine verdict
+├── presentation/
+│   ├── attendance_screen.dart           # today, location, picker, actions, queue
+│   ├── attendance_controller.dart       # AttendanceController, AttendanceState
+│   └── selfie_capture_sheet.dart        # open → preview → shutter → review → retake
+```
+
+`site_visits/` from the sketch above is **not** a separate feature: a visit
+is part of the same day at the same site, shares the same geofence, the same
+queue and the same `client_event_id` rules, and is one screen away from a
+check-in. Splitting it would have meant two copies of all of that.
 
 **Why feature-first rather than layer-first?** Attendance and payroll change for
 different reasons and at different speeds. Isolating them means a change to payroll
@@ -435,14 +534,31 @@ cannot break attendance.
 
 ## 5. Key Design Decisions
 
-### 5.1 One attendance row per employee per work day
+### 5.1 One attendance row per employee per work day ✅ (Phase 5)
 
 `attendances` holds a single row per employee per date, carrying check-in *and*
-check-out columns plus both site references (check-out may happen at a different site).
-Intra-day movement is modelled separately in `site_visits`.
+check-out columns for the one `site_id` the day belongs to. Intra-day movement
+is modelled separately in `site_visits`, and
+`UNIQUE (employee_id, attendance_date)` makes the rule an index rather than a
+habit — a second check-in is refused by the database before any application
+logic gets a chance to be wrong.
+
+Check-out must happen **at the site the day started at** (`422` on `site_id`
+otherwise). Moving somewhere else for the afternoon is expressed as a site
+visit, not as another attendance row, because "the day" is one continuous
+thing and `working_minutes` has to describe all of it.
 
 *Alternative considered:* one row per punch. Rejected — computing daily working hours
 and detecting missing check-outs becomes significantly harder.
+
+**Also decided in Phase 5:** `check_in_at`, `check_out_at`,
+`scheduled_start_at`, `scheduled_end_at`, `site_visits.started_at` and
+`site_visits.ended_at` are **`datetime`, not `timestamp`**. MariaDB 10.4 runs
+with `explicit_defaults_for_timestamp=0`, which gives the first `NOT NULL
+timestamp` column an implicit `ON UPDATE CURRENT_TIMESTAMP` — it silently
+rewrote the check-in time the moment the row was checked out. The migration
+docblocks record this, because the next person adding a time column will
+otherwise add a `timestamp` and lose a day of data.
 
 ### 5.2 Site assignments are append-only
 
@@ -523,16 +639,82 @@ requires a code change, a review, a deploy and a restart on every environment. S
 in `settings`, HR changes it once, immediately, and it is auditable and testable
 against a non-default value.
 
-### 5.4 Offline sync uses client-generated idempotency keys
+### 5.4 Offline sync uses client-generated idempotency keys ✅ (Phase 5)
 
-Each queued action gets a UUID created on the device. The server stores it under a
-**unique** constraint, so re-uploading the same batch can never create duplicate
-attendance. The server still re-validates geofence and timing on every sync.
+Each queued action gets a UUID **created on the device before the first
+attempt goes out**, so "the server accepted it but the reply was lost" and
+"a genuine retry" become the same event from the server's point of view.
+Four unique constraints hold it: `attendances.client_event_id`,
+`attendances.check_out_client_event_id`, `site_visits.client_event_id` and
+`site_visits.end_client_event_id`. A row already carrying that key returns
+its original record and evaluates nothing else; two simultaneous replays
+race to the index, and the loser re-reads the winner's row.
 
-### 5.5 Private storage with signed access
+There is **no batch endpoint**. Each event replays through the route that
+would have carried it live, so one code path owns the rules, and the server
+still re-validates assignment, geofence and accuracy on every sync.
 
-Selfies, passports, Emirates IDs, visas, contracts and salary documents live outside
-`public/` and are only reachable through authorized, expiring URLs.
+*Alternative considered:* a `POST /attendance/sync` accepting a list of
+actions. Rejected — it needs its own validation path, its own partial-failure
+semantics and its own tests, all to avoid N small requests that the
+`attendance` limiter (30/min per user) already bounds.
+
+### 5.5 Private storage with protected access ✅ (Phase 5, for selfies)
+
+Selfies, passports, Emirates IDs, visas, contracts and salary documents live
+outside `public/`.
+
+For the check-in selfie the access path is **not** a signed URL but a
+policy-gated route: `GET /api/v1/attendance/{id}/selfie` runs
+`AttendancePolicy::viewSelfie` and streams the file off the `local` disk
+(`storage/app/private`) with `Cache-Control: no-store`. A signed URL is a
+bearer secret with a lifetime, and it hands the storage layout and the
+employee id to anyone holding the link; a route answers "may *this* user
+see *this* person's photograph" with the same code that answers every other
+row question, and revocation is a permission change rather than a wait.
+
+No response contains a filesystem path, a base64 image, or a link to
+somebody else's selfie. Documents arriving in later phases follow the same
+rule.
+
+### 5.6 Status is decided in exactly one place (Phase 5)
+
+`present`, `late`, `incomplete`, `missing_checkout` and `manually_adjusted`
+are written by `AttendanceStatusCalculator` and by nothing else — not by a
+controller, not by a resource, not by a query. The rules are ordered rather
+than boolean: a day that was both late *and* short of its hours is
+`incomplete`, because the thing an employee needs to fix is the missing
+hours, and a status that only ever says "you were late" would hide it.
+`manually_adjusted` is reserved with no writer yet, so the override/audit
+work of a later phase changes rows without migrating them.
+
+The same rule applies to time: `WorkingTimeCalculator` is the only place
+that subtracts a scheduled break, floors a duration, or measures an
+overnight window across midnight. No controller does arithmetic.
+
+### 5.7 The phone advises; the server decides (Phase 5)
+
+`LocalGeofence.assess()` on the device and `App\Support\Geo` on the server
+are the same haversine written twice, on purpose: the phone needs to tell a
+person standing in the wrong field that they are about to be refused,
+before they take a selfie for nothing. What the phone says is shown with
+the word *advisory* and the note that the server measures again — because
+the request carries coordinates, not a verdict, and a modified client that
+pre-approves itself changes nothing.
+
+`hrms.attendance.max_gps_accuracy_metres` is returned by
+`GET /attendance/today` so the advisory check uses the server's number
+rather than a copy that would drift the moment the config changed.
+
+### 5.8 A site visit is two points, never a track (Phase 5)
+
+`site_visits` stores a start and an end, each with its own coordinates,
+accuracy and computed distance, and nothing in between. There is no
+background location permission, no polling, no upload-when-moving: the app
+requests foreground location only, and every coordinate it ever sends was
+captured at the moment a person pressed a button. A visit that starts
+inside the boundary cannot be ended from outside it, because each end
+re-runs the geofence against its own reading.
 
 ---
 
@@ -580,3 +762,4 @@ The following are explicitly **out of scope** unless later requested:
 | Phase 2 | RBAC implemented (spatie ^6.25, 10 roles / 40 permissions, middleware aliases); `settings` table + `SettingsService`; append-only assignments; core schema (14 migrations, 23 tables) |
 | Phase 3 | Authentication — login / logout / sessions / change-password / forgot-password (501 until a mailer), named rate limiters, the success-and-failure envelope in `ApiResponse`, Flutter auth + GoRouter guard |
 | Phase 4 | First vertical slice — departments, designations, employees, projects, sites and employee-site-assignments (Form Requests, Resources, services, transactions, six policies, `employees.salary.view`); Flutter `data/domain/presentation` features, permission-gated home, 13 screens |
+| Phase 5 | GPS attendance and site movement — `attendances` + `site_visits` (2 migrations), `GeofenceService`, `WorkingTimeCalculator`, `AttendanceStatusCalculator`, `AttendanceService`, 11 routes, `Attendance`/`SiteVisit` policies, private selfie storage, `attendance` rate limiter, movement timeline; Flutter `features/attendance/` with location + camera permission flows, advisory geofence, offline queue with `client_event_id`, 176 tests |
