@@ -1,8 +1,8 @@
 # Testing
 
-> **Status:** Phase 3 — auth covered end to end. Backend **120 passed (517
-> assertions)**, Flutter **43 passed**. This document defines the strategy for
-> the modules still to come (Phases 4–12).
+> **Status:** Phase 4 — the first business slice is covered end to end.
+> Backend **190 passed (993 assertions)**, Flutter **89 passed**. This
+> document defines the strategy for the modules still to come (Phases 5–12).
 
 ---
 
@@ -111,6 +111,23 @@ to contain **no** SQL, stack trace, model class or internal path.
 
 > **Rule:** hiding a button is not authorization. Every denied action must return `403`
 > from the API regardless of what the UI shows.
+
+### 3.2a Organisation modules ✅ (Phase 4)
+
+Ten feature files, one per resource plus the two relationship suites:
+
+| File | What it proves |
+|---|---|
+| `DepartmentApiTest` | read vs write split (HR Executive reads, cannot write); full CRUD; duplicate `code` → `422` with a **field** error; every required field reported at once, not one per submit; search / filter / pagination; a department with employees cannot be archived; unknown id → `404`, not `500` |
+| `DesignationApiTest` | permission gate; CRUD; company-wide designation with no department; an archived department cannot be assigned; filters; designation with employees cannot be archived; bad status → `422` |
+| `EmployeeApiTest` | permission gate; CRUD + soft delete; HR Executive creates but cannot delete; duplicate code/email; enum + reference validation; archived department rejected; primary site must belong to primary project; **reporting line cannot loop**; HR Executive may maintain the roster but not the payroll figure; Finance may read the figure but not edit; the list projection never carries a salary at all; filters + pagination; unknown id → `404` |
+| `EmployeeRelationshipTest` | department/designation/user/reporting-manager links, one-to-one user link, soft vs hard delete behaviour, structured name, status vocabulary, uniqueness, soft-deleted rows hidden |
+| `EmployeeVisibilityTest` | **row-level scope**: a Project Manager reaches only their own workforce (and anyone posted to their project); a Site Supervisor sees their site only; an ordinary employee reads *themselves* and nothing else; Management reads all but cannot write; posting history scoped the same way |
+| `ProjectApiTest` | permission gate; read vs write split (HR Admin reads, Project Manager writes); date-order rules including *"end date with no start date"*; shortening a project cannot push its end before the stored start; duplicate code handling; filters; project with sites cannot be deleted; a Site Supervisor sees only projects owning a site they run |
+| `SiteApiTest` | permission gate; read vs write split; latitude range; **geofence radius bounds come from config, not a constant**; half a geofence rejected; site must belong to a real project; supervisor ≠ manager; filters; site with assignment history cannot be deleted; Site Supervisor sees only their own sites |
+| `ProjectSiteRelationshipTest` | project owns many sites, restrictive cascade, manager/supervisor are employees, soft vs hard delete of the reference, site belongs to a shift |
+| `AssignmentApiTest` | permission gate; `created_by` recorded; site must belong to the named project; required fields; **a new primary posting closes the previous one without erasing it**; a temporary posting leaves the primary alone; a posting can be closed; history cannot be rewritten; an ended posting cannot be reopened; **no route deletes posting history**; Site Supervisor may post only to sites they run; list filters |
+| `AssignmentHistoryTest` | history survives soft deletion of the site and *blocks* hard deletion; same for the employee; `created_by` optional for system imports; type/status vocabularies enforced; the end helper is idempotent |
 
 ### 3.3 Attendance (core module)
 
@@ -239,14 +256,16 @@ Use `Queue::fake()` / `Notification::fake()` and `Carbon::setTestNow()`.
 
 ## 5. Flutter Test Matrix
 
-### 5.1 Unit ✅ (Phase 3)
+### 5.1 Unit ✅ (Phases 3–4)
 
 | Target | Tests | File |
 |---|---|---|
 | `ApiException` envelope parsing | 401/422 read as the server wrote them; `Retry-After` parsed; timeout **never** blames the user; a non-envelope body is never shown as prose | `test/core/network/api_exception_test.dart` |
 | `AuthController` state machine | initial status, restore outcomes (accepted / rejected / unreachable / empty), login success + failure paths, 422 field map, throttle wait, `dismissFeedback`, logout (server ok / unreachable / no session), session-rejected broadcast | `test/features/auth/auth_controller_test.dart` |
 | Validators | empty form says what is missing; the typed credentials are what reaches the API | `test/features/auth/login_screen_test.dart` |
-| Models | Auth models parse exactly the fields the API returns (`AuthUser`, `EmployeeBrief`) | exercised through the repository/controller tests above |
+| List envelope | items + every metadata field; `has_next` derived when the server omits it; nothing left to load on the last page; a malformed payload **refused** rather than rendered as an empty list | `test/core/data/page_result_test.dart` |
+| Phase 4 models | `Employee`, `Site`, `Department`, `Project` `fromJson` — a list projection with no salary, a detail projection that reads one only when allowed, an unset geofence staying `null` instead of `0`, decimals that arrive as **strings** | same file |
+| `PermissionScope` | an unsigned-out session fails closed; `can`/`canAny`/`canAll`; **`employees.view` alone never implies `employees.salary.view`**; the seeded role bundles read the way the screens phrase them; a typo in a permission string reads as *denied* | `test/core/permissions/permission_scope_test.dart` |
 
 **Two non-obvious guarantees worth keeping under test:**
 
@@ -257,13 +276,17 @@ Use `Queue::fake()` / `Notification::fake()` and `Carbon::setTestNow()`.
   interceptor and the controller can notice. The sign-in form's own message
   must survive.
 
-### 5.2 Widget ✅ (Phase 3 — Login)
+### 5.2 Widget ✅ (Phases 3–4)
 
 | Screen | States verified |
 |---|---|
 | Login | empty/invalid submit, success → home, 401 as **one banner with no field marked**, 422 with `forceErrorText` under the named field, 429 with countdown, password masked until asked for, editing clears a superseded message |
 | Splash | holds `/` while restoring — `advance()` pumps instead of `pumpAndSettle()`, because the restoring spinner is intentionally endless |
-| Attendance / Leave list / all screens | ⬜ Phase 4 onward |
+| Employees list | the four states in order — spinner while in flight, *empty* is distinct from *unknown*, failure with a working retry, **a failed refresh keeps the rows and says so on top**; search sent trimmed; status filter sends only the status chosen and removes the key when cleared; load-more appends rather than replaces; **a session without `employees.view` is drawn as a lock and never asked for the list** |
+| Employee detail | a 403 drawn as a refusal (lock, not error) with retry still offered; salary shown only when the permission **and** the payload both say so; edit/delete only for the right permissions |
+| Employee form | salary field not drawn without the permission; `salary` key **absent from the body** when it is not on screen and present with the right number when it is; untouched create never reaches the server; a 403 while editing says so plainly |
+| Department form | local validation before any request; trimmed values sent, blank description sent as `null`; **422 lands on the field it names** and clears on the next attempt; 403 shown in the banner with no field blamed; edit loads the record (including its `inactive` status) and puts it back with the same id |
+| Attendance / Leave / rest | ⬜ Phases 5 onward |
 
 > **Don't read `TextFormField.obscureText`** — it is not public. Read the
 > widget's own `TextField.obscureText` field instead.
@@ -271,6 +294,12 @@ Use `Queue::fake()` / `Notification::fake()` and `Carbon::setTestNow()`.
 > **Avoid `pumpAndSettle`** anywhere the splash spinner is visible: it never
 > settles. Eight × 100 ms pumps (`advance()`) is enough for any transition in
 > this feature.
+>
+> **A `tap()` that lands off-screen does not fail on the tap** — it warns, the
+> handler never runs, and the assertion afterwards fails for an unrelated
+> reason. `useTallScreen()` resizes the surface for the long forms.
+> Likewise, an unbuilt `ListView` row is not a row a finder can see, so the
+> load-more test runs on a surface tall enough to build all of them.
 
 ### 5.3 Behavioural ✅ (Phase 3 — `test/app_test.dart`)
 
@@ -285,9 +314,9 @@ Use `Queue::fake()` / `Notification::fake()` and `Carbon::setTestNow()`.
 | Submitting the form | navigates to `/home` with **no** explicit `Navigator` call from the screen |
 | Signing out | returns to the form |
 | Token revoked elsewhere (401 mid-session) | returns the user to the form |
-| 403 response | shows "not authorized", **does not log out** | ⬜ Phase 4 |
+| 403 response | shows "not authorized", **does not log out** — the lock banner stays, the form stays editable, the session is untouched | ✅ Phase 4 (`employee_detail_screen_test`, `employee_form_screen_test`, `department_form_screen_test`) |
 | Network loss / offline queue | offline message, action queued | ⬜ Phase 6 |
-| Permission hidden | HR control absent for an Employee user | ⬜ Phase 4 |
+| Permission hidden | control absent for a user without the permission, **and no request is made for it** | ✅ Phase 4 (`permission_scope_test`, employees list) |
 
 ### 5.4 What NOT to test in Flutter
 
@@ -296,9 +325,17 @@ Laravel. Flutter tests confirm **rendering and state handling** only.
 
 **Doubles, not sockets.** Every Flutter test runs against
 `test/support/fakes.dart` — `InMemoryTokenStore`, `FixedDeviceIdentity`,
-`FakeAuthRepository`. `flutter_secure_storage` talks to the platform keychain
-over a method channel, and `ApiAuthRepository` would need a live server;
-neither has anything useful to say inside a widget test.
+`FakeAuthRepository` — and Phase 4 added `test/support/phase4.dart`: one
+generic `Scripted<T>` repository used five times, which records `listCalls`,
+`lastQuery`, `lastBody` and `lastId`, can be told to fail once and then
+recover, and can park on a `Completer` so a test can look at the loading state
+a real double that answers immediately never renders. `scopedPhase4(...)`
+overrides the permission scope directly, so a widget test does not have to
+drive the whole auth restore to ask "what does an HR Executive see?".
+
+`flutter_secure_storage` talks to the platform keychain over a method channel,
+and `ApiAuthRepository` would need a live server; neither has anything useful
+to say inside a widget test.
 
 ---
 
@@ -431,8 +468,8 @@ A phase is complete only when:
 |---|---|
 | Test strategy (this document) | ✅ Written |
 | Development/testing database split (`hrms_laravel` vs `hrms_testing`) | ✅ Phase 2 safety cleanup |
-| Backend test suite | ✅ **120 passed (517 assertions)** — 75 from Phase 2 + 45 Phase 3 |
-| Flutter test suite | ✅ **43 passed** |
+| Backend test suite | ✅ **190 passed (993 assertions)** — 75 Phase 2 + 45 Phase 3 + 70 Phase 4 |
+| Flutter test suite | ✅ **89 passed** |
 | `flutter analyze` / `pint --test` / `composer validate` clean | ✅ |
 | CI pipeline running tests on every commit | ⬜ |
 | Coverage measurement (needs xdebug/pcov) | ⬜ |

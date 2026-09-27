@@ -53,12 +53,12 @@ class ApiAuthRepository implements AuthRepository {
     );
 
     final body = envelope.data;
-    if (body is! Map<String, dynamic>) throw _unexpectedShape();
+    if (body is! Map<String, dynamic>) throw unexpectedShapeException;
 
     final token = body['token'];
     final user = body['user'];
     if (token is! String || user is! Map<String, dynamic>) {
-      throw _unexpectedShape();
+      throw unexpectedShapeException;
     }
 
     final expiresAt = body['expires_at'];
@@ -76,17 +76,11 @@ class ApiAuthRepository implements AuthRepository {
     final envelope = await _client.get('/auth/me');
 
     final body = envelope.data;
-    if (body is! Map<String, dynamic>) throw _unexpectedShape();
+    if (body is! Map<String, dynamic>) throw unexpectedShapeException;
 
     return AuthUser.fromJson(body);
   }
 
   @override
   Future<void> logout() => _client.post('/auth/logout');
-
-  ApiException _unexpectedShape() => const ApiException(
-        statusCode: 0,
-        message: 'The server sent a response this app does not understand. '
-            'Please check for an app update.',
-      );
 }

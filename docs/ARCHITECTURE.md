@@ -1,8 +1,9 @@
 # Architecture
 
-> **Status:** Phase 3 — backend authentication and the Flutter auth foundation are
-> implemented and documented as built. Sections marked ⬜ are planned but not yet
-> built.
+> **Status:** Phase 4 — RBAC, authentication and the first full business slice
+> (departments, designations, employees, projects, sites, site assignments)
+> are implemented and documented as built. Sections marked ⬜ are planned but
+> not yet built.
 
 ---
 
@@ -236,16 +237,19 @@ Route middleware checks the permission; the Policy checks the ownership/scope.
 
 A permission is therefore a **coarse gate**, not a data filter. The `Employee` role
 holds `attendance.view` so it can open the attendance screen at all — row scoping to
-their own records is the Policy's job (Phase 4). Never use a permission alone to
-decide *which* rows to return.
+their own records is the Policy's job. **Implemented in Phase 4 ✅**: six policies
+(`Employee`, `Department`, `Designation`, `Project`, `Site`,
+`EmployeeSiteAssignment`) are wired into every Phase 4 controller through a base
+`Controller` using `AuthorizesRequests`. Never use a permission alone to decide
+*which* rows to return.
 
 #### Roles and permissions
 
 | | |
 |---|---|
 | Roles | 10 — Super Admin, HR Admin, HR Executive, Payroll Admin, Project Manager, Site Engineer, Site Supervisor, Finance, Management, Employee |
-| Permissions | 39, all named `resource.action` (lowercase) |
-| Grants | 163 rows in `role_has_permissions` |
+| Permissions | 40, all named `resource.action` (lowercase) |
+| Grants | 167 rows in `role_has_permissions` |
 | Seeders | `RoleSeeder` → `PermissionSeeder` → `RolePermissionSeeder` (order matters) |
 
 Permission catalogue lives in one place — `PermissionSeeder::PERMISSIONS`, grouped by
@@ -253,7 +257,7 @@ module. Adding a module means adding a line there; nothing else needs the full l
 
 ```
 dashboard    dashboard.view
-employees    employees.view | .create | .update | .delete
+employees    employees.view | .create | .update | .delete | .salary.view
 departments  departments.view | .manage
 designations designations.view | .manage
 attendance   attendance.view | .manage
@@ -276,8 +280,14 @@ audit        audit.view
 time rather than hard-coded, so a newly added permission is granted automatically.
 Every other role is an explicit allow-list: anything absent is **denied**. The mapping
 is `RolePermissionSeeder::MAP`, and `RbacTest` asserts both directions (Super Admin has
-all 39; `Employee` is denied `payroll.manage`, `employees.delete`, `attendance.manage`,
+all 40; `Employee` is denied `payroll.manage`, `employees.delete`, `attendance.manage`,
 `leave.approve`, `audit.view`).
+
+`employees.salary.view` — added in Phase 4 — is the one permission that is *not*
+implied by its module: `employees.view` opens the roster, three segments more
+are required before a payroll figure may be drawn. Held by HR Admin, Payroll
+Admin, Finance (and Super Admin through `*`); deliberately withheld from HR
+Executive, who maintains the roster without seeing what anyone is paid.
 
 ---
 
@@ -357,48 +367,65 @@ lib/
 └── main.dart
 ```
 
-**What Phase 3 actually created** — `core/router/` is an addition to the list
-above (GoRouter lives with the rest of the cross-cutting plumbing), and the
-auth feature is deliberately flat:
+**What Phases 3–4 actually created** — `core/router/` and `core/permissions/`
+are additions to the list above (GoRouter and the permission scope live with
+the rest of the cross-cutting plumbing), as is `core/presentation/` for the
+widgets every list and form screen shares:
 
 ```
 mobile/lib/
 ├── core/
-│   ├── config/app_config.dart        # --dart-define base URL
-│   ├── network/api_client.dart       # Dio, bearer interceptor, session-rejected stream
-│   ├── network/api_exception.dart    # envelope → ApiException
-│   ├── router/app_router.dart        # GoRouter + refreshListenable guard
-│   ├── storage/token_store.dart      # flutter_secure_storage
-│   └── storage/device_identity.dart  # stable per-install device name
+│   ├── config/app_config.dart          # --dart-define base URL
+│   ├── network/api_client.dart         # Dio, bearer interceptor, session-rejected stream
+│   ├── network/api_exception.dart      # envelope → ApiException
+│   ├── permissions/permission_scope.dart # one place that answers "may they?"
+│   ├── presentation/
+│   │   ├── paged_list_view.dart        # loading / empty / error+retry / rows
+│   │   ├── list_state.dart             # PagedListController<T>, generation guard
+│   │   ├── form_controls.dart          # StatusField, FormBanner, StatusFilter
+│   │   ├── fields.dart                 # LabeledTextField, DateField
+│   │   └── remote_picker.dart          # debounced, searchable option sheet
+│   ├── router/app_router.dart          # GoRouter + refreshListenable guard
+│   ├── storage/token_store.dart        # flutter_secure_storage
+│   └── storage/device_identity.dart    # stable per-install device name
 ├── features/
-│   ├── auth/
-│   │   ├── auth_models.dart          # AuthUser, EmployeeBrief, LoginResult
-│   │   ├── auth_repository.dart      # AuthRepository + ApiAuthRepository
-│   │   ├── auth_state.dart           # AuthStatus + AuthState
-│   │   ├── auth_controller.dart      # Notifier<AuthState>
-│   │   ├── login_screen.dart
-│   │   └── splash_screen.dart
-│   └── home/home_screen.dart         # Phase 4 landing spot
+│   ├── auth/                           # deliberately flat (5 files)
+│   ├── home/home_screen.dart           # permission-gated module tiles
+│   ├── employees/                      # ↓ three-layer, as below
+│   ├── departments/
+│   ├── designations/
+│   ├── projects/
+│   └── sites/
 └── main.dart
 ```
 
-Five files do not justify four directories. `data/`, `providers/` and
-`presentation/` appear once a feature grows local sources — the offline queue
-in Phase 6 is the point where `attendance/` should adopt the full shape below,
-and `auth/` should follow when forgot-password UI lands.
-
-Each feature folder follows the same internal shape:
+Five files do not justify four directories, so `auth/` stays flat. The Phase 4
+modules are the first to have local sources of their own, and each takes the
+same shape — `data/` (models as JSON, repositories, Dio implementations),
+`domain/` (the typed model and its repository *contract*), `presentation/`
+(screens, controllers):
 
 ```
-features/attendance/
+features/employees/
 ├── data/
-│   ├── models/        # Attendance, AttendanceCheckInRequest
-│   ├── repositories/  # AttendanceRepository
-│   └── sources/       # AttendanceApi, AttendanceLocalDb
-├── providers/         # Riverpod providers
-├── presentation/      # screens + widgets
-└── application/       # use-cases / orchestration (when complex)
+│   ├── api_employees_repository.dart   # the Dio implementation
+│   └── employee_providers.dart         # repository + list/picker providers
+├── domain/
+│   ├── employee.dart                   # Employee, fromJson, summary
+│   ├── employees_repository.dart       # the contract the fake implements
+│   └── employee_site_assignment.dart   # (assignments, shared with sites)
+├── presentation/
+│   ├── employees_list_screen.dart
+│   ├── employee_detail_screen.dart
+│   ├── employee_form_screen.dart
+│   └── employees_controller.dart       # PagedListController<Employee>
 ```
+
+The split matters for one reason above the others: `domain/` holds a
+*contract*, so a test can substitute a scripted repository that records what
+the screen asked for without the screen knowing. `attendance/` should take
+this same shape in Phase 5–6 when it grows an offline queue, rather than the
+`providers/` + `application/` layout sketched earlier.
 
 **Why feature-first rather than layer-first?** Attendance and payroll change for
 different reasons and at different speeds. Isolating them means a change to payroll
@@ -550,4 +577,6 @@ The following are explicitly **out of scope** unless later requested:
 | Date | Change |
 |---|---|
 | Phase 1 | Initial architecture — system overview, layering, key decisions |
-| Phase 2 | RBAC implemented (spatie ^6.25, 10 roles / 39 permissions, middleware aliases); `settings` table + `SettingsService`; append-only assignments; core schema (14 migrations, 23 tables) |
+| Phase 2 | RBAC implemented (spatie ^6.25, 10 roles / 40 permissions, middleware aliases); `settings` table + `SettingsService`; append-only assignments; core schema (14 migrations, 23 tables) |
+| Phase 3 | Authentication — login / logout / sessions / change-password / forgot-password (501 until a mailer), named rate limiters, the success-and-failure envelope in `ApiResponse`, Flutter auth + GoRouter guard |
+| Phase 4 | First vertical slice — departments, designations, employees, projects, sites and employee-site-assignments (Form Requests, Resources, services, transactions, six policies, `employees.salary.view`); Flutter `data/domain/presentation` features, permission-gated home, 13 screens |

@@ -1,8 +1,9 @@
 # User Guide
 
-> **Status:** Phase 1 — Foundation. **The application does not exist yet.**
-> This guide describes the workflows each role will have once the corresponding phase
-> ships. Sections are marked with the phase that delivers them.
+> **Status:** Phase 4 — sign-in and the first management screens exist and are
+> usable. This guide describes the workflows each role will have once the
+> corresponding phase ships. Sections are marked with the phase that delivers
+> them; ✅ means it is in the app today.
 
 ---
 
@@ -20,7 +21,7 @@ relevant to them.
 
 ## 2. Signing In
 
-> ✅ Phase 3 — sign-in, session restore and sign-out. Forgot-password arrives with the UI in Phase 4+.
+> ✅ Phase 3 — sign-in, session restore and sign-out. Forgot-password arrives with the UI in a later phase.
 
 1. Open the app — it restores your session automatically if you already signed in
 2. Enter your work email and password
@@ -35,8 +36,8 @@ sign you out. Signing out, or an administrator disabling your account, does.
 
 **Multiple devices:** each sign-in replaces that device's previous session, so
 no one accumulates sessions they cannot see. You can review and revoke them
-from *Settings → Sessions* (Phase 4 UI); changing your password from any device
-immediately signs out every other one.
+from *Settings → Sessions* (UI arrives in a later phase); changing your password from
+any device immediately signs out every other one.
 
 **Forgot password:** *not available yet.* The API exists but deliberately
 answers "not available" until a mail server can actually deliver the link —
@@ -45,6 +46,35 @@ contact your administrator for a reset in the meantime.
 **Security:** your password is never stored in plain text, and your session token is kept
 in your device's secure key storage. If you suspect any issue, sign out — this revokes
 your token immediately.
+
+### 2.1 The home screen ✅ (Phase 4)
+
+After signing in you land on **Home**. It draws one tile per module your role may
+open — Employees, Departments, Designations, Projects, Sites — and nothing else.
+A role that cannot open a module is not shown a door it would be refused behind.
+
+Every module follows the same three screens:
+
+| Screen | What it does |
+|---|---|
+| **List** | search box, filters (department, status, employment status), pull to refresh, **Load more** past the first page |
+| **Detail** | the full record and what is connected to it, with **Edit** / **Delete** where your role allows |
+| **Form** | create or edit; every message under a field came from the server, which owns the rules |
+
+Four things worth knowing:
+
+- **A list you may not open is never fetched.** Without the permission the
+  screen draws a lock rather than an error — and no request was made on your
+  behalf to be refused.
+- **Being refused is not being signed out.** A *not authorized* message means
+  that one action was not permitted for you; your session continues and the
+  form keeps what you typed.
+- **Salary is its own permission.** Opening the employee list never reveals
+  anyone's pay — the field is not drawn at all, and a request carrying it
+  would be rejected by the server.
+- **Nothing disappears behind your back.** A department with employees, a
+  project with sites, a site with assignment history: each refuses deletion
+  and tells you what must be moved first.
 
 ---
 
@@ -221,7 +251,7 @@ Similar to Site Supervisor, focused on technical reporting:
 
 ## 6. Project Manager
 
-> ⬜ Phase 4 / 12
+> ✅ Phase 4 (project & site management) · ⬜ Phase 12 (dashboard)
 
 **Dashboard:**
 - Projects and sites
@@ -230,18 +260,19 @@ Similar to Site Supervisor, focused on technical reporting:
 - Site visits and site reports
 - Overtime requests awaiting approval
 
-**Manage:**
+**Manage (live today):**
 - Project details and status (Planned / Active / On Hold / Completed / Cancelled)
 - Sites within your projects, including geofence radius
 - Approval of overtime for your projects
 
-> Scope is limited to projects assigned to you.
+> Scope is limited to projects assigned to you — the server narrows your list,
+> so you are not shown projects you do not run.
 
 ---
 
 ## 7. HR Executive
 
-> ⬜ Phase 4
+> ✅ Phase 4 (employees, departments, designations) · ⬜ for documents, attendance, leave
 
 - Create and edit employee records
 - Manage departments and designations
@@ -251,11 +282,14 @@ Similar to Site Supervisor, focused on technical reporting:
 - View attendance across the company
 - First-level leave approval (depending on configured workflow)
 
+HR Executive may maintain the roster but **cannot delete an employee and cannot
+see anyone's salary** — those two are separate permissions held elsewhere.
+
 ---
 
 ## 8. HR Admin
 
-> ⬜ Phase 4 / 5 / 9
+> ✅ Phase 4 (employee management, site assignments) · ⬜ Phase 5 / 9
 
 Everything an HR Executive can do, plus:
 
@@ -320,7 +354,7 @@ Read-only — plus the ability to view any report.
 
 ## 12. Super Admin
 
-> ⬜ Phase 3–4
+> ✅ Phase 4 (every module screen, through `*` permissions) · ⬜ roles / users / settings UI
 
 - Full system access
 - Manage roles and permissions
@@ -421,8 +455,8 @@ permission — contact your administrator.
 | Section | Phase | Status |
 |---|---|---|
 | Foundation & documentation | 1 | ✅ Written |
-| Authentication | 3 | ⬜ |
-| Employee / Project / Site management | 4 | ⬜ |
+| Authentication | 3 | ✅ |
+| Employee / Project / Site management | 4 | ✅ |
 | Attendance + geofence + selfie | 5 | ⬜ |
 | Offline sync | 6 | ⬜ |
 | Site visits & reports | 7 | ⬜ |

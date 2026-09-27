@@ -136,3 +136,17 @@ Duration? _retryAfter(Response<dynamic>? response) {
   final seconds = int.tryParse(raw.trim());
   return seconds == null ? null : Duration(seconds: seconds);
 }
+
+/// The response arrived, was not a failure, and still did not have the shape
+/// this app knows how to read.
+///
+/// Status code 0 on purpose: this is not a server error the user could retry
+/// away, it is a mismatch between what the app expects and what a proxy or an
+/// un-upgraded backend handed back. Callers that distinguish "you are not
+/// allowed" from "we do not understand" both need this to fall out of the
+/// second bucket.
+const ApiException unexpectedShapeException = ApiException(
+  statusCode: 0,
+  message: 'The server sent a response this app does not understand. '
+      'Please check for an app update.',
+);

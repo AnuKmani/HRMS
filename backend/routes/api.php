@@ -1,8 +1,14 @@
 <?php
 
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\DepartmentController;
+use App\Http\Controllers\Api\V1\DesignationController;
+use App\Http\Controllers\Api\V1\EmployeeController;
+use App\Http\Controllers\Api\V1\EmployeeSiteAssignmentController;
 use App\Http\Controllers\Api\V1\PasswordResetController;
+use App\Http\Controllers\Api\V1\ProjectController;
 use App\Http\Controllers\Api\V1\RoleController;
+use App\Http\Controllers\Api\V1\SiteController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -62,5 +68,97 @@ Route::prefix('v1')->group(function () {
         // roles.view this 403s no matter what the Flutter UI chooses to show.
         Route::get('roles', [RoleController::class, 'index'])
             ->middleware('permission:roles.view');
+
+        /* ------------------------------------------- Phase 4: modules */
+
+        // Two gates, both live:
+        //
+        //   `permission:`  is the COARSE one — "may this role open the
+        //                  module at all?". It runs before the controller,
+        //                  so an unauthorised caller never reaches a query.
+        //
+        //   `$this->authorize()` resolves the policy, which is the ROW-LEVEL
+        //                  one — "may they touch *this* record?". It runs on
+        //                  every method, including the ones below that carry
+        //                  no `permission:` middleware.
+        //
+        // Two routes deliberately omit the coarse gate. `GET /employees/{id}`
+        // and `GET /employee-site-assignments/{id}` must stay reachable to
+        // somebody reading their own row while holding no `*.view`
+        // permission at all — the ordinary employee checking their own
+        // profile. EmployeePolicy / EmployeeSiteAssignmentPolicy are what
+        // separate "yours" from "everybody else's" there, and they answer
+        // 403 for anything else.
+
+        // Departments — master data, no row-level rules (DepartmentPolicy).
+        Route::get('departments', [DepartmentController::class, 'index'])
+            ->middleware('permission:departments.view');
+        Route::get('departments/{department}', [DepartmentController::class, 'show'])
+            ->middleware('permission:departments.view');
+        Route::post('departments', [DepartmentController::class, 'store'])
+            ->middleware('permission:departments.manage');
+        Route::put('departments/{department}', [DepartmentController::class, 'update'])
+            ->middleware('permission:departments.manage');
+        Route::delete('departments/{department}', [DepartmentController::class, 'destroy'])
+            ->middleware('permission:departments.manage');
+
+        // Designations — same shape, plus a department filter.
+        Route::get('designations', [DesignationController::class, 'index'])
+            ->middleware('permission:designations.view');
+        Route::get('designations/{designation}', [DesignationController::class, 'show'])
+            ->middleware('permission:designations.view');
+        Route::post('designations', [DesignationController::class, 'store'])
+            ->middleware('permission:designations.manage');
+        Route::put('designations/{designation}', [DesignationController::class, 'update'])
+            ->middleware('permission:designations.manage');
+        Route::delete('designations/{designation}', [DesignationController::class, 'destroy'])
+            ->middleware('permission:designations.manage');
+
+        // Employees — see the note above for why `show` has no middleware.
+        Route::get('employees', [EmployeeController::class, 'index'])
+            ->middleware('permission:employees.view');
+        Route::get('employees/{employee}', [EmployeeController::class, 'show']);
+        Route::post('employees', [EmployeeController::class, 'store'])
+            ->middleware('permission:employees.create');
+        Route::put('employees/{employee}', [EmployeeController::class, 'update'])
+            ->middleware('permission:employees.update');
+        Route::delete('employees/{employee}', [EmployeeController::class, 'destroy'])
+            ->middleware('permission:employees.delete');
+
+        // Projects.
+        Route::get('projects', [ProjectController::class, 'index'])
+            ->middleware('permission:projects.view');
+        Route::get('projects/{project}', [ProjectController::class, 'show'])
+            ->middleware('permission:projects.view');
+        Route::post('projects', [ProjectController::class, 'store'])
+            ->middleware('permission:projects.manage');
+        Route::put('projects/{project}', [ProjectController::class, 'update'])
+            ->middleware('permission:projects.manage');
+        Route::delete('projects/{project}', [ProjectController::class, 'destroy'])
+            ->middleware('permission:projects.manage');
+
+        // Sites.
+        Route::get('sites', [SiteController::class, 'index'])
+            ->middleware('permission:sites.view');
+        Route::get('sites/{site}', [SiteController::class, 'show'])
+            ->middleware('permission:sites.view');
+        Route::post('sites', [SiteController::class, 'store'])
+            ->middleware('permission:sites.manage');
+        Route::put('sites/{site}', [SiteController::class, 'update'])
+            ->middleware('permission:sites.manage');
+        Route::delete('sites/{site}', [SiteController::class, 'destroy'])
+            ->middleware('permission:sites.manage');
+
+        // Employee site assignments — READ, CREATE and CLOSE only. No DELETE
+        // route exists: posting history is append-only, and an endpoint that
+        // erased it would be reachable by anyone holding assignments.manage,
+        // which is not the same thing as being allowed to rewrite the past.
+        Route::get('employee-site-assignments', [EmployeeSiteAssignmentController::class, 'index'])
+            ->middleware('permission:assignments.view');
+        Route::get('employee-site-assignments/{assignment}', [EmployeeSiteAssignmentController::class, 'show']);
+        Route::post('employee-site-assignments', [EmployeeSiteAssignmentController::class, 'store'])
+            ->middleware('permission:assignments.manage');
+        Route::put('employee-site-assignments/{assignment}', [EmployeeSiteAssignmentController::class, 'update'])
+            ->middleware('permission:assignments.manage');
     });
 });

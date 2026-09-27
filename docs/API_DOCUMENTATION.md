@@ -1,8 +1,8 @@
 # API Documentation
 
-> **Status:** Phase 1 — Foundation. **No endpoints are implemented yet.**
-> This document defines the conventions every endpoint will follow, plus the planned
-> route list. Concrete request/response examples will be added as each phase ships.
+> **Status:** Phases 1–4. §1 conventions, §2.1 authentication (Phase 3) and
+> §2.2–§2.3 the organisation modules (Phase 4) are **live**. Everything from
+> §2.4 onward is the contract the remaining phases build against.
 
 **Base URL (development):** `http://127.0.0.1:8000/api/v1/`
 **Content type:** `application/json` (except file uploads: `multipart/form-data`)
@@ -90,11 +90,15 @@ plus resource-specific filters.
     "message": "OK",
     "data": {
         "items": [ ],
-        "meta":   { "current_page": 1, "per_page": 15, "total": 132, "last_page": 9 },
-        "links":  { "next": "...", "prev": null }
+        "meta": { "current_page": 1, "per_page": 15, "total": 132, "last_page": 9, "has_next": true }
     }
 }
 ```
+
+`per_page` is clamped server-side to a maximum of **100**, whatever the client
+asks for. `has_next` is computed for the client rather than left to be
+re-derived from `page < last_page`, so a cursor-style screen and a page-number
+screen agree about when the list ends.
 
 ### 1.8 Filtering
 
@@ -130,8 +134,21 @@ Behaviour that holds across every authenticated endpoint:
 
 ## 2. Endpoints
 
-> **Implemented:** §2.1 (Phase 3). Everything from §2.2 onward arrives with
-> Phases 4–12 and is listed here as the contract to build against.
+> **Implemented:** §2.1 (Phase 3), §2.2–§2.3 (Phase 4). Everything from §2.4
+> onward arrives with Phases 5–12 and is listed here as the contract to build
+> against.
+
+**Two gates, both live on every Phase 4 route:**
+
+| Gate | Runs | Answers |
+|---|---|---|
+| `permission:…` middleware | before the controller | "may this role open the module at all?" — an unauthorised caller never reaches a query |
+| `$this->authorize()` → policy | inside the controller | "may they touch *this* record?" — row-level, and it also guards the two routes below that carry no middleware |
+
+`GET /employees/{id}` and `GET /employee-site-assignments/{id}` deliberately
+have **no** `permission:` middleware: an ordinary employee reading their own
+profile holds no `*.view` permission, and the policy is what separates
+"yours" from "everybody else's". Everything else is coarse-gated first.
 
 ### 2.1 Authentication ✅ (Phase 3)
 
@@ -274,27 +291,135 @@ would confirm that the token exists somewhere.
 }
 ```
 
-### 2.2 Employees
+### 2.2 Departments, Designations & Employees ✅ (Phase 4)
 
-| Method | Path | Permission |
+| Method | Path | Gate |
 |---|---|---|
-| GET | `/employees` | `employees.view` |
-| POST | `/employees` | `employees.create` |
-| GET | `/employees/{id}` | `employees.view` |
-| PUT | `/employees/{id}` | `employees.update` |
-| DELETE | `/employees/{id}` | `employees.delete` |
-| GET | `/employees/{id}/documents` | `employees.view` |
-| POST | `/employees/{id}/onboarding` | `employees.update` |
+| GET | `/departments` | `permission:departments.view` |
+| GET | `/departments/{id}` | `permission:departments.view` |
+| POST | `/departments` | `permission:departments.manage` |
+| PUT | `/departments/{id}` | `permission:departments.manage` |
+| DELETE | `/departments/{id}` | `permission:departments.manage` |
+| GET | `/designations` | `permission:designations.view` |
+| GET | `/designations/{id}` | `permission:designations.view` |
+| POST | `/designations` | `permission:designations.manage` |
+| PUT | `/designations/{id}` | `permission:designations.manage` |
+| DELETE | `/designations/{id}` | `permission:designations.manage` |
+| GET | `/employees` | `permission:employees.view` |
+| GET | `/employees/{id}` | *(no middleware — `EmployeePolicy::view` only)* |
+| POST | `/employees` | `permission:employees.create` |
+| PUT | `/employees/{id}` | `permission:employees.update` |
+| DELETE | `/employees/{id}` | `permission:employees.delete` |
 
-### 2.3 Projects & Sites
+**List query params** (all six resources share the shape): `page`, `per_page`
+(server clamps to **100**), `sort`, `direction`, `search`, plus the
+resource's own filters — `department` *or* `department_id` are accepted as
+aliases on designations and employees; `status` on departments, designations,
+projects, sites; `employment_status`, `employment_type`, `designation_id`,
+`project_id` on employees. An unknown `sort` key falls back to the default
+rather than erroring.
 
-| Method | Path | Permission |
+**List envelope** (`PaginatedResponse::make`):
+
+```json
+{
+    "success": true,
+    "message": "Employees.",
+    "data": {
+        "items": [ /* resource objects */ ],
+        "meta": { "current_page": 1, "last_page": 4, "per_page": 15, "total": 52, "has_next": true }
+    }
+}
+```
+
+`has_next` is derived server-side so the client's load-more button does not
+have to reconstruct it from `page` and `last_page`.
+
+**`GET /employees/{id}` returns `EmployeeDetailResource`** — the projection
+that carries `date_of_birth`, `nationality`, `address`, the emergency
+contacts, `salary` and `salary_visible`. `GET /employees` and every nested
+reference return `EmployeeResource`, which has **no** `salary` key at all:
+not `null`, absent. That resource is embedded inside projects (the project
+manager) and sites (manager, supervisor), so whatever it carried would travel
+into responses gated by `projects.view` rather than `employees.view`.
+
+```json
+{
+    "id": 12,
+    "employee_code": "EMP-0012",
+    "first_name": "Ada", "middle_name": null, "last_name": "Lovelace",
+    "full_name": "Ada Lovelace",
+    "email": "ada@example.com", "phone": null,
+    "department_id": 3, "department": { "id": 3, "name": "Engineering" },
+    "designation_id": 7, "designation": { "id": 7, "name": "Staff Engineer" },
+    "reporting_manager_id": null, "reporting_manager": null,
+    "joining_date": "2024-03-01", "employment_type": "permanent",
+    "employment_status": "active", "status": "active",
+    "salary": 18000.00, "salary_visible": true
+}
+```
+
+`salary_visible` is `true` only when the caller holds `employees.salary.view`.
+A caller without it receives a body where `salary` is absent, and `PUT` with a
+`salary` key answers **422** — the gate is re-enforced in
+`UpdateEmployeeRequest`, not merely trusted from the session.
+
+**Deleting a department or designation answers 422** while employees still
+reference it (`{"employees": ["Reassign the employees before deleting."]}`);
+a project answers 422 while it still has sites. Nothing is cascade-deleted
+from behind the user's back.
+
+### 2.3 Projects, Sites & Assignments ✅ (Phase 4)
+
+| Method | Path | Gate |
 |---|---|---|
-| GET/POST/PUT/DELETE | `/projects` … | `projects.manage` |
-| GET/POST/PUT/DELETE | `/sites` … | `sites.manage` |
-| GET | `/sites/{id}/members` | `sites.manage` |
-| GET/POST | `/assignments` | `sites.manage` |
-| PUT | `/assignments/{id}/end` | `sites.manage` — ends an assignment, never overwrites |
+| GET | `/projects` | `permission:projects.view` |
+| GET | `/projects/{id}` | `permission:projects.view` |
+| POST / PUT / DELETE | `/projects` … | `permission:projects.manage` |
+| GET | `/sites` | `permission:sites.view` |
+| GET | `/sites/{id}` | `permission:sites.view` |
+| POST / PUT / DELETE | `/sites` … | `permission:sites.manage` |
+| GET | `/employee-site-assignments` | `permission:assignments.view` |
+| GET | `/employee-site-assignments/{id}` | *(no middleware — policy only)* |
+| POST | `/employee-site-assignments` | `permission:assignments.manage` |
+| PUT | `/employee-site-assignments/{id}` | `permission:assignments.manage` |
+
+**There is deliberately no `DELETE /employee-site-assignments/{id}`.** Posting
+history is append-only: an assignment is retired by moving its `status` to
+`ended` or `cancelled` and setting `end_date`, never by removing the row. An
+erase endpoint would be reachable by anyone holding `assignments.manage`,
+which is not the same thing as being allowed to rewrite the past.
+
+**Creating an assignment** (`POST`) accepts `employee_id`, `site_id`,
+`assignment_type` (`primary` \| `temporary` \| `additional`), `start_date`,
+and optionally `end_date`, `notes`, `is_primary`, `latitude`, `longitude`,
+`radius_metres`. The response records `created_by`. When a `primary` +
+`active` assignment already exists for that employee, the service closes the
+predecessor on the day before the new `start_date` (or marks it `cancelled`
+if the dates overlap) inside one transaction — one row per day is preserved,
+not overwritten.
+
+**Updating an assignment** accepts **only** `status` ∈ `{ended, cancelled}`
+and `end_date`. Identity fields (`employee_id`, `site_id`, …) answer a
+per-field **422** rather than silently rewriting which relationship the row
+describes.
+
+**Geofence fields** must be supplied as a set: `latitude`, `longitude` and
+`radius_metres` are accepted together or all absent, and the radius is
+bounded by `config/hrms.php` — `GEOFENCE_MIN_RADIUS_METRES` (default 10) to
+`GEOFENCE_MAX_RADIUS_METRES` (default 10000).
+
+**Project status values:** `planned`, `active`, `on_hold`, `completed`,
+`cancelled`. **Site status:** `active`, `inactive`. **Employee status:**
+`active`, `inactive`, `resigned`, `terminated`, `on_leave`. **Employee type:**
+`permanent`, `contract`, `probation`, `internship`, `part_time`. No column
+uses a MySQL `ENUM`; the values are validated per-request, so adding one later
+is a seeder change and not a migration.
+
+`DELETE /projects/{id}` answers **422** while the project still owns sites;
+`DELETE /sites/{id}` answers **422** while the site has assignment history.
+`photo_path` is never an accepted request field on any of these endpoints —
+profile-photo upload arrives with the documents phase.
 
 ### 2.4 Attendance
 
@@ -502,13 +627,15 @@ Server behaviour for each action:
 |---|---|
 | Conventions (this document) | ✅ Defined |
 | §2.1 Authentication | ✅ Phase 3 |
-| §2.2–§2.12 Everything else | ⬜ Phase 4 onward |
+| §2.2 Departments / Designations / Employees | ✅ Phase 4 |
+| §2.3 Projects / Sites / Assignments | ✅ Phase 4 |
+| §2.4–§2.12 Everything else | ⬜ Phases 5–12 |
 | Rate limiting — auth routes | ✅ Phase 3 |
 | Rate limiting — remaining scopes | ⬜ As their modules land |
 
-Backend proof: `php artisan test` → **120 passed (517 assertions)**, covering
-`AuthenticationTest`, `AuthorizationTest`, `PasswordResetTest` and
-`ApiErrorHandlingTest`.
+Backend proof: `php artisan test` → **190 passed (993 assertions)**; 38 routes
+under `api/*`. Flutter proof: `flutter analyze` clean, `flutter test` →
+**89 passed**.
 
 > To explore a running API later, use Laravel's generated OpenAPI/Swagger UI or
 > a tool such as Postman.

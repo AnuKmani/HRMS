@@ -25,6 +25,15 @@ class PermissionSeeder extends Seeder
             'employees.create',
             'employees.update',
             'employees.delete',
+
+            // Three segments on purpose. Salary is not a row an employee
+            // record happens to carry — it is a payroll fact that sits on
+            // top of the record, so it needs its own gate rather than
+            // riding along with `employees.view`. Held by HR Admin,
+            // Payroll Admin and Finance; deliberately NOT by HR Executive,
+            // who may maintain the roster without seeing what anyone is
+            // paid. Super Admin holds it through `*`.
+            'employees.salary.view',
         ],
         'departments' => [
             'departments.view',

@@ -1,7 +1,8 @@
 # Flutter Guide
 
-> **Status:** Phase 1 — Foundation. **Flutter is not installed yet and no Flutter project
-> exists yet.** This guide explains the concepts and patterns the app will use, written
+> **Status:** Phase 4 — Flutter is installed (on `F:`), the project exists, and the
+> first business slice is built and tested (`flutter analyze` clean, `flutter test`
+> **89 passed**). This guide explains the concepts and patterns the app uses, written
 > for someone who knows PHP/Laravel but is new to Flutter/Dart.
 
 ---
@@ -418,6 +419,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/',      builder: (_, _) => const SplashScreen()),
       GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
       GoRoute(path: '/home',  builder: (_, _) => const HomeScreen()),
+      // … and, since Phase 4, the module routes in the table below.
     ],
   );
 
@@ -452,8 +454,27 @@ route middleware, but for the client.
 `authenticating` as "not signed in" is what keeps the form from flickering to
 a dashboard and back while the request is in flight.
 
-**Role-based menus:** the shell builds its navigation items from the permissions the
-server returned at login. Hiding a menu is *convenience* — Laravel still enforces access.
+**Role-based menus:** `HomeScreen` builds its tiles from `permissionScopeProvider`
+rather than from raw `authState.permissions`, so every screen asks one object the
+same question (`scope.canViewProjects`) instead of spelling the permission string
+afresh at each call site. Hiding a tile is *convenience* — Laravel still enforces
+access, and a hand-typed location lands on a screen that draws a lock rather than
+a roster.
+
+**Phase 4 route table:**
+
+| Path | Screen | Notes |
+|---|---|---|
+| `/employees` · `/employees/new` · `/employees/:id` · `/employees/:id/edit` | list · form · detail · form | `/new` is declared **before** `:id` |
+| `/departments` · `/departments/new` · `/departments/:id` | list · form | |
+| `/designations` · `/designations/new` · `/designations/:id` | list · form | |
+| `/projects` · `/projects/new` · `/projects/:id` · `/projects/:id/edit` | list · form · detail · form | |
+| `/sites` · `/sites/new` · `/sites/:id` · `/sites/:id/edit` | list · form · detail · form | |
+
+`/new` is declared before `:id` because GoRouter matches in declaration order,
+and `:id` carries the regex `(\d+)` so `/employees/new` is never read as an id.
+Detail routes parse `int.parse(state.pathParameters['id']!)`; forms take the id
+as a nullable `int?`, `null` meaning create.
 
 ---
 
@@ -485,76 +506,104 @@ transactions plus a **unique constraint on `local_uuid`** so a retry can never d
 ## 11. Permissions in the UI
 
 ```dart
-// At login the server returns the permission list; store it in auth state.
-final canManage = ref.watch(authProvider.select(
-  (s) => s.permissions.contains('attendance.manage'),
-));
+// Phase 4 — one object answers every "may they?" question.
+final scope = ref.watch(permissionScopeProvider);
 
-if (canManage) ...[ /* HR-only controls */ ],
+if (scope.canManageSites) ...[ /* HR-only controls */ ],
+
+// A screen that may show the list also *loads* it — watch the flag, not the
+// raw list, so a session without the permission never fires the request:
+final canView = ref.watch(
+  permissionScopeProvider.select((s) => s.canViewEmployees),
+);
 ```
 
+`PermissionScope` (`core/permissions/permission_scope.dart`) exposes `can`,
+`canAny`, `canAll` plus the named getters the screens actually use
+(`canViewEmployees`, `canCreateEmployees`, `canViewSalary`, …). Three properties
+it is built to hold, each of them under test:
+
+1. **Fails closed.** A session with no permissions denies everything, so a
+   partially-restored app draws nothing rather than everything.
+2. **Salary is not a subset of the roster.** `employees.view` never implies
+   `employees.salary.view`; the same two-rule split the API uses
+   (`EmployeePolicy::viewSalary` needs *both*) is phrased the same way here.
+3. **A misspelling denies.** An unknown permission string reads as denied, not
+   as granted — the failure mode of a typo should be an absent button, never
+   an exposed one.
+
 **Remember:** this only controls *visibility*. The API enforces the real rule and
-returns `403` if the app is bypassed.
+returns `403` if the app is bypassed — which is why every form and detail screen
+has a test that renders that `403` as a refusal rather than as a broken page.
 
 ---
 
 ## 12. Project structure
 
-**As built after Phase 3:**
+**As built after Phase 4:**
 
 ```
 mobile/lib/
 ├── core/
-│   ├── config/app_config.dart        # base URL from --dart-define
-│   ├── network/api_client.dart       # Dio + bearer interceptor + ApiEnvelope
-│   ├── network/api_exception.dart    # ApiException + envelope parsing
-│   ├── router/app_router.dart        # GoRouter + refreshListenable guard
-│   ├── storage/token_store.dart      # flutter_secure_storage (TokenStore)
-│   └── storage/device_identity.dart  # stable per-install device name
+│   ├── config/app_config.dart          # base URL from --dart-define
+│   ├── data/page_result.dart           # PagedList<T> envelope → items/meta/has_next
+│   ├── network/api_client.dart         # Dio + bearer interceptor + ApiEnvelope
+│   ├── network/api_exception.dart      # ApiException + envelope parsing
+│   ├── permissions/permission_scope.dart  # may()/can() — one place that answers
+│   ├── presentation/
+│   │   ├── paged_list_view.dart        # spinner / empty / error+retry / rows / banner
+│   │   ├── list_state.dart             # PagedListController<T>, generation guard
+│   │   ├── form_controls.dart          # LabeledTextField, StatusField, FormBanner
+│   │   ├── fields.dart                 # DateField, StatusFilter, SectionCard
+│   │   └── remote_picker.dart          # debounced searchable option sheet
+│   ├── router/app_router.dart          # GoRouter + refreshListenable guard
+│   └── storage/
+│       ├── token_store.dart            # flutter_secure_storage (TokenStore)
+│       └── device_identity.dart        # stable per-install device name
 │
 ├── features/
-│   ├── auth/
-│   │   ├── auth_models.dart          # AuthUser, EmployeeBrief, LoginResult
-│   │   ├── auth_repository.dart      # AuthRepository (abstract) + Api impl
-│   │   ├── auth_state.dart           # AuthStatus + AuthState
-│   │   ├── auth_controller.dart      # Notifier<AuthState>
+│   ├── auth/                           # deliberately flat — five files
+│   │   ├── auth_models.dart            # AuthUser, EmployeeBrief, LoginResult
+│   │   ├── auth_repository.dart        # AuthRepository (abstract) + Api impl
+│   │   ├── auth_state.dart             # AuthStatus + AuthState
+│   │   ├── auth_controller.dart        # Notifier<AuthState>
 │   │   ├── login_screen.dart
 │   │   └── splash_screen.dart
-│   └── home/home_screen.dart         # Phase 4 landing spot
-│
-├── app.dart                          # MaterialApp.router
-└── main.dart                         # ProviderScope + runApp
-```
-
-**Target shape once features carry real data:**
-
-```
-mobile/lib/
-├── core/
-│   ├── config/       app config, environment
-│   ├── constants/    API routes, storage keys
-│   ├── errors/       Failure types, message mapping
-│   ├── network/      Dio client, interceptors, ApiResult
-│   ├── storage/      secure storage, Drift database
-│   ├── utils/        date, distance (haversine), validators
-│   └── widgets/      LoadingView, ErrorView, EmptyState, buttons
-│
-├── features/
-│   └── attendance/
+│   ├── home/home_screen.dart           # permission-gated module tiles
+│   │
+│   │   └── each of the five below has the same three layers:
+│   ├── employees/      ├── departments/   ├── designations/
+│   ├── projects/       └── sites/
+│   │
+│   └── <feature>/
 │       ├── data/
-│       │   ├── models/
-│       │   ├── repositories/
-│       │   └── sources/       AttendanceApi, AttendanceLocalDb
-│       ├── providers/         Riverpod providers
-│       ├── application/       use-cases (when logic is complex)
-│       └── presentation/      screens + widgets
+│       │   ├── api_<feature>_repository.dart  # the Dio implementation
+│       │   └── <feature>_providers.dart       # repository + list/picker providers
+│       ├── domain/
+│       │   ├── <feature>.dart                 # the model + fromJson + summary
+│       │   └── <feature>_repository.dart      # the contract the fake implements
+│       └── presentation/
+│           ├── <feature>_list_screen.dart
+│           ├── <feature>_detail_screen.dart   # (employees / projects / sites)
+│           ├── <feature>_form_screen.dart
+│           └── <feature>_controller.dart      # PagedListController<T>
 │
-└── main.dart
+├── app.dart                            # MaterialApp.router
+└── main.dart                           # ProviderScope + runApp
 ```
 
-`auth/` is flat because five files do not need four directories. The nested
-shape starts paying for itself when a feature gains a local data source — the
-offline queue in Phase 6 is that moment for `attendance/`.
+**Why `domain/` exists as its own layer:** it holds a *contract*, so a widget test
+can substitute a scripted repository that records what the screen asked for
+(`listCalls`, `lastQuery`, `lastBody`) without the screen knowing it is being
+watched. The model lives there too — `Employee.fromJson` reading a `full_name`
+from a nested `EmployeeResource`, `Site.fromJson` parsing decimals that arrive
+as **strings** — which is what makes `page_result_test.dart` able to prove the
+parsing without a socket.
+
+`auth/` stays flat because five files do not need four directories. The nested
+shape starts paying for itself exactly when a feature grows local sources of
+its own — which the Phase 4 modules did, and which `attendance/` will when the
+offline queue arrives in Phase 6.
 
 ---
 
@@ -635,12 +684,14 @@ flutter build appbundle         # build an AAB for Play Store
 | This guide (concepts + patterns) | ✅ Written |
 | Flutter SDK install (on `F:`) | ✅ Phase 1b |
 | Flutter project skeleton | ✅ Phase 1b |
-| Packages: `flutter_riverpod` 3.4.3 · `dio` 5.11.1 · `go_router` 18.0.1 · `flutter_secure_storage` 11.2.0 | ✅ Phase 3 |
+| Packages: `flutter_riverpod` 3.4.3 · `dio` 5.11.1 · `go_router` 18.0.1 · `flutter_secure_storage` 11.2.0 | ✅ Phase 3 — **no Phase 4 additions** |
 | `core/` — config, network, storage, router | ✅ Phase 3 |
+| `core/data` page envelope · `core/permissions` scope · `core/presentation` list + form widgets | ✅ Phase 4 |
 | Auth feature — controller, repository, models, login + splash screens | ✅ Phase 3 |
 | Router guard (`refreshListenable`) + session restore | ✅ Phase 3 |
+| Module routes + permission-gated home tiles | ✅ Phase 4 |
+| Employees / departments / designations / projects / sites — 13 screens | ✅ Phase 4 |
 | `flutter analyze` | ✅ clean |
-| `flutter test` | ✅ **43 passed** |
+| `flutter test` | ✅ **89 passed** |
 | Local database (Drift) + offline queue | ⬜ Phase 6 |
-| Shared widgets (`core/widgets/`) | ⬜ With the first list screens |
-| Feature screens beyond auth | ⬜ Phase 4 onward |
+| Shared widgets under `core/widgets/` | ⬜ The list and form widgets live in `core/presentation/` today; the split is worth it once a second, differently-shaped widget set appears |

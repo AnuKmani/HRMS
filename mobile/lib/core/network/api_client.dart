@@ -92,10 +92,23 @@ class ApiClient {
   /// subscribes when it is built, which happens before the first request.
   Stream<void> get sessionRejected => _sessionRejected.stream;
 
-  Future<ApiEnvelope> get(String path) => _send(() => dio.get<dynamic>(path));
+  Future<ApiEnvelope> get(String path, {Map<String, Object?>? query}) =>
+      _send(() => dio.get<dynamic>(path, queryParameters: query));
 
   Future<ApiEnvelope> post(String path, {Object? body}) =>
       _send(() => dio.post<dynamic>(path, data: body));
+
+  Future<ApiEnvelope> put(String path, {Object? body}) =>
+      _send(() => dio.put<dynamic>(path, data: body));
+
+  /// Reserved for endpoints that legitimately have one.
+  ///
+  /// Employee site assignments deliberately have no `DELETE` route — posting
+  /// history is append-only and closed with `PUT` — so nothing in Phase 4
+  /// calls this for them. The verb exists so the *other* resources (whose
+  /// rows are soft-deleted server-side) are not forced through `put`.
+  Future<ApiEnvelope> delete(String path) =>
+      _send(() => dio.delete<dynamic>(path));
 
   Future<ApiEnvelope> _send(Future<Response<dynamic>> Function() send) async {
     try {

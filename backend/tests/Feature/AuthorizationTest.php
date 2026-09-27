@@ -96,7 +96,15 @@ class AuthorizationTest extends TestCase
                 $superAdmin['permissions']
             ))
         );
-        $this->assertCount(39, $superAdmin['permissions']);
+        // Derived rather than literal: adding a permission to the catalog is
+        // a normal change, and a hardcoded count would turn it into a failing
+        // test nobody could explain without finding this line. Comparing the
+        // sets (rather than just the count) also catches the opposite slip —
+        // a catalogue entry quietly missing from the seeded grants.
+        $this->assertEqualsCanonicalizing(
+            PermissionSeeder::flat(),
+            array_values(array_unique($superAdmin['permissions'])),
+        );
     }
 
     public function test_a_user_with_no_roles_at_all_is_refused(): void

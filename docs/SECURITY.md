@@ -1,8 +1,10 @@
 # Security
 
-> **Status:** Phase 3 — authentication, rate limiting and the password policy are
-> live and tested. File storage, transport hardening and audit logging remain
-> phased ahead (§4, §5, §8). Individual controls are marked with their phase below.
+> **Status:** Phase 4 — authentication, rate limiting, the password policy, the
+> permission layer and now **row-level policies** for the organisation modules
+> are live and tested. File storage, transport hardening and audit logging
+> remain phased ahead (§4, §5, §8). Individual controls are marked with their
+> phase below.
 
 ---
 
@@ -15,6 +17,7 @@
 | Selfies | Public exposure | Privacy violation |
 | Passports, Emirates IDs, visas | Public exposure | Identity theft, legal exposure |
 | Salary slips, contracts | Unauthorized access | Financial/HR confidentiality breach |
+| Employee `salary` field | Read by anyone who may open the roster | Payroll confidentiality breach — gated by `employees.salary.view`, absent from the list projection entirely |
 | Attendance GPS data | Falsification | Payroll fraud |
 | Geofence check | Client-side bypass | Attendance fraud |
 | `.env`, keystores, Firebase keys | Commit to Git | Infrastructure compromise |
@@ -79,7 +82,7 @@ Two layers, both mandatory:
 ### 3.1 Permission layer (`spatie/laravel-permission`)
 
 **Implemented in Phase 2 ✅** — `spatie/laravel-permission` **^6.25**, 10 roles,
-39 permissions, 163 grants.
+40 permissions, 167 grants.
 
 > **Version pin matters:** v7/v8 of this package require PHP `^8.3`. This environment
 > runs **PHP 8.2.4**, so Composer correctly resolves to **6.25.0** (supports Laravel
@@ -90,6 +93,7 @@ Every permission is `resource.action`, lowercase:
 ```
 dashboard.view
 employees.view        employees.create     employees.update     employees.delete
+employees.salary.view
 departments.view      departments.manage
 designations.view     designations.manage
 attendance.view       attendance.manage
@@ -132,22 +136,41 @@ Verified by `RbacTest`: an authorized user gets `200`, a user with the wrong rol
 Permissions answer *"may this role do X?"*. Policies answer *"may this user do X to
 **this** record?"*.
 
-| Rule | Enforced by |
+**Implemented in Phase 4 ✅** — six policies, each authorized from a base
+`Controller` using `AuthorizesRequests`, so a controller cannot forget to ask:
+
+| Policy | What it decides |
 |---|---|
-| An employee may read **their own** attendance | `AttendancePolicy::view` |
-| An employee may **not** read a colleague's salary | `SalarySlipPolicy::view` |
-| An employee may **not** access HR endpoints | Permission middleware → `403` |
-| HR may override an attendance record | `AttendancePolicy::override` + audit log |
+| `DepartmentPolicy` | view / create / update / delete a department |
+| `DesignationPolicy` | view / create / update / delete a designation |
+| `ProjectPolicy` | view / create / update / delete a project |
+| `SitePolicy` | view / create / update / delete a site |
+| `EmployeePolicy` | view / update / delete another person; **and `viewSalary`** |
+| `EmployeeSiteAssignmentPolicy` | read / create / close an assignment |
+
+`EmployeePolicy::view` is the reason `GET /employees/{id}` carries **no**
+`permission:` middleware: an ordinary employee holding no `*.view` permission
+must still be able to open their own profile, and the policy is what separates
+"yours" from "everybody else's" — answering `403` for anything else.
+
+**`EmployeePolicy::viewSalary` requires both `employees.salary.view` *and*
+`view`.** Holding `employees.view` therefore never implies payroll: a list
+projection (`EmployeeResource`) has no `salary` key at all, only
+`EmployeeDetailResource` may carry it, and it carries `salary_visible: false`
+to anyone who may not read it. The rule is re-enforced in
+`StoreEmployeeRequest` / `UpdateEmployeeRequest`, which answer **422** if a
+`salary` key arrives from a caller without the permission — a body the UI
+chose not to render cannot be a way in.
 
 > **Hiding a button in Flutter is not authorization.** Every rule must also be enforced
 > in Laravel. The Flutter UI hides controls only for usability.
 
-**Status:** ✅ Permission layer live (Phase 2) · ✅ Permission-gated routes since Phase 3 · ⬜ Policies (row-level ownership) Phase 4
+**Status:** ✅ Permission layer live (Phase 2) · ✅ Permission-gated routes since Phase 3 · ✅ Policies for the Phase 4 modules (Phase 4) · ⬜ Attendance / leave / payroll policies in their own phases
 
-> **Scope note:** permissions are a *coarse gate*. `Employee` holds `attendance.view`
-> so it can open the screen at all — restricting results to the employee's own rows is
-> the **Policy's** job and is not yet wired to any route. No resource routes exist yet,
-> so until Phase 4 no employee data is reachable at all.
+> **Scope note:** permissions are a *coarse gate*. Row scoping belongs to the
+> policy, and for the modules that exist today that split is wired: every Phase
+> 4 route carries `permission:` middleware except the two `show` routes that
+> must stay open to a person reading their own row.
 
 ---
 
@@ -216,8 +239,20 @@ No file is ever reachable by guessing a path.
 | CSRF | Stateless token API — CSRF applies only if session auth is used on web routes |
 
 **Status:** ✅ Auth endpoints since Phase 3 (`LoginRequest`, `ChangePasswordRequest`,
-`PasswordResetRequest`), mass assignment closed on every model · ⬜ one Form
-Request per write endpoint as modules land from Phase 4
+`PasswordResetRequest`), mass assignment closed on every model · ✅ Phase 4 write
+endpoints each have their own Form Request (`StoreDepartmentRequest`,
+`UpdateDepartmentRequest`, `StoreDesignationRequest`, `UpdateDesignationRequest`,
+`StoreEmployeeRequest`, `UpdateEmployeeRequest`, `StoreProjectRequest`,
+`UpdateProjectRequest`, `StoreSiteRequest`, `UpdateSiteRequest`,
+`StoreEmployeeSiteAssignmentRequest`, `UpdateEmployeeSiteAssignmentRequest`) ·
+⬜ one per write endpoint as later modules land
+
+`UpdateEmployeeSiteAssignmentRequest` is worth naming: it accepts **only**
+`status` ∈ `{ended, cancelled}` and `end_date`. Identity fields
+(`employee_id`, `site_id`, …) come back as per-field 422s, so an assignment
+cannot be pointed at a different person or place by an edit.
+`StoreEmployeeRequest` rejects `photo_path` and `user_id` outright — neither
+is a client-supplied field.
 
 ---
 
@@ -267,6 +302,12 @@ lockout weapon aimed at a chosen victim.
 IP address, user-agent.
 
 **Status:** ⬜ Phase 5 onward
+
+**Phase 4 prepared the ground without faking it.** No activity log was wired,
+because a table nothing writes to is worse than none — but every mutation that
+will need one is already structured for it: services own the non-trivial
+writes, transactions wrap them, and an assignment records `created_by` at
+insert. Adding logging later is one call inside the service, not a rewrite.
 
 ---
 
@@ -375,7 +416,7 @@ Enforced by `Password::min(8)->letters()->numbers()` on both
 | 1 | `.gitignore` secret blocking, private-storage plan |
 | 2 | RBAC (roles, permissions, middleware), settings as the single config authority |
 | 3 | Sanctum auth, one-token-per-device, rate limiting, password policy, session revocation, response-envelope exception handling. **Login audit deferred to Phase 5** with §8 |
-| 4 | Policies on employees/projects/sites, form requests |
+| 4 | Six policies (department, designation, employee, project, site, employee-site-assignment), 12 Form Requests, coarse `permission:` middleware on every route except the two self-read `show`s, `employees.salary.view` separated from `employees.view`, assignment identity fields frozen against edits |
 | 5 | Geofence server validation, selfie private storage + upload validation, attendance audit, login audit |
 | 6 | Offline sync idempotency, server re-validation of offline GPS |
 | 9 | Leave approval audit, LOP conversion audit |

@@ -28,6 +28,7 @@ class RolePermissionSeeder extends Seeder
         'HR Admin' => [
             'dashboard.view',
             'employees.view', 'employees.create', 'employees.update', 'employees.delete',
+            'employees.salary.view',
             'departments.view', 'departments.manage',
             'designations.view', 'designations.manage',
             'attendance.view', 'attendance.manage',
@@ -65,6 +66,7 @@ class RolePermissionSeeder extends Seeder
         'Payroll Admin' => [
             'dashboard.view',
             'employees.view',
+            'employees.salary.view',
             'attendance.view',
             'leave.view',
             'payroll.view', 'payroll.manage',
@@ -112,6 +114,7 @@ class RolePermissionSeeder extends Seeder
         'Finance' => [
             'dashboard.view',
             'employees.view',
+            'employees.salary.view',
             'payroll.view',
             'expenses.view', 'expenses.approve', 'expenses.manage',
             'reports.view', 'reports.export',

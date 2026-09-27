@@ -1,8 +1,9 @@
 # Deployment
 
-> **Status:** Phase 1 — Foundation. Nothing is deployed yet. This document defines the
-> target production architecture, environment requirements, backup strategy and the
-> runbook for each phase.
+> **Status:** Nothing is deployed yet — this document defines the architecture and
+> runbook to deploy to. What is live is local: `php artisan serve` against
+> `hrms_laravel`, and a Flutter debug build pointed at it with
+> `--dart-define=API_BASE_URL`. Phase 4 added the environment variables in §3.1.
 
 ---
 
@@ -99,6 +100,20 @@ MAIL_PORT=587
 MAIL_USERNAME=<smtp user>
 MAIL_PASSWORD=<smtp password>
 MAIL_ENCRYPTION=tls
+
+# --- Phase 4: organisation modules -------------------------------------------
+# Bounds on what may be written to a site's geofence radius, in metres. The
+# radius itself is a column on the site row; these only decide what a form may
+# submit, so a different ceiling is an env change and not a code change.
+GEOFENCE_MIN_RADIUS_METRES=10
+GEOFENCE_MAX_RADIUS_METRES=10000
+
+# Role visibility narrowing (Site Supervisor / Site Engineer see only their own
+# projects; Project Manager / Site Supervisor / Site Engineer see only their own
+# workforce) is deliberately NOT env-driven — it is `config/hrms.php`
+# => 'visibility'. A custom deployment that needs different lists edits that
+# file, and both the list queries and the policies read the same two arrays, so
+# narrowing a role narrows the collection and the single-record check together.
 ```
 
 **Critical:** `APP_DEBUG=false` in production. A debug page can leak env secrets.
@@ -117,6 +132,17 @@ php artisan view:cache
 php artisan migrate --force
 php artisan storage:link        # only if any public disk is used
 ```
+
+**When the permission catalogue grows** (it did once, in Phase 4), re-run the two
+idempotent seeders rather than the whole `DatabaseSeeder`:
+
+```bash
+php artisan db:seed --class=PermissionSeeder --force
+php artisan db:seed --class=RolePermissionSeeder --force
+```
+
+Both are `firstOrCreate` / `syncPermissions`, so they add what is missing and
+change nothing else — no sample rows, no duplicated roles.
 
 ---
 
@@ -394,6 +420,7 @@ curl -s https://api.example.com/api/v1/health
 |---|---|
 | This document (target architecture + runbook) | ✅ Written |
 | Phase 3 auth environment variables documented in §3.1 | ✅ |
+| Phase 4 geofence + visibility config documented in §3.1 | ✅ |
 | Server provisioning | ⬜ |
 | CI/CD pipeline | ⬜ |
 | SSL certificate | ⬜ |

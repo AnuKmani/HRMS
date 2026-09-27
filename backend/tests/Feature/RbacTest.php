@@ -82,10 +82,19 @@ class RbacTest extends TestCase
     public function test_permissions_follow_resource_action_convention(): void
     {
         foreach (PermissionSeeder::flat() as $permission) {
+            // Two segments (`employees.view`) or three (`employees.salary.view`).
+            // The third is reserved for a sub-field of a resource — salary is
+            // the case that forced it: it must not be implied by employees.view.
             $this->assertMatchesRegularExpression(
-                '/^[a-z_]+\.[a-z_]+$/',
+                '/^[a-z_]+(\.[a-z_]+)+$/',
                 $permission,
-                "Permission '{$permission}' must be lowercase resource.action",
+                "Permission '{$permission}' must be lowercase segments joined by dots",
+            );
+
+            $this->assertLessThanOrEqual(
+                3,
+                substr_count($permission, '.') + 1,
+                "Permission '{$permission}' may have at most three segments",
             );
         }
     }

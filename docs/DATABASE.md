@@ -1,7 +1,8 @@
 # Database Design
 
-> **Status:** Phase 3 — core schema plus the auth addition. Laravel's base tables plus 10
-> Phase 2 migrations and the Phase 3 `users.status` column now exist: `settings`,
+> **Status:** Phase 4 — core schema plus the auth addition, and the first slice
+> **using** it. Laravel's base tables plus 10 Phase 2 migrations and the Phase 3
+> `users.status` column now exist: `settings`,
 > `departments`, `designations`, `shifts`, `projects`, `employees`, `sites`,
 > `employee_site_assignments` and the `spatie/laravel-permission` RBAC tables.
 > Tables for later phases (`attendances`, `leave_requests`, `payrolls`, …)
@@ -382,12 +383,17 @@ All counts below are **live and verified** against `hrms_laravel` after
 | Seeded | Count | Seeder |
 |---|---|---|
 | Roles | 10 | `RoleSeeder` |
-| Permissions | 39 | `PermissionSeeder` |
-| Role → permission grants | 163 | `RolePermissionSeeder` |
+| Permissions | 40 | `PermissionSeeder` |
+| Role → permission grants | 167 | `RolePermissionSeeder` |
 | Settings | 12 | `SettingSeeder` |
 | Shifts | 4 — General, Morning, Evening, Night | `DevelopmentDataSeeder` |
 | Departments | 4 *(development sample)* | `DevelopmentDataSeeder` |
 | Designations | 8 *(development sample)* | `DevelopmentDataSeeder` |
+
+Phase 4 added exactly one permission, `employees.salary.view`, granted to
+HR Admin, Payroll Admin and Finance (Super Admin holds it through `*`).
+Re-running the two seeders brings an older dev database up to date without
+touching anything else — they are `firstOrCreate` / `syncPermissions` only.
 
 Not yet seeded (later phases): leave types, demo projects/sites.
 
@@ -407,7 +413,7 @@ Not yet seeded (later phases): leave types, demo projects/sites.
 | 1 | `0001_01_01_*` framework tables + `2026_09_26_170015` Sanctum tokens | ✅ |
 | 2 | Core schema — 10 migrations, see below | ✅ |
 | 3 | `2026_09_27_000010` — `users.status` (indexed `active`/`inactive`) | ✅ |
-| 4 | Employees / Projects / Sites *(controllers & routes)* | ⬜ |
+| 4 | **None.** Controllers, Form Requests, Resources, services and six policies on the tables Phase 2 already created | ✅ |
 | 5 | Attendance | ⬜ |
 
 ### Phase 2 migrations (all `Ran`)
