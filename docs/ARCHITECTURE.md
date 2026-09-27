@@ -664,6 +664,22 @@ semantics and its own tests, all to avoid N small requests that the
 Selfies, passports, Emirates IDs, visas, contracts and salary documents live
 outside `public/`.
 
+**What is stored is never what was sent.** `SelfieSanitizer` decodes the
+upload with PHP's bundled **GD**, flattens any alpha onto white, and
+re-encodes it as JPEG (quality 85, `hrms.storage.selfie_jpeg_quality`);
+only those bytes are written, to a server-minted
+`{employeeId}/{uuid}.jpg`. Because EXIF lives in JPEG APP segments that a
+pixel decoder discards, re-encoding *is* the metadata removal — no GPS fix,
+no camera identification, no embedded thumbnail — and the original file and
+filename are read once and never written. GD is already present, so no new
+Composer dependency was added.
+
+This is the **security boundary**: it runs for every request, including from
+clients that bypass the Flutter app entirely. `SelfieCompressor` performs
+the same re-encode on the device beforehand, which is a courtesy to a
+patchy site signal rather than a control. If GD were missing the sanitiser
+refuses to store anything rather than falling back to the raw upload.
+
 For the check-in selfie the access path is **not** a signed URL but a
 policy-gated route: `GET /api/v1/attendance/{id}/selfie` runs
 `AttendancePolicy::viewSelfie` and streams the file off the `local` disk
@@ -675,7 +691,7 @@ row question, and revocation is a permission change rather than a wait.
 
 No response contains a filesystem path, a base64 image, or a link to
 somebody else's selfie. Documents arriving in later phases follow the same
-rule.
+rule — sanitise on write, serve through a policy.
 
 ### 5.6 Status is decided in exactly one place (Phase 5)
 
@@ -763,3 +779,4 @@ The following are explicitly **out of scope** unless later requested:
 | Phase 3 | Authentication — login / logout / sessions / change-password / forgot-password (501 until a mailer), named rate limiters, the success-and-failure envelope in `ApiResponse`, Flutter auth + GoRouter guard |
 | Phase 4 | First vertical slice — departments, designations, employees, projects, sites and employee-site-assignments (Form Requests, Resources, services, transactions, six policies, `employees.salary.view`); Flutter `data/domain/presentation` features, permission-gated home, 13 screens |
 | Phase 5 | GPS attendance and site movement — `attendances` + `site_visits` (2 migrations), `GeofenceService`, `WorkingTimeCalculator`, `AttendanceStatusCalculator`, `AttendanceService`, 11 routes, `Attendance`/`SiteVisit` policies, private selfie storage, `attendance` rate limiter, movement timeline; Flutter `features/attendance/` with location + camera permission flows, advisory geofence, offline queue with `client_event_id`, 176 tests |
+| Post-Phase 5 hardening | Server-side selfie sanitisation — `SelfieSanitizer` (GD decode → flatten → JPEG re-encode, EXIF/GPS stripped, original never stored) + `App\Rules\ImageContent` (header decode check + pixel budget); closes §4.3's "EXIF is stripped by the app, not by the server" gap; no new dependency; `AttendanceSelfieSanitizationTest` (13), backend 321 tests |

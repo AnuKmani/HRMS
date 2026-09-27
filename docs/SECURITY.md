@@ -3,9 +3,10 @@
 > **Status:** Phase 5 — authentication, rate limiting, the password policy, the
 > permission layer, row-level policies, and now **GPS attendance controls**
 > (server-authoritative geofence, private selfie storage, location and camera
-> permissions) are live and tested. Transport hardening and audit logging
-> remain phased ahead (§5, §8). Individual controls are marked with their
-> phase below.
+> permissions) are live and tested. **Attendance selfie sanitisation is now
+> enforced server-side** (§4.3) — metadata stripping no longer depends on the
+> Flutter client. Transport hardening and audit logging remain phased ahead
+> (§5, §8). Individual controls are marked with their phase below.
 
 ---
 
@@ -243,28 +244,55 @@ signed URL is a bearer secret with a lifetime, and it would put the storage
 layout and the employee id into a link that outlives the permission that
 issued it.
 
-### 4.3 Upload validation (server-side, always) ✅ Phase 5 (selfies)
+### 4.3 Upload validation **and sanitisation** (server-side, always) ✅ Phase 5, hardened
 
 | Check | Rule |
 |---|---|
 | MIME type | Sniffed from the bytes by `finfo`, **not** the client-supplied header — checked in `StoreCheckInRequest` *and* again in `SelfieStore` |
-| Extension | Must be in the allow-list and the stored extension is chosen from the **sniffed** MIME, not from the filename |
+| Extension | Must be in the allow-list; the stored extension is chosen by the **encoder**, so it is always `.jpg` regardless of what arrived |
 | Size | Selfies ≤ `hrms.storage.selfie_max_kilobytes` (5120 KB); documents ≤ 10 MB (configurable, Phase 10) |
-| Filename | **Never trusted** — `{employeeId}/{uuid}.{ext}` is generated server-side |
+| Real image content | `App\Rules\ImageContent` parses the header itself and `SelfieSanitizer` decodes the pixels — a PDF renamed to `.jpg` is refused by three independent answers |
+| Pixel budget | ≤ `hrms.storage.selfie_max_pixels` (default 16 777 216 = 4096 × 4096), because a decoded image costs ~4 bytes a pixel and one crafted request must not be able to ask for a gigabyte of buffer |
+| Filename | **Never trusted** — `{employeeId}/{uuid}.jpg` is generated server-side and the client's name is never read |
 | Path containment | `SelfieStore::isSafe()` before any read or delete |
 | Cleanup | a check-in that throws after the file was written deletes it |
 
 `jpg`, `jpeg`, `png`, `webp` only, unless explicitly extended.
 
-**Known gap — EXIF is stripped by the app, not by the server.** The Flutter
-compressor re-encodes the frame before upload, which discards EXIF (and with
-it any GPS tag the phone may have written). The server stores the bytes it
-is given and does not re-encode. A hand-crafted client could therefore send
-an image carrying metadata. The app path is clean today; a server-side
-re-encode belongs with Phase 10, when documents arrive and "what the file
-contains" stops being something the app can vouch for.
+#### Metadata stripping is enforced on **both** sides — Laravel is the boundary
 
-**Status:** ✅ Phase 5 (selfie), ⬜ Phase 10 (documents)
+| Layer | What it does | Why it exists |
+|---|---|---|
+| **Flutter** — `SelfieCompressor` | Decodes and re-encodes before upload | A courtesy to a patchy site signal: it gets the frame under 5 MB without a second round-trip. It is **not** a control. |
+| **Laravel** — `SelfieSanitizer` | Decodes the upload, flattens any alpha onto white, re-encodes as JPEG 85, and writes **only** those bytes | **The security boundary.** It runs for every request, including from clients that have never seen the app. |
+
+**How the stripping works.** There is no metadata-stripping step, because
+there cannot be one worth trusting: EXIF — the GPS fix, the camera make and
+model, the software string, sometimes an embedded thumbnail of a different
+frame entirely — lives in JPEG APP segments that a pixel decoder skips.
+Decoding with GD and writing the pixels back out therefore writes none of
+it. The original bytes are read exactly once, into memory, and are never
+written anywhere; the original filename is never read at all.
+
+This closes the gap Phase 5 left open ("EXIF is stripped by the app, not by
+the server"). It uses **PHP GD**, which is already bundled with this PHP
+build (`imagecreatefromstring`, `imagejpeg`) — no new Composer dependency
+was added and none is required.
+
+**Fail closed.** If GD were unavailable, `SelfieSanitizer` refuses to store
+*anything* rather than falling back to the raw upload: a missing extension
+must never become a metadata bypass.
+
+**Not implemented, deliberately:** facial recognition, biometric matching of
+any kind, and any automatic identification of the person in the frame.
+
+**Audit logging is still not implemented** — see §13. It is scheduled for
+the dedicated audit/security phase, which will record who read or changed
+which record. Reading a selfie today is authorised by `viewSelfie` and
+denied when it should be, but the fact of the read is not persisted.
+
+**Status:** ✅ Phase 5 (selfie) · ✅ selfie sanitisation (this pass) ·
+⬜ Phase 10 (documents) · ⬜ audit/security phase
 
 ---
 
@@ -368,7 +396,10 @@ down, they do not make a second row impossible.
 **Recorded fields:** user, action, module, record, old values, new values, timestamp,
 IP address, user-agent.
 
-**Status:** ⬜ Not yet implemented — Phase 5 did not change this.
+**Status:** ⬜ Not yet implemented — neither Phase 5 nor the Phase 5 selfie
+hardening pass changed this. **Audit logging remains scheduled for the
+dedicated audit/security phase**, and is not being faked or partially
+shipped in the meantime.
 
 **Phase 4 prepared the ground without faking it**, and **Phase 5 did the
 same**. No activity log was wired, because a table nothing writes to is
@@ -382,7 +413,8 @@ logging later is one call inside the service, not a rewrite.
 
 The honest gaps: **attendance override is not audited because attendance
 override does not exist yet**, and **login success/failure is still not
-recorded anywhere** — see §2.
+recorded anywhere** — see §2. Reading a selfie is authorised by
+`viewSelfie`, but the read itself is not persisted as an activity row.
 
 ---
 
@@ -517,6 +549,25 @@ Enforced by `Password::min(8)->letters()->numbers()` on both
 | 10 | Document private storage, signed URLs, expiry jobs |
 | 11 | Salary access control (own-only), payroll audit |
 | 13 | Full security audit, penetration-style test pass, deployment hardening |
+
+### Selfie hardening pass (after Phase 5, before Phase 6)
+
+Server-side image sanitisation for attendance selfies, closing the "EXIF is
+stripped by the app, not by the server" gap §4.3 used to record:
+
+- `SelfieSanitizer` — GD decode → flatten alpha → re-encode as JPEG 85;
+  only the re-encoded bytes are ever written, so EXIF/GPS/camera metadata
+  and the client filename cannot survive
+- `App\Rules\ImageContent` — header-level "is this an image" plus a pixel
+  budget, as a field error at the request
+- fail-closed when the decoder is unavailable; the original upload is never
+  stored, even temporarily
+- one format on disk (`.jpg`), server-minted UUID name, private disk,
+  `viewSelfie` + `no-store` unchanged
+- 13 tests in `AttendanceSelfieSanitizationTest`
+
+**Not delivered by this pass, unchanged:** facial recognition (deliberately
+never), audit logging (scheduled for the dedicated audit/security phase).
 
 ---
 

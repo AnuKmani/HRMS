@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Models\Attendance;
+use App\Rules\ImageContent;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
@@ -17,10 +18,13 @@ use Illuminate\Foundation\Http\FormRequest;
  * nowhere to put them. AttendanceService derives every one of them from the
  * token, the site row and the clock.
  *
- * `selfie` is required and validated three ways — declared type, sniffed
- * MIME and size — because a check-in with no evidence attached is not a
- * check-in, and because the one place a user can be told "that is not an
- * image" before anything is written is here.
+ * `selfie` is required and validated four ways — declared type, sniffed
+ * MIME, size, and (via `ImageContent`) whether the bytes decode into an
+ * image at all and how many pixels it claims — because a check-in with no
+ * evidence attached is not a check-in, and because the one place a user can
+ * be told "that is not an image" before anything is written is here. What
+ * the photograph is then *turned into* is `SelfieSanitizer`'s job, which
+ * runs for every client including the ones that skip the app.
  *
  * Coordinate range is checked here so a nonsense value gets a field error
  * rather than a service call; everything subtler (accuracy quality, (0,0),
@@ -58,6 +62,12 @@ class StoreCheckInRequest extends FormRequest
                 'mimes:jpg,jpeg,png,webp',
                 'mimetypes:image/jpeg,image/png,image/webp',
                 'max:'.$maxKilobytes,
+
+                // The only rule here that looks at the picture rather than
+                // its paperwork: it reads the header itself, refuses
+                // anything that is not an image, and caps the pixel count
+                // before a decoder is ever asked for a buffer.
+                new ImageContent,
             ],
 
             'client_event_id' => ['nullable', 'uuid'],

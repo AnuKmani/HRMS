@@ -382,19 +382,40 @@ home. Tests **190 passed (993 assertions)** after Phase 4.
 | `POST /attendance/check-in` · `check-out` · `GET /attendance/today` · `GET /attendance` · `GET /attendance/{id}` · `GET /attendance/{id}/selfie` | ✅ |
 | `POST /site-visits/start` · `{id}/end` · `GET /site-visits/today` · `GET /site-visits` · `GET /movement/today` | ✅ |
 | `AttendancePolicy` + `SiteVisitPolicy` — self-service routes carry **no** `permission:` middleware; row scope fails closed | ✅ |
-| Private selfies (`storage/app/private/attendance-selfies/{employeeId}/{uuid}.ext`), streamed only through the policy, `no-store`, no paths in JSON | ✅ |
+| Private selfies (`storage/app/private/attendance-selfies/{employeeId}/{uuid}.jpg`), streamed only through the policy, `no-store`, no paths in JSON | ✅ |
+| **Sanitised on write** — `SelfieSanitizer` decodes with PHP GD and re-encodes as JPEG 85, so EXIF/GPS/camera metadata and the client filename never reach the disk; `ImageContent` rule rejects non-images and over-budget pixels at the request | ✅ |
 | Offline: `client_event_id` idempotency, replay through the same route, full re-validation on sync | ✅ |
 | Rate limit `attendance` 30/min/user on the four writes | ✅ |
 | Flutter `features/attendance/` — 6-state location flow, 5-state camera flow, advisory local geofence, offline queue with **Sync now** | ✅ |
 | Android manifest: fine/coarse location + camera, **no** background location | ✅ |
-| Tests: backend **308 passed (1384 assertions)** · Flutter **176 passed** · `pint --test` clean · `dart format` + `flutter analyze` clean | ✅ |
+| Tests: backend **321 passed (1451 assertions)** · Flutter **176 passed** · `pint --test` clean · `dart format` + `flutter analyze` clean | ✅ |
 | Docs updated: `API_DOCUMENTATION`, `ARCHITECTURE`, `DATABASE`, `SECURITY`, `FLUTTER_GUIDE`, `TESTING`, `USER_GUIDE` | ✅ |
 
 > **Deliberately not built in Phase 5:** attendance override and its audit
 > trail (the `manually_adjusted` status is reserved with no writer),
 > background/automatic sync (queueing is manual **Sync now**), site activity
 > reports, and any login audit — see [`docs/SECURITY.md`](docs/SECURITY.md)
-> §8.
+> §8. **Facial recognition is not built and is not planned.**
+
+### ✅ Phase 5 hardening — server-side selfie sanitisation (COMPLETE)
+
+Added after Phase 5 because the app-side EXIF strip could be walked around
+by any client that speaks HTTP.
+
+| Deliverable | Status |
+|---|---|
+| `SelfieSanitizer` — GD decode → alpha flattened onto white → **JPEG re-encode at quality 85**; only those bytes are written, the original upload never is | ✅ |
+| Metadata removed as a side effect of re-encoding: no EXIF, no GPS fix, no camera make/model, no embedded thumbnail | ✅ |
+| Library used: **PHP GD, already bundled** — no new Composer dependency | ✅ |
+| `App\Rules\ImageContent` — header-level image check + pixel budget (`selfie_max_pixels`, default 4096×4096) as a field error | ✅ |
+| Fail closed if the decoder is missing; server-minted `{uuid}.jpg`, client filename never read; private disk unchanged | ✅ |
+| Access unchanged: `viewSelfie` policy, `no-store`, `401` without a session, `403` for a colleague | ✅ |
+| Tests: `AttendanceSelfieSanitizationTest` (13) — valid JPEG, PNG re-encode, invalid, renamed non-image (fake **and** real sniff), oversized, over-budget pixels, EXIF stripped, original not stored, private, `401`, `403` | ✅ |
+| Docs: `SECURITY` §4.3/§8/§13, `ARCHITECTURE` §5.5, `API_DOCUMENTATION` §4, `TESTING` §3.3/§6 | ✅ |
+
+> **Still deliberately not built:** facial recognition, and **audit
+> logging** — which remains scheduled for the dedicated audit/security
+> phase and is not partially faked. See [`docs/SECURITY.md`](docs/SECURITY.md) §8.
 
 ### Planned Phases
 

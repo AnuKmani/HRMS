@@ -1,8 +1,9 @@
 # Testing
 
-> **Status:** Phase 5 — two business slices are covered end to end.
-> Backend **308 passed (1384 assertions)**, Flutter **176 passed**. This
-> document defines the strategy for the modules still to come (Phases 6–12).
+> **Status:** Phase 5 + the selfie hardening pass — two business slices are
+> covered end to end, and every selfie that enters the system is covered
+> too. Backend **321 passed (1451 assertions)**, Flutter **176 passed**.
+> This document defines the strategy for the modules still to come (Phases 6–12).
 
 ---
 
@@ -129,12 +130,17 @@ Ten feature files, one per resource plus the two relationship suites:
 | `AssignmentApiTest` | permission gate; `created_by` recorded; site must belong to the named project; required fields; **a new primary posting closes the previous one without erasing it**; a temporary posting leaves the primary alone; a posting can be closed; history cannot be rewritten; an ended posting cannot be reopened; **no route deletes posting history**; Site Supervisor may post only to sites they run; list filters |
 | `AssignmentHistoryTest` | history survives soft deletion of the site and *blocks* hard deletion; same for the employee; `created_by` optional for system imports; type/status vocabularies enforced; the end helper is idempotent |
 
-### 3.3 Attendance ✅ (Phase 5 — 118 tests)
+### 3.3 Attendance ✅ (Phase 5 + selfie hardening — 131 tests)
 
-Eight files: `AttendanceCheckInTest` (27), `AttendanceVisibilityTest` (19),
+Nine files: `AttendanceCheckInTest` (27), `AttendanceVisibilityTest` (19),
 `WorkingTimeCalculatorTest` (18), `SiteVisitTest` (15),
 `AttendanceCheckOutTest` (13), `GeofenceTest` (11),
-`AttendanceStatusCalculatorTest` (8), `MovementTimelineTest` (7).
+`AttendanceStatusCalculatorTest` (8), `MovementTimelineTest` (7),
+**`AttendanceSelfieSanitizationTest` (13)**.
+
+Every test runs against `hrms_testing` only, and the sanitisation tests call
+`Storage::fake('local')` so not one fixture photograph is written into the
+real private storage.
 
 #### Check-in
 
@@ -157,6 +163,33 @@ Eight files: `AttendanceCheckInTest` (27), `AttendanceVisibilityTest` (19),
 | 15 | Oversized image | `422` | `an_oversized_selfie_is_refused` |
 | 16 | No session | `401` | `check_in_requires_a_session` |
 | 17 | Rate limiter present on the four writes | config-driven (`attendance` 30/min), not an inline literal | `the_attendance_write_throttle_is_configured_rather_than_inlined` |
+
+#### Selfie sanitisation & access (13 tests — `AttendanceSelfieSanitizationTest`)
+
+Added by the post-Phase 5 hardening pass. Every row below asserts the file
+side too: **a rejected request leaves no attendance row *and* no file.**
+
+| # | Scenario | Expectation | Test |
+|---|---|---|---|
+| 1 | Valid JPEG | `201`; stored as `attendance-selfies/{employeeId}/{uuid}.jpg`, bytes are a complete JPEG (`FFD8` … `FFD9`) | `a_valid_jpeg_is_accepted_and_stored_under_a_server_minted_name` |
+| 2 | Client-supplied filename (`my holiday selfie.jpg`) | ignored — the stored name carries none of it, no spaces | `the_client_chosen_filename_never_reaches_the_disk` |
+| 3 | Valid PNG | accepted **and re-encoded to JPEG** — `.jpg` on disk, PNG magic absent; one format whatever arrived | `a_png_is_accepted_and_re_encoded_as_a_jpeg` |
+| 4 | Not an image at all (`this is not a photograph`) | `422` `errors.selfie[0]` = "That file is not a readable image.", nothing written | `a_file_that_is_not_an_image_is_refused_before_anything_is_written` |
+| 5 | Non-image **renamed** to `.png` | `422` with the same message — the extension is not the arbiter | `a_non_image_renamed_to_an_image_extension_is_refused` |
+| 6 | Same, as a **real** upload (MIME sniffed from bytes, as production does) | `422` — two independent answers, both "no" | `a_non_image_renamed_to_an_image_extension_is_refused_by_the_mime_sniff_too` |
+| 7 | Oversized real image | `422` `errors.selfie[0]` = "That selfie is too large…" | `an_oversized_image_is_refused` |
+| 8 | Pixel count over `selfie_max_pixels` | `422` "That image is too large to process." — the byte ceiling alone does not bound the buffer | `an_image_larger_than_the_pixel_budget_is_refused` |
+| 9 | JPEG carrying an EXIF block with a GPS fix, make and model | the **stored** bytes contain none of the markers and no `Exif` | `exif_and_camera_metadata_do_not_survive_sanitisation` |
+| 10 | What is written vs what was sent | not byte-identical to the upload; exactly one file on the disk | `only_the_sanitised_image_is_stored_never_the_original_upload` |
+| 11 | Read-back | no path in any response, `Content-Type: image/jpeg`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff` | `a_stored_selfie_is_reachable_only_through_the_policy_checked_route` |
+| 12 | No session | `401` on both `get` and `getJson` | `an_unauthenticated_request_cannot_fetch_a_selfie` |
+| 13 | Another employee | `403`, and their own list does not contain the id | `another_employee_cannot_fetch_this_selfie` |
+
+*Not covered, and why:* EXIF **orientation** is discarded rather than baked
+into the pixels, because the Flutter compressor already strips EXIF before
+upload — so both paths behave identically. PHP cannot author an EXIF block
+in a test fixture without hand-building a TIFF directory, so this is
+documented rather than asserted.
 
 #### Site assignment (the gate in front of every check-in)
 
@@ -501,6 +534,27 @@ Employee A holds attendance.view, employee B does not
   → no permission anywhere lets an ordinary employee read a colleague's day
 ```
 
+### Scenario F — A selfie that is not what it claims (hardening pass)
+```
+A client bypasses Flutter entirely and POSTs /attendance/check-in
+  → a text file named .jpg            → 422, no row, no file
+  → a real image renamed to .png      → 422, no row, no file
+  → a valid PNG                       → 201, stored as <uuid>.jpg (JPEG bytes)
+  → a valid JPEG carrying EXIF        → 201, stored bytes contain NO Exif,
+     with GPS fix, Make and Model            NO GPS fix, NO camera identity
+  → an image over selfie_max_pixels   → 422 — the byte ceiling does not
+                                         bound the decode buffer
+  → whatever arrives, disk holds exactly ONE file, at
+    attendance-selfies/{employeeId}/{uuid}.jpg on the `local` disk
+  → no response ever contains that path
+  → unauthenticated GET /attendance/{id}/selfie → 401
+  → another employee on the same route          → 403
+```
+
+Never regress: the sanitiser stores **only its own re-encoded output**. If
+`SelfieStore` ever writes `$file` bytes again, Scenario F fails even though
+every Phase 5 test still passes.
+
 ---
 
 ## 7. Running Tests
@@ -593,7 +647,7 @@ A phase is complete only when:
 |---|---|
 | Test strategy (this document) | ✅ Written |
 | Development/testing database split (`hrms_laravel` vs `hrms_testing`) | ✅ Phase 2 safety cleanup |
-| Backend test suite | ✅ **308 passed (1384 assertions)** — 75 Phase 2 + 45 Phase 3 + 70 Phase 4 + **118 Phase 5** |
+| Backend test suite | ✅ **321 passed (1451 assertions)** — 75 Phase 2 + 45 Phase 3 + 70 Phase 4 + **131 Phase 5 (incl. selfie hardening)** |
 | Flutter test suite | ✅ **176 passed** — 89 Phases 3–4 + **87 Phase 5** |
 | `flutter analyze` / `pint --test` / `composer validate` clean | ✅ |
 | CI pipeline running tests on every commit | ⬜ |

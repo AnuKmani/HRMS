@@ -11,7 +11,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 /**
  * Where attendance selfies live, and how they are read back.
  *
- * Three properties hold without exception:
+ * Four properties hold without exception:
  *
  *  - **private**. The `local` disk is `storage/app/private`, which has no
  *    `/storage/...` URL and no directory listing; Laravel's own signed-URL
@@ -22,8 +22,15 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  *    and a colleague's selfie-by-guessing are both structurally impossible.
  *  - **unexposed**. Nothing in this class returns a path to a request, and
  *    AttendanceResource reports `has_selfie`, not `_path`.
+ *  - **sanitised**. What lands on disk is `SelfieSanitizer`'s re-encoded
+ *    JPEG, never the upload: the original bytes are decoded in memory and
+ *    dropped, so no EXIF, no GPS fix, no camera model and no client
+ *    filename survive, and one format is written whatever arrived. Why the
+ *    stripping is a side effect of re-encoding rather than a step of its
+ *    own is `SelfieSanitizer`'s story to tell.
  *
- * The actual MIME/extension/size *rejection* happens in
+ * The actual MIME/extension/size *rejection* — and the `ImageContent` check
+ * that the bytes decode into an image at all — happens in
  * StoreCheckInRequest so the user gets a 422 naming the field. The checks
  * here repeat it on purpose: a storage layer that trusts a validation layer
  * it may one day stop sharing an author with is a storage layer waiting for
@@ -31,10 +38,12 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 final class SelfieStore
 {
-    /** Everything a selfie may be. Image data only — never a document. */
+    /** Everything a selfie may arrive as. Image data only — never a document. */
     public const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
     public const ALLOWED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp'];
+
+    public function __construct(private readonly SelfieSanitizer $sanitizer) {}
 
     public function store(UploadedFile $file, Employee $employee): string
     {
@@ -42,20 +51,19 @@ final class SelfieStore
             abort(422, 'That selfie is not an accepted image. Please take a new one.');
         }
 
+        // The bytes that go on disk are the sanitizer's, never the upload's.
+        // JPEG in, JPEG out, and the decoder has already said no to anything
+        // it could not read.
+        $bytes = $this->sanitizer->sanitize($file);
+
         $directory = $this->directory();
 
-        // Mime type decides the extension, not the client's filename — the
-        // same reason a passport office reads the page, not the cover.
-        $extension = match ($file->getMimeType()) {
-            'image/png' => 'png',
-            'image/webp' => 'webp',
-            default => 'jpg',
-        };
-
-        $name = $employee->id.'/'.Str::uuid()->toString().'.'.$extension;
+        // Neither the client's filename nor its extension chose the format —
+        // the encoder did, so the extension is known before a name is built.
+        $name = $employee->id.'/'.Str::uuid()->toString().'.'.SelfieSanitizer::OUTPUT_EXTENSION;
         $path = $directory.'/'.$name;
 
-        Storage::disk('local')->put($path, (string) file_get_contents($file->getRealPath()));
+        Storage::disk('local')->put($path, $bytes);
 
         return $path;
     }
@@ -78,6 +86,10 @@ final class SelfieStore
             return null;
         }
 
+        // Every selfie written since sanitisation is `.jpg`; the png/webp
+        // arms exist only for rows stored before it, so a record from last
+        // week is not served as the wrong type. Which type is announced is
+        // decided by the extension the server minted, never by the upload.
         $mime = match (pathinfo($path, PATHINFO_EXTENSION)) {
             'png' => 'image/png',
             'webp' => 'image/webp',
@@ -131,6 +143,10 @@ final class SelfieStore
         // client is free to label an upload `application/octet-stream`, and
         // refusing a perfectly good selfie for a header nobody reads would
         // be a worse failure than the one this check exists to prevent.
+        //
+        // This is still only a sniff — it reads a header, not the picture.
+        // Whether the bytes decode into an image at all is SelfieSanitizer's
+        // question, and it is asked again here rather than instead of this.
         return in_array((string) $file->getMimeType(), self::ALLOWED_MIME_TYPES, true);
     }
 

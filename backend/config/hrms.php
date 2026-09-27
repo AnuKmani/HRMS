@@ -130,6 +130,11 @@ return [
     | one is `GET /api/v1/attendance/{id}/selfie`, which runs the same policy
     | as the attendance row itself.
     |
+    | What is written there is never the upload: SelfieSanitizer decodes the
+    | incoming file and re-encodes it as JPEG, which is what drops the EXIF
+    | block — GPS fix, camera model, software string — along with any
+    | filename the client may have supplied.
+    |
     | The path below is relative to the storage root and is never sent to a
     | client — AttendanceResource exposes `has_selfie`, not `*_path`.
     |
@@ -137,8 +142,24 @@ return [
 
     'storage' => [
         'selfie_directory' => (string) env('HRMS_SELFIE_DIRECTORY', 'attendance-selfies'),
+
+        // What a selfie may weigh on the way in, checked against the part's
+        // own size by the request and again by SelfieStore.
         'selfie_max_kilobytes' => (int) env('HRMS_SELFIE_MAX_KB', 5120),
-        'selfie_max_pixels' => (int) env('HRMS_SELFIE_MAX_PIXELS', 4096),
+
+        // Width x height, not "per edge": a decoded image costs roughly
+        // four bytes a pixel, so this is what bounds the buffer a single
+        // crafted request may ask for. 16 777 216 is 4096 x 4096 — far past
+        // any selfie, and the reason a gigapixel file is refused instead of
+        // being decoded.
+        'selfie_max_pixels' => (int) env('HRMS_SELFIE_MAX_PIXELS', 16_777_216),
+
+        // What SelfieSanitizer emits. JPEG because it is the format every
+        // client already sends, it has no alpha channel to carry anything
+        // through, and re-encoding into it is precisely what discards EXIF.
+        // 85 is visually lossless for a face and about a tenth the size of
+        // 100 on a phone-camera frame.
+        'selfie_jpeg_quality' => (int) env('HRMS_SELFIE_JPEG_QUALITY', 85),
     ],
 
 ];

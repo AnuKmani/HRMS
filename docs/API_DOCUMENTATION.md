@@ -453,7 +453,7 @@ only what the phone in that person's hand could know:
 | `site_id` | required, must exist **and** be an active assignment for the caller |
 | `latitude` / `longitude` | required, `-90..90` / `-180..180` |
 | `accuracy` | optional metres, `0..100000`; the geofence refuses anything above `hrms.attendance.max_gps_accuracy_metres` (default 100) |
-| `selfie` | required image, ≤ `hrms.storage.selfie_max_kilobytes` (5120 KB), MIME sniffed |
+| `selfie` | required image, ≤ `hrms.storage.selfie_max_kilobytes` (5120 KB), MIME sniffed, and it must actually **decode** — see §4 |
 | `client_event_id` | optional UUID — the idempotency key |
 | `source` | `online` or `offline`. `manual` is never accepted from a client |
 | `device_reference` | optional string, ≤ 100 chars |
@@ -787,25 +787,63 @@ Phase 5 uploads exactly one kind of file: the **check-in selfie**.
 
 - `multipart/form-data`, field name `selfie`, on `POST /attendance/check-in` only
 - Max size **5120 KB** — `hrms.storage.selfie_max_kilobytes` (`HRMS_SELFIE_MAX_KB`)
-- Images only (`jpg`, `jpeg`, `png`, `webp`), validated three ways:
-  Laravel's declared-type rule, a `finfo` MIME sniff, and the byte ceiling.
-  The extension is not the arbiter and the client's `Content-Type` is not
-  believed.
+- Images only (`jpg`, `jpeg`, `png`, `webp`), validated **four** ways:
+  Laravel's declared-type rule, a `finfo` MIME sniff, the byte ceiling, and —
+  new in this hardening pass — `App\Rules\ImageContent`, which parses the
+  image header itself and refuses anything that does not decode, or that
+  claims more than `hrms.storage.selfie_max_pixels` pixels (default
+  16 777 216 = 4096 × 4096). The extension is not the arbiter and the
+  client's `Content-Type` is not believed.
+
+### 4.1 Sanitisation — what is stored is never what was sent
+
+What reaches disk is produced by `SelfieSanitizer` (PHP **GD**, already
+bundled with this PHP build — no extra Composer dependency):
+
+1. the upload is decoded (`imagecreatefromstring`);
+2. anything translucent is flattened onto white, so a PNG's alpha has
+   nowhere surprising to go;
+3. it is re-encoded as **JPEG at quality 85**
+   (`hrms.storage.selfie_jpeg_quality`, `HRMS_SELFIE_JPEG_QUALITY`);
+4. only those re-encoded bytes are written, to
+   `attendance-selfies/{employeeId}/{uuid}.jpg`.
+
+Re-encoding is the metadata removal: EXIF lives in JPEG APP segments that a
+pixel decoder discards, so there is no GPS fix, no camera make or model, no
+software string and no embedded thumbnail in anything the server stores.
+The original filename is never read, and the original bytes are never
+written — not even transiently.
+
+| Client | Metadata protection |
+|---|---|
+| Flutter app | `SelfieCompressor` re-encodes before upload — a courtesy to a patchy site signal |
+| **Any other client** | **`SelfieSanitizer` on the server — the security boundary** |
+
+The two layers are independent on purpose. The app can be skipped, replaced
+or modified; the server-side re-encode cannot be.
+
 - Filenames are **never** taken from the request. The stored name is a
-  generated UUID under `attendance-selfies/{employeeId}/{uuid}.{ext}`, so no
-  two devices can collide and no upload can address a path outside that
-  directory. A failed check-in deletes the file it had already written.
+  generated UUID under `attendance-selfies/{employeeId}/{uuid}.jpg`, so no
+  two devices can collide, no upload can address a path outside that
+  directory, and no client-chosen extension survives. A failed check-in
+  deletes the file it had already written.
 - **Private storage** (`local` disk → `storage/app/private`), reachable only
   by `GET /api/v1/attendance/{attendance}/selfie` behind the `viewSelfie`
   policy and served `Cache-Control: no-store`. No public URL, no signed URL,
-  no base64 in a JSON body, no way to enumerate the directory.
+  no base64 in a JSON body, no way to enumerate the directory. **No response
+  ever contains a filesystem path.**
 - The check-in response carries `has_selfie`, never the bytes.
 - Requires `Accept: application/json`
+
+**Rejection responses.** All of the above are `422` with the message on
+`errors.selfie[0]`, e.g. `"That file is not a readable image."` or
+`"That image is too large to process. Take a smaller one."` — and no
+attendance row and no file are created.
 
 Nothing here feeds facial recognition. The photograph is evidence that a
 person stood at that gate at that moment; it is opened by a human during a
 dispute, never by a model, and never by someone who simply wants to look at
-another employee's file.
+another employee's file. **Facial recognition is deliberately not built.**
 
 ---
 
@@ -876,8 +914,10 @@ Syncing is manual ("Sync now"), oldest first, and stops at the first 0 or
 | Rate limiting — auth routes | ✅ Phase 3 |
 | Rate limiting — attendance writes | ✅ Phase 5 |
 | Rate limiting — remaining scopes | ⬜ As their modules land |
+| §4 File upload rules (selfie) | ✅ Phase 5, **sanitised server-side since the post-Phase 5 hardening pass** |
+| §4 File upload rules (documents) | ⬜ Phase 10 |
 
-Backend proof: `php artisan test` → **308 passed (1384 assertions)**; 49 routes
+Backend proof: `php artisan test` → **321 passed (1451 assertions)**; 49 routes
 under `api/*`. Flutter proof: `dart format .` clean, `flutter analyze` clean,
 `flutter test` → **176 passed**.
 
