@@ -1,8 +1,12 @@
 # API Documentation
 
-> **Status:** Phases 1–4. §1 conventions, §2.1 authentication (Phase 3) and
-> §2.2–§2.3 the organisation modules (Phase 4) are **live**. Everything from
-> §2.4 onward is the contract the remaining phases build against.
+> **Status:** Phases 1–7. §1 conventions, §2.1 authentication (Phase 3),
+> §2.2–§2.3 the organisation modules (Phase 4), §2.4–§2.5 attendance, site
+> visits and movement (Phase 5), §2.6 site activity and daily reports
+> (Phase 7) and §2.7–§2.9 timesheets, overtime, approval workflows, leave,
+> certificates and holidays (Phase 6) are **live**. Everything from §2.10
+> onward is the contract the remaining phases build against. See §6 for the
+> per-section status.
 
 **Base URL (development):** `http://127.0.0.1:8000/api/v1/`
 **Content type:** `application/json` (except file uploads: `multipart/form-data`)
@@ -148,13 +152,13 @@ Behaviour that holds across every authenticated endpoint:
 ## 2. Endpoints
 
 > **Implemented:** §2.1 (Phase 3), §2.2–§2.3 (Phase 4), §2.4–§2.5 (Phase 5),
-> §2.7 (timesheets + overtime), §2.8 (leave), §2.9 (holidays) and
-> §2.7's approval-workflows in **Phase 6**. Everything still pending is listed
-> here as the contract to build against.
+> §2.6 in **Phase 7**, §2.7 (timesheets + overtime), §2.8 (leave), §2.9
+> (holidays) and §2.7's approval-workflows in **Phase 6**. Everything still
+> pending is listed here as the contract to build against.
 
-**Two gates, both live on every Phase 4, Phase 5 and Phase 6 route** (the three
-exceptions are named in §2.7 / §2.9 — holiday reads, and the certificate
-read/write, which are policy-only on purpose):
+**Two gates, both live on every Phase 4, Phase 5, Phase 6 and Phase 7 route**
+(the three exceptions are named in §2.7 / §2.9 — holiday reads, and the
+certificate read/write, which are policy-only on purpose):
 
 | Gate | Runs | Answers |
 |---|---|---|
@@ -175,6 +179,14 @@ anybody grants you. Holding `attendance.view` gets you *your own rows and no
 others*; the policy, not a permission name, is what stops one employee
 reading another's attendance. `GET /attendance` and `GET /site-visits` are
 coarse-gated first, as elsewhere.
+
+Phase 7 adds no exception of that kind — both report families are
+coarse-gated first and row-scoped by the policy — but it does add one route
+that exists because a *different* gate would have been wrong:
+`GET /site-activity-reports/reportable-sites`. It answers "which sites may I
+write about?" for the field-reporting form, because `GET /sites` needs
+`sites.view`, which no Employee holds, and filing your own day's work is
+precisely what an Employee is there to do.
 
 ### 2.1 Authentication ✅ (Phase 3)
 
@@ -677,14 +689,85 @@ status value so the future override/audit path can be added without
 migrating the table — but no UI, no endpoint and no permission gate around
 it yet.
 
-### 2.6 Site Activity & Daily Reports
+### 2.6 Site Activity & Daily Reports — (Phase 7 ✅)
 
-| Method | Path |
-|---|---|
-| GET/POST/PUT | `/site-reports` … |
-| POST | `/site-reports/{id}/photos` | multiple images |
-| GET/POST | `/daily-reports` … |
-| GET | `/daily-reports/{id}/pdf` | generated PDF |
+| Method | Path | Gate |
+|---|---|---|
+| GET | `/site-activity-reports` | `site_activity_reports.view` + row scope |
+| GET | `/site-activity-reports/reportable-sites` | `site_activity_reports.view` |
+| GET | `/site-activity-reports/{report}` | `site_activity_reports.view` + row scope |
+| POST | `/site-activity-reports` | `site_activity_reports.create` |
+| PUT | `/site-activity-reports/{report}` | `site_activity_reports.update` + row scope |
+| POST | `/site-activity-reports/{report}/submit` | `site_activity_reports.update` + own row |
+| POST | `/site-activity-reports/{report}/photos` | `site_activity_reports.update` + row scope |
+| GET | `/site-activity-reports/{report}/photos/{photo}` | `site_activity_reports.view` + row scope |
+| DELETE | `/site-activity-reports/{report}/photos/{photo}` | `site_activity_reports.update` + row scope |
+| GET | `/daily-site-reports` | `daily_site_reports.view` + row scope |
+| GET | `/daily-site-reports/{report}` | `daily_site_reports.view` + row scope |
+| POST | `/daily-site-reports` | `daily_site_reports.create` |
+| PUT | `/daily-site-reports/{report}` | `daily_site_reports.update` + row scope |
+| POST | `/daily-site-reports/{report}/submit` | `daily_site_reports.update` + row scope |
+| GET | `/daily-site-reports/{report}/pdf` | **`daily_site_reports.pdf`** + `DailySiteReportPolicy::pdf` |
+| POST | `/daily-site-reports/{report}/photos` | `daily_site_reports.update` + row scope |
+| GET | `/daily-site-reports/{report}/photos/{photo}` | `daily_site_reports.view` + row scope |
+| DELETE | `/daily-site-reports/{report}/photos/{photo}` | `daily_site_reports.update` + row scope |
+
+18 routes. Every `{report}` is `->whereNumber(...)` and every sub-route is
+registered *before* `/{report}`, so `…/submit` and `…/photos` can never be
+swallowed as an id.
+
+**The author is never a field.** `employee_id` is absent from every request
+body and is derived from the authenticated user; `created_by` likewise on the
+daily report. A body that carries either is simply ignored. The project is
+also not trusted as typed: both stores require `project_id` *and* `site_id`,
+and `ValidatesReportSite` rejects any pair whose project does not own the
+site with a `422` on `project_id` — the service then stores `$site->project_id`
+regardless, so a wrong pairing can never reach the row.
+
+**Status is a verb, not a field.** The only transitions are
+`draft → submitted`, taken by `POST …/submit`. There is no `status` key in
+any create or update body, and an edit to a report that is already filed
+answers **`409 Conflict`** rather than silently reopening it. `approved_at`
+is reserved for a later approval pass; Phase 7 has no approve endpoint.
+
+**GPS travels at submit, not at save.** A draft may be filed without a
+reading, and may carry one if it has it. Submitting requires all three of
+`latitude`, `longitude` **and** `gps_accuracy`, validates them
+(`0,0`, non-finite and over `hrms.attendance.max_gps_accuracy_metres` are
+refused), and takes them from *that request* — the server does not merge the
+stored fix, so the phone must take the reading at the moment it submits.
+
+**Filters**, all on `GET /site-activity-reports`:
+`report_date_from` · `report_date_to` · `employee_id` · `project_id` ·
+`site_id` · `work_category` · `status`. On `GET /daily-site-reports`:
+`report_date_from` · `report_date_to` · `project_id` · `site_id` ·
+`status` · `created_by`. Both paginate in the usual
+`{items, meta}` envelope, default `per_page = 15`, max `100`.
+
+**One official report per site per day.** A duplicate `POST /daily-site-reports`
+answers `422` with `report_date`, enforced three times over: `Rule::unique`
+scoped to `site_id` (with `ignore()` on update), the `dsr_site_date_unique`
+index, and a `QueryException` guard in `DailySiteReportService` for callers
+that bypass the request. Workforce categories are **rows, not a fixed list** —
+`manpower` is an array of `{category, count}` and `total_manpower` is
+required only when `manpower` is absent (a caller with rows cannot also
+assert a total that disagrees with them).
+
+**Photographs are never addresses.** `POST …/photos` takes a `photos[]`
+multipart batch of at most **6** per request (12 per report, over which it
+answers `422` on `photos`) plus one optional `caption`. The response carries
+only `{id, caption, sort_order, mime_type, size_bytes, created_at}` — no
+path, no URL, no `disk`. To see the pixels you use
+`GET …/photos/{photo}`, which is permission-checked like any other row and
+serves the bytes with `no-store`.
+
+**The PDF is generated on demand and never stored.**
+`GET /daily-site-reports/{report}/pdf` answers `Content-Type: application/pdf`
+with `Content-Disposition: inline; filename=daily-site-report-{id}-{ddMMyyyy}.pdf`,
+`Cache-Control: no-store, no-cache, must-revalidate, max-age=0` and
+`X-Content-Type-Options: nosniff`. There is no `/pdf` on the activity
+reports, and no endpoint returns a saved PDF, because there are none to
+return.
 
 ### 2.7 Shifts, Timesheets, Overtime & Approval Workflows — (Phase 6 ✅, shifts pending)
 
@@ -985,6 +1068,47 @@ another employee's file. **Facial recognition is deliberately not built.**
 e.g. `"That file is not a PDF or an image a reader could open."` — and no
 leave-request row and no file are changed.
 
+### 4.3 Report photographs — Phase 7 (site activity & daily reports)
+
+- `multipart/form-data`, field name **`photos`** (plural), on
+  `POST /api/v1/site-activity-reports/{report}/photos` and
+  `POST /api/v1/daily-site-reports/{report}/photos`
+- **6 per request**, **12 per report**; more than 12 is refused at the
+  request with a message on `errors.photos[0]`, and a batch that fails
+  part-way is unwound so no report is ever left holding half a batch
+- Max size **5120 KB** each — `hrms.storage.report_photo_max_kilobytes`
+  (`HRMS_REPORT_PHOTO_MAX_KB`); directory
+  `hrms.storage.report_photo_directory` (`HRMS_REPORT_PHOTO_DIRECTORY`,
+  default `site-report-photos`)
+- Types: `image/jpeg`, `image/png`, `image/webp` — declared extension
+  *and* `finfo` sniff, the same allow-list the selfie uses
+- **Re-encoded like the selfie, not kept as sent like the certificate.**
+  Every frame goes through `SelfieSanitizer::sanitize()` via the shared
+  `App\Services\Images\StoresPrivateImages` trait, which fails **closed**:
+  an image that cannot be re-encoded is refused rather than stored
+  untouched. This is the right trade here and wrong for §4.2 — a report
+  photo is evidence of a site condition, not a document with a signature,
+  and stripping the EXIF/GPS block the phone wrote is the point: the
+  server records its own reading at submit, and a stale coordinate inside
+  a JPEG would contradict it.
+- One optional **`caption`** applies to the batch. The stored filename is
+  minted by the server from the report — `site-report-photos/activity/{id}/…`
+  or `site-report-photos/daily/{id}/…`; the client's filename is never used.
+- **Private storage.** No public URL, no directory listing, no path and no
+  `disk` key in any JSON. `SiteReportPhotoResource` /
+  `DailySiteReportPhotoResource` expose `{id, caption, sort_order,
+  mime_type, size_bytes, created_at}` and nothing else; images are never
+  stored in the database.
+- Reading the pixels: `GET …/photos/{photo}`, permission- and row-checked
+  like any other read, with `Cache-Control: no-store` and
+  `X-Content-Type-Options: nosniff`. The Flutter app fetches them through
+  the authenticated client, which is why **no `Image.network` appears
+  anywhere in the app** — a bare URL would need to be public, and there
+  isn't one.
+- A photo whose report is not a draft, or whose id belongs to a different
+  report, answers `409` and `404` respectively — the id is checked
+  *against the row*, not merely whether it exists.
+
 ---
 
 ## 5. Offline Sync Contract
@@ -1052,18 +1176,22 @@ Syncing is manual ("Sync now"), oldest first, and stops at the first 0 or
 | §2.4 Attendance / §2.5 Site Visits & Movement | ✅ Phase 5 |
 | §2.7 Timesheets / Overtime / Approval workflows | ✅ Phase 6 |
 | §2.8 Leave / §2.8a Certificates & LOP / §2.9 Holidays | ✅ Phase 6 |
-| §2.6, §2.10–§2.13 Everything else | ⬜ Phases 7–12 |
+| §2.6 Site Activity & Daily Reports | ✅ **Phase 7** |
+| §2.10–§2.13 Everything else | ⬜ Phases 8–12 |
 | Rate limiting — auth routes | ✅ Phase 3 |
 | Rate limiting — attendance writes | ✅ Phase 5 |
 | Rate limiting — leave/timesheet/overtime/holiday writes | **deliberately none** — see §3 |
+| Rate limiting — site-report writes | **deliberately none** — see §3 |
 | Rate limiting — remaining scopes | ⬜ As their modules land |
 | §4.1 File upload rules (selfie) | ✅ Phase 5, **sanitised server-side since the post-Phase 5 hardening pass** |
 | §4.2 File upload rules (medical certificate) | ✅ Phase 6 |
+| §4.3 File upload rules (report photographs) | ✅ **Phase 7** |
 | §4 File upload rules (employee documents) | ⬜ Phase 10 |
 
-Backend proof: `php artisan test` → **383 passed (2017 assertions)**; **86 routes**
-under `api/*` (Phase 6 added 37). Flutter proof: `dart format .` clean,
-`flutter analyze` clean, `flutter test` → **215 passed**.
+Backend proof: `php artisan test` → **425 passed (2370 assertions)**; **104
+route definitions** under `api/*` (109 registered) — Phase 6 added 37,
+Phase 7 added 18. Flutter proof: `dart format .` clean, `flutter analyze`
+clean, `flutter test` → **303 passed**.
 
 > To explore a running API later, use Laravel's generated OpenAPI/Swagger UI or
 > a tool such as Postman.

@@ -1,14 +1,17 @@
 # Security
 
-> **Status:** Phase 6 — authentication, rate limiting, the password policy, a
-> **51-permission** catalogue, row-level policies (15 of them), GPS attendance
+> **Status:** Phase 7 — authentication, rate limiting, the password policy, a
+> **59-permission** catalogue, row-level policies (17 of them), GPS attendance
 > controls (server-authoritative geofence, private selfie storage, location and
-> camera permissions), server-side selfie sanitisation (§4.3), and now the
-> **approval and leave controls**: no self-approval, current-step-only
-> decisions, own-draft-only edits, private medical-certificate storage with
-> three-way upload validation (§4.4), and an hourly idempotent scheduler job
-> (§13 row 6). Transport hardening and audit logging remain phased ahead
-> (§5, §8). Individual controls are marked with their phase below.
+> camera permissions), server-side selfie sanitisation (§4.3), the approval and
+> leave controls (no self-approval, current-step-only decisions, private
+> medical-certificate storage, §4.4), and now the **site vertical slice**:
+> derived authorship and derived project on every report, private
+> re-encoded report photographs behind their own policy (§4.5), a
+> server-rendered PDF that is never stored (§4.6), and a submit-time GPS
+> reading the server validates rather than trusts. Transport hardening and
+> audit logging remain phased ahead (§5, §8). Individual controls are marked
+> with their phase below.
 
 ---
 
@@ -89,13 +92,15 @@ Two layers, both mandatory:
 
 ### 3.1 Permission layer (`spatie/laravel-permission`)
 
-**Implemented in Phase 2 ✅, extended in Phases 4–6** — `spatie/laravel-permission`
-**^6.25**, 10 roles, **51 permissions**, **236 grants**. Phase 4 added
+**Implemented in Phase 2 ✅, extended in Phases 4–7** — `spatie/laravel-permission`
+**^6.25**, 10 roles, **59 permissions**, **278 grants**. Phase 4 added
 `employees.salary.view`; Phase 5 granted the existing `attendance.view` to the
 `Employee` role so a person can read back the day they recorded; Phase 6 added 11
 (`approvals.view/manage`, `leave.balance.view/manage`, `holidays.manage`,
 `timesheets.view/manage`, `overtime.view/create/approve/manage`) and retired
-`leave.request` in favour of `leave.create`.
+`leave.request` in favour of `leave.create`; Phase 7 added 8
+(`site_activity_reports.{view,create,update}` and
+`daily_site_reports.{view,create,update,manage,pdf}`).
 
 > **Version pin matters:** v7/v8 of this package require PHP `^8.3`. This environment
 > runs **PHP 8.2.4**, so Composer correctly resolves to **6.25.0** (supports Laravel
@@ -119,6 +124,9 @@ overtime.view         overtime.create      overtime.approve     overtime.manage
 payroll.view          payroll.manage
 projects.view         projects.manage
 sites.view            sites.manage
+site_activity_reports.view   site_activity_reports.create   site_activity_reports.update
+daily_site_reports.view      daily_site_reports.create      daily_site_reports.update
+daily_site_reports.manage    daily_site_reports.pdf
 shifts.view           shifts.manage
 assignments.view      assignments.manage
 reports.view          reports.export
@@ -140,6 +148,12 @@ Two absences are deliberate:
 - **No `timesheet.approve`.** Timesheets are derived snapshots with nothing
   to approve (ARCHITECTURE §5.9); a permission that authorised a decision the
   system does not offer would be a button nobody could press.
+- **No `daily_site_reports.approve`.** Phase 7 files the official report and
+  stops: `daily_site_reports.manage` covers the read-and-correct work that
+  exists today, and `approved_at` is an empty column waiting for a decision
+  Phase 7 deliberately does not offer. `.pdf` *is* its own permission rather
+  than riding on `.view`, because being shown a list and being handed
+  something you can forward are different acts.
 
 | | |
 |---|---|
@@ -253,7 +267,7 @@ Three rules the Phase 6 policies encode:
 — you may file for a request you may already read, and only while it can
 still accept one. The upload itself is bounded by §4.2.
 
-**Status:** ✅ Permission layer live (Phase 2) · ✅ Permission-gated routes since Phase 3 · ✅ Policies for the Phase 4 modules (Phase 4) · ✅ Attendance + site-visit policies (Phase 5) · ✅ Leave / balance / leave-type / holiday / timesheet / overtime / approval-workflow policies (Phase 6) · ⬜ Payroll and document policies in their own phases
+**Status:** ✅ Permission layer live (Phase 2) · ✅ Permission-gated routes since Phase 3 · ✅ Policies for the Phase 4 modules (Phase 4) · ✅ Attendance + site-visit policies (Phase 5) · ✅ Leave / balance / leave-type / holiday / timesheet / overtime / approval-workflow policies (Phase 6) · ✅ **Site activity report + daily site report policies with `App\Support\Visibility` row scoping (Phase 7)** · ⬜ Payroll and document policies in their own phases
 
 > **Scope note:** permissions are a *coarse gate*. Row scoping belongs to the
 > policy, and for the modules that exist today that split is wired: every Phase
@@ -361,7 +375,8 @@ which record. Reading a selfie today is authorised by `viewSelfie` and
 denied when it should be, but the fact of the read is not persisted.
 
 **Status:** ✅ Phase 5 (selfie) · ✅ selfie sanitisation (this pass) ·
-✅ certificates (§4.4) · ⬜ Phase 9 (employee documents) · ⬜ audit/security phase
+✅ certificates (§4.4) · ✅ **report photographs (§4.5) and the report PDF
+(§4.6)** · ⬜ Phase 9 (employee documents) · ⬜ audit/security phase
 
 ### 4.4 Certificates — ✅ Phase 6 (medical documents)
 
@@ -390,6 +405,51 @@ granted independently of both would be the wrong question.
 **Audit logging is still not implemented** for reads of this file either —
 §8/§13.
 
+### 4.5 Report photographs — ✅ Phase 7 (site activity & daily reports)
+
+Same private-storage spine as the selfie, because a report photograph faces
+the same threat: a phone's JPEG arrives carrying the coordinates it was
+taken at and the device that took it.
+
+| Layer | What it does | Why it exists |
+|---|---|---|
+| **`StoresPrivateImages`** | One shared trait for the accept-list (`image/jpeg`, `image/png`, `image/webp`), the size ceiling and the response headers | The selfie and the report photo must not drift into two different definitions of "acceptable image" |
+| **`ReportPhotoStore`** | Injects `SelfieSanitizer` and re-encodes every frame; mints `site-report-photos/{activity\|daily}/{reportId}/{uuid}.jpg` | The client's filename never reaches disk, and neither does any EXIF/GPS block the phone wrote |
+| **Fail-closed** | An image that cannot be decoded and re-encoded is refused at the request (`422` on `photos`), never stored as-sent | "Sanitisation failed, so keep the original" would make sanitisation optional |
+| **Private disk (`local`)** | Reachable only through `GET …/{report}/photos/{photo}` behind the report's own policy, `no-store` | No public URL, no directory listing, no path and no `disk` key in any JSON |
+| **`SiteReportPhotoResource`** | `{id, caption, sort_order, mime_type, size_bytes, created_at}` only | The row is metadata about a file; handing back its address would make the storage rule a convention |
+| **Row + state checks** | Photo/report id mismatch → `404`; a photo attached to a filed report → `409` | "Exists somewhere" is not the same question as "belongs to the report you named" |
+| **Batch limits** | 6 per request, 12 per report, and a partial failure unwinds every file it already wrote | A half-uploaded gallery is worse than none, because the report looks complete |
+
+**Why re-encoded here and only validated for certificates (§4.4):** a report
+photograph is not a signed document, it is a picture of a site condition —
+and its embedded coordinates would *contradict* the fix the server records at
+submit. Stripping them is the point. A certificate's signature is the
+evidence, so it is left alone.
+
+**No `Image.network` anywhere in the app.** A bare URL would have to be
+public to be fetchable by one; instead the bytes are fetched through the
+authenticated `ApiClient` and drawn from memory.
+
+### 4.6 The daily report PDF — ✅ Phase 7
+
+The document is built by the server from the row it is asked for, streamed
+as `application/pdf` with `Cache-Control: no-store`, `Pragma: no-cache` and
+`X-Content-Type-Options: nosniff`, and **written nowhere**. There is no
+stored PDF, no `pdf_path` column and no signed URL to expire, so the only
+way to a document is the route, which asks
+`permission:daily_site_reports.pdf` and then `DailySiteReportPolicy::pdf`.
+
+`.pdf` is a permission of its own rather than a rider on `.view`, and it is
+**not** held by `Employee` — reading the numbers on a screen and being
+handed something you can forward are different acts.
+
+Photographs are embedded as `data:` URIs (capped at six) rather than
+referenced, so rendering the file never has to expose or write an image.
+
+**Audit logging is still not implemented** for reads of this document —
+§8/§13.
+
 ---
 
 ## 5. Transport Security
@@ -415,6 +475,9 @@ granted independently of both would be the wrong question.
 | Out-of-range GPS | `latitude` `-90..90`, `longitude` `-180..180`, `accuracy` `0..100000`, all `numeric` — a coordinate that cannot exist is rejected before any distance is computed |
 | Client-trusted facts | No `employee_id`, `attendance_date`, `project_id`, distance, minute or `status` field exists in any Phase 5 request; `source: manual` is refused from a client |
 | Uploaded filenames | Never read from the request — see §4.3 |
+| A report naming its own author | No `employee_id` or `created_by` key is read from any Phase 7 request; both are taken from the bearer token. `project_id` is accepted only when it owns the stated `site_id`, and the service writes `$site->project_id` anyway |
+| A report un-filing itself | There is no `status` key in any report body. `draft → submitted` is a route, and editing a filed report answers `409` |
+| A fix that cannot exist | `latitude`/`longitude`/`gps_accuracy` are all-or-nothing, `Geo::isValidCoordinate` rejects `(0,0)` and non-finite values, and the ceiling reuses `hrms.attendance.max_gps_accuracy_metres` |
 
 **Status:** ✅ Auth endpoints since Phase 3 (`LoginRequest`, `ChangePasswordRequest`,
 `PasswordResetRequest`), mass assignment closed on every model · ✅ Phase 4 write
@@ -425,7 +488,19 @@ endpoints each have their own Form Request (`StoreDepartmentRequest`,
 `StoreEmployeeSiteAssignmentRequest`, `UpdateEmployeeSiteAssignmentRequest`) ·
 ✅ Phase 5 writes (`StoreCheckInRequest`, `StoreCheckOutRequest`,
 `StartSiteVisitRequest`, `EndSiteVisitRequest`) ·
+✅ **Phase 7 writes (`StoreSiteActivityReportRequest`,
+`UpdateSiteActivityReportRequest`, `StoreDailySiteReportRequest`,
+`UpdateDailySiteReportRequest`, `SubmitSiteActivityReportRequest`,
+`SubmitDailySiteReportRequest` and `StoreReportPhotosRequest` — seven in all,
+backed by the shared `ValidatesReportSite` and `ValidatesReportGps`
+concerns)** ·
 ⬜ one per write endpoint as later modules land
+
+The Phase 7 set is worth naming for one habit it establishes: **the update
+requests are not the store requests with everything made optional.**
+`UpdateSiteActivityReportRequest` relaxes only the keys that may legitimately
+change on an existing row and leaves the cross-field rules alone, so an edit
+cannot smuggle in a combination a create would have refused.
 
 `UpdateEmployeeSiteAssignmentRequest` is worth naming: it accepts **only**
 `status` ∈ `{ended, cancelled}` and `end_date`. Identity fields
@@ -458,6 +533,15 @@ condition rather than an attack. The one write that could be abused —
 certificate upload — is bounded instead by the byte ceiling, the extension and
 sniffed-type checks and the content rule in §4.2/§4.4. Rate limiting is a
 control against *repetition*; there is nothing here worth repeating.
+
+**Phase 7 added no limiter either, for the same reason and one extra
+bound.** Report writes are a handful of fields behind two gates, and a
+report is a *record*, not an expense — a flood of them is visible on the
+list rather than being a cost paid silently. The upload is the only
+resource a client can actually consume, and it is capped structurally: 6
+files per request, 12 per report, 5120 KB each, and a partial batch is
+unwound (§4.5). Adding a limiter later is a config line; making an
+over-eager one permanent is not.
 
 On breach → `429` in the standard envelope with `Retry-After`, rendered by the
 exception handler rather than by a per-limiter `Limit::response()` callback, so
@@ -598,18 +682,27 @@ including the Phase 3 keys (`PASSWORD_RESET_ENABLED`, `LOGIN_RATE_LIMIT_*`,
 
 - Attendance check-in / check-out
 - Site visits
-- Site activity reports *(not built yet)*
+- Site activity reports ✅ **(Phase 7)** — one reading at submit, taken on
+  demand and sent with the submit request
 
 **Explicitly NOT implemented:**
 
 - ❌ Continuous background GPS tracking — no background permission is
-  declared, nothing polls, nothing uploads when the app is idle
+  declared, nothing polls, nothing uploads when the app is idle. The
+  report form holds its fix in memory for as long as the form is open and
+  asks for it again only when the person presses *Take reading* or
+  *Submit*
 - ❌ Location monitoring when the app is idle
 - ❌ Facial recognition on selfies — the photograph is evidence read by a
   person during a dispute, never scored by a model
 - ❌ A location history. There is nowhere to store one: a coordinate is
-  written only when someone presses CHECK IN, START VISIT, END VISIT or
-  CHECK OUT, and every pair of them has a column in §4's tables
+  written only when someone presses CHECK IN, START VISIT, END VISIT,
+  CHECK OUT or **Submit report**, and every pair of them has a column in
+  §4's tables
+- ❌ Coordinates inside a report photograph. Every frame is re-encoded
+  server-side (§4.5), so whatever GPS block the phone wrote to the JPEG
+  is gone by the time it is stored — the only location on a report is the
+  one the server validated at submit
 
 **Employee-facing transparency:**
 
@@ -631,8 +724,9 @@ is the only image kept, at one per first check-in per day, and it leaves the
 phone as a compressed JPEG rather than the full camera frame.
 
 **Status:** ✅ Phase 5 — the location and camera parts of this section are now
-properties of shipped code, not a plan. The remaining rows (site activity
-reports, retention jobs) belong to later phases.
+properties of shipped code, not a plan. **✅ Phase 7 — site activity reports
+now collect a reading too, at submit, with no background permission.**
+The remaining rows (retention jobs) belong to later phases.
 
 ---
 
@@ -670,7 +764,10 @@ Enforced by `Password::min(8)->letters()->numbers()` on both
 | 4 | Six policies (department, designation, employee, project, site, employee-site-assignment), 12 Form Requests, coarse `permission:` middleware on every route except the two self-read `show`s, `employees.salary.view` separated from `employees.view`, assignment identity fields frozen against edits |
 | 5 | Server-authoritative geofence (lat/lng range + accuracy ceiling + distance always computed, never accepted), site-assignment validation before any punch, private selfie storage behind `viewSelfie` with no-store and no paths in responses, MIME/extension/size checks twice over, `Attendance` + `SiteVisit` policies with fail-closed row scoping, `attendance.view` granted to `Employee` (167 → 168 grants at that point), `attendance` rate limiter (30/min per user) on the four writes, foreground-only location + camera permissions, offline queue with `client_event_id` idempotency and server re-validation on sync. **Not delivered: attendance override audit (no override exists) and login audit (§8) — both still outstanding** |
 | 6 | **Leave, timesheets, overtime, holidays, approval workflows** — `permission:` middleware on every route except the three deliberately open ones (holiday reads, certificate read/write), 7 policies named after their models, no self-approval and current-step-only checks inside `ApprovalWorkflowService`, own-draft-only edits with all transitions through service methods, private certificate storage with three-way upload validation and no path in any response, an hourly idempotent scheduler job for the LOP conversion, 11 new permissions (51 total / 236 grants), `leave.request` retired, **deliberately no new rate limiter (§3)**. **Not delivered: approval and LOP audit rows — still outstanding (§8)** |
-| 7–8 | Site activity reports & daily reports (PDF) — planned with their own audit rows |
+| 7 | **Site activity reports & the official daily report** — 18 routes each behind `permission:` **and** a policy; author (`employee_id` / `created_by`) and project derived server-side, never read from the payload; `project_id` must own the stated `site_id`; status only via `POST …/submit` with `409` on an edit to a filed report; `dsr_site_date_unique` plus request-level and service-level guards for one official report per site-day; report photographs re-encoded through the fail-closed `SelfieSanitizer`, private disk, no path and no URL in any response, 6 per request / 12 per report, mismatch → `404` and filed → `409`; the PDF rendered on demand, `no-store`, never stored, behind its own `daily_site_reports.pdf` permission — held by Super Admin,
+HR Admin, HR Executive, Project Manager, Site Engineer, Site Supervisor and
+Management, and by neither Payroll Admin, Finance nor `Employee`; 8 new permissions (59 total / 278 grants); submit-time GPS with a `(0,0)`/non-finite/accuracy-ceiling check; **deliberately no new rate limiter (§7)**. **Not delivered: report audit rows — still outstanding (§8)** |
+| 8 | Daily-report approval (`approved_at` is created and reserved), report audit rows — planned |
 | 9 | Document private storage, signed URLs, expiry jobs, onboarding/training/assets — planned |
 | 10 | Payroll, salary slips, loans, expenses — own-only salary access and payroll audit, planned |
 | 11 | Notifications/FCM, dashboards, exports — planned |

@@ -131,6 +131,38 @@ class PermissionScope {
   bool get canViewAssignments => can('assignments.view');
 
   bool get canManageAssignments => can('assignments.manage');
+
+  /* ---------------------------------------------------- site reports */
+
+  /// A person's own account of a site-day. Every role that has the module at
+  /// all holds `.create`, because filing your own note about your own site is
+  /// not an act of authority — but `.view` alone does not mean *every* note,
+  /// and the row-level half of that question is the server's.
+  bool get canViewSiteActivityReports => can('site_activity_reports.view');
+
+  bool get canCreateSiteActivityReports => can('site_activity_reports.create');
+
+  bool get canUpdateSiteActivityReports => can('site_activity_reports.update');
+
+  /// The official site-day document. Deliberately **not** implied by the
+  /// activity permissions: an Employee holds all three activity grants and
+  /// none of these, because the whole company cannot be preparing the one
+  /// record a review reads.
+  bool get canViewDailySiteReports => can('daily_site_reports.view');
+
+  bool get canCreateDailySiteReports => can('daily_site_reports.create');
+
+  bool get canUpdateDailySiteReports => can('daily_site_reports.update');
+
+  bool get canManageDailySiteReports => can('daily_site_reports.manage');
+
+  /// Exporting the document is a separate act from reading the numbers on a
+  /// screen, and the seeders grant the two together — so a deployment that
+  /// wants one without the other can revoke `.pdf` without taking `.view`.
+  bool get canExportDailySiteReports => can('daily_site_reports.pdf');
+
+  bool get canWriteSiteReports =>
+      canCreateSiteActivityReports || canCreateDailySiteReports;
 }
 
 /// Recomputed whenever the session changes, so a permission revoked by a

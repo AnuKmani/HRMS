@@ -22,6 +22,7 @@ class LabeledTextField extends StatelessWidget {
     this.hint,
     this.helper,
     this.autofillHints,
+    this.onChanged,
   });
 
   final String label;
@@ -42,6 +43,14 @@ class LabeledTextField extends StatelessWidget {
 
   final Iterable<String>? autofillHints;
 
+  /// Told about every keystroke rather than only about a submitted form.
+  ///
+  /// Screens that keep a local draft need to know *while* a person types:
+  /// a draft saved on blur is a draft that is already gone when the app is
+  /// swiped away from underneath them. Left null by everything that only
+  /// cares about the value when it is read.
+  final ValueChanged<String>? onChanged;
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -59,6 +68,7 @@ class LabeledTextField extends StatelessWidget {
             keyboardType: keyboardType,
             textInputAction: textInputAction,
             autofillHints: autofillHints,
+            onChanged: onChanged,
             decoration: InputDecoration(
               hintText: errorText == null ? hint : null,
               helperText: errorText == null ? helper : null,

@@ -30,12 +30,18 @@ import '../../features/projects/presentation/projects_list_screen.dart';
 import '../../features/sites/presentation/site_detail_screen.dart';
 import '../../features/sites/presentation/site_form_screen.dart';
 import '../../features/sites/presentation/sites_list_screen.dart';
+import '../../features/site_reports/presentation/daily_report_detail_screen.dart';
+import '../../features/site_reports/presentation/daily_report_form_screen.dart';
+import '../../features/site_reports/presentation/daily_report_list_screen.dart';
+import '../../features/site_reports/presentation/site_activity_detail_screen.dart';
+import '../../features/site_reports/presentation/site_activity_form_screen.dart';
+import '../../features/site_reports/presentation/site_activity_list_screen.dart';
 import '../../features/timesheet/presentation/timesheet_detail_screen.dart';
 import '../../features/timesheet/presentation/timesheets_list_screen.dart';
 
 /// The app's routes, one redirect, and a guard driven entirely by auth state.
 ///
-/// Four phases of modules now sit behind it. Two rules shape how they are
+/// Seven phases of work now sit behind it. Two rules shape how they are
 /// laid out:
 ///
 ///  - **`new` before `:id`, and `:id` only matches digits.** A route
@@ -272,6 +278,57 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/overtime/:id/edit',
         builder: (context, state) =>
             OvertimeFormScreen(overtimeId: idOf(state)),
+      ),
+
+      /* --------------------------------------------------- site reports */
+
+      // Phase 7. Two lists, each with the same four shapes. `new` again
+      // comes before `:id`, and — unlike the modules above — every read
+      // screen here is reached from a permission-gated list rather than a
+      // menu item, so a URL typed by hand lands on `NoPermission` instead
+      // of a form that would be refused a second later.
+      //
+      // The activity report and the daily report are separate trees
+      // rather than one with a mode: they have different authors, different
+      // permissions, different child rows, and different lifecycle rules
+      // (one per person per day versus one per site per day). Sharing a
+      // screen would mean a `type` flag threaded through every field.
+      GoRoute(
+        path: '/site-reports',
+        builder: (context, state) => const SiteActivityListScreen(),
+      ),
+      GoRoute(
+        path: '/site-reports/new',
+        builder: (context, state) => const SiteActivityFormScreen(),
+      ),
+      GoRoute(
+        path: '/site-reports/:id',
+        builder: (context, state) =>
+            SiteActivityDetailScreen(reportId: idOf(state)),
+      ),
+      GoRoute(
+        path: '/site-reports/:id/edit',
+        builder: (context, state) =>
+            SiteActivityFormScreen(reportId: idOf(state)),
+      ),
+
+      GoRoute(
+        path: '/daily-reports',
+        builder: (context, state) => const DailySiteReportListScreen(),
+      ),
+      GoRoute(
+        path: '/daily-reports/new',
+        builder: (context, state) => const DailySiteReportFormScreen(),
+      ),
+      GoRoute(
+        path: '/daily-reports/:id',
+        builder: (context, state) =>
+            DailySiteReportDetailScreen(reportId: idOf(state)),
+      ),
+      GoRoute(
+        path: '/daily-reports/:id/edit',
+        builder: (context, state) =>
+            DailySiteReportFormScreen(reportId: idOf(state)),
       ),
     ],
   );

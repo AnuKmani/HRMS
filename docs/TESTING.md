@@ -1,9 +1,11 @@
 # Testing
 
-> **Status:** Phase 6 — leave, certificates, LOP, holidays, timesheets and
-> overtime are covered end to end on top of Phases 1–5. Backend
-> **383 passed (2017 assertions)**, Flutter **215 passed**.
-> This document defines the strategy for the modules still to come (Phases 7–12).
+> **Status:** Phase 7 — leave, certificates, LOP, holidays, timesheets,
+> overtime and now the site vertical slice (activity reports, the official
+> daily report, its photographs and its on-demand PDF) are covered end to end
+> on top of Phases 1–6. Backend **425 passed (2370 assertions)**, Flutter
+> **303 passed**. This document defines the strategy for the modules still to
+> come (Phases 8–12).
 
 ---
 
@@ -427,6 +429,27 @@ Use **exact decimal assertions** — money must never be compared as floats.
 
 ---
 
+### 3.10 Site Reports ✅ (Phase 7 — `SiteActivityReportTest`, `DailySiteReportTest`, `DailySiteReportPdfTest`)
+
+**42 tests, 319 assertions.** All on `hrms_testing`, all behind the shared
+`BuildsSiteReports` helper (anchored at `2026-09-28` with `Carbon::setTestNow`,
+plus `world(role)`, `activityPayload()`, `dailyPayload()`, `photo()` and
+`withExif()`).
+
+| Area | Tests |
+|---|---|
+| **Activity reports (19)** | permission gates on all nine routes; the author comes from the token and `employee_id` in a body is ignored; a site the caller may not report at → `403`; `project_id`/`site_id` mismatch → `422` on `project_id`; a future `report_date` → `422`; each of the five filters narrowing the query; the pagination envelope; row scope (own rows for an Employee, assigned sites for a Supervisor, managed projects for a PM, everything for Super Admin); create → draft; `PUT` on a draft; `PUT` on a filed report → **`409`**; submit requires all three GPS keys; `(0,0)`, non-finite and over-ceiling accuracy each refused; submit → `submitted_at`; a non-editor may not submit; a row outside the caller's scope → `404`, not `403` |
+| **Photographs** | a batch of six accepted and stored privately; MIME/extension/size refused at the request; **EXIF and GPS stripped** from what lands on disk; a seventh file in one request → `422` on `photos`; a thirteenth photo on a report → `422`; an empty batch → `422`; a photo whose id belongs to another report → `404`; a photo added to a filed report → `409`; the response of every photo route carries **no path and no URL** |
+| **Daily reports (15)** | permission gates; `created_by` from the token; one official report per site-day — a duplicate `POST` answers **`422` on `report_date`**, a duplicate `PUT` with `ignore()` is accepted; the three child sets stored and read back; `total_manpower` derived from the rows and refused when it disagrees; the four filters; row scope in all four directions; submit → `submitted_at` with no approve route in existence; `POST /daily-site-reports/{id}/approve` → `405`; `PUT` on a filed document → **`409`** |
+| **PDF (8)** | behind `daily_site_reports.pdf` **and** `DailySiteReportPolicy::pdf`; revoked from the *role* and the read is refused; a row outside the caller's scope → `404`; `Content-Type: application/pdf` with `no-store` / `Pragma` / `nosniff` and `Content-Disposition: inline; filename=daily-site-report-1-28092026.pdf`; the HTML carries the company name from `settings.reporting.company_name`, the date in `system.date_format`, prepared-by, the workforce rows, materials, equipment, safety, delays, issues and remarks; photographs embedded as `data:` URIs and capped at six; an empty document still renders; `html()` asserted separately from `response()` so **no test parses PDF bytes** |
+
+**The one deliberate assertion style:** `409` for a state conflict, `404` for
+a row outside your scope. Neither is a permission failure, and conflating
+them is how a user ends up reading "you are not allowed" about something they
+are simply not party to.
+
+---
+
 ## 4. Scheduler / Job Tests
 
 | Job | Test |
@@ -499,7 +522,7 @@ it cannot be pointed at development data by mistake.
 
 ## 5. Flutter Test Matrix
 
-### 5.1 Unit ✅ (Phases 3–6)
+### 5.1 Unit ✅ (Phases 3–7)
 
 | Target | Tests | File |
 |---|---|---|
@@ -515,6 +538,8 @@ it cannot be pointed at development data by mistake.
 | `AttendanceController` | loading / ready / error; every location state; **duplicate submit blocked while one is in flight**; 403 shown as a refusal; 422 rendering the server's own field message; no-fix refuses to send rather than posting (0,0); check-out; offline queueing and replay with the same `clientEventId` and `source: offline`; a rejected replay marked `failed`; site visits including an empty purpose; a purpose controller disposed only after its dialog has finished | `test/features/attendance/attendance_controller_test.dart` (27) |
 | `OvertimeRequest` | **`payableMinutes` is `approved ?? requested` and only when the status is `approved`** — an absent approval is not a refusal; draft/pending/rejected/cancelled are never payable whatever was granted; `payroll_eligible` is read from the server and **never inferred from `status`** (an approved-but-not-eligible claim is possible and must read as such); `is_payroll_eligible` reads the same as `payroll_eligible`; status labels spell nothing out to the user (`pending` → "Awaiting approval"); `requestedLabel` / `approvedLabel` in both units; `isEditable` is true for a draft and false for anything settled | `test/features/overtime/domain/overtime_request_test.dart` (9) |
 | `LeaveRequest` / `LeaveCertificate` | certificate facts arrive ready-made rather than being re-derived on the phone: *required but not yet due* shows "Certificate due 2026-10-04" with a file action, *overdue* shows the server's flag and its chip, and a type that never asks for one draws **no certificate block at all** | `leave_detail_screen_test.dart` (group "the certificate") |
+| `SiteActivityReport` / `DailySiteReport` | the author is parsed only when the server sends it and **no `employee_id` is ever read**; `hasUsableGps` requires all three keys, so a half-sent fix is *not* a location; status labels; `displayTotalManpower` preferring the rows a reader can add up; `ManpowerRow.category` accepted as free text; `quantityLabel`; `SiteReportPhoto.pathFor` building the private path from ids and **nothing else**; `photosFrom` refusing a payload that is not a list; `reportPdfFilename` → `daily-site-report-1-28092026` | `test/features/site_reports/domain/site_report_models_test.dart` (10) |
+| The two report repositories | the `{items, meta}` envelope; submit carrying exactly three GPS keys; a create body with **no `employee_id`, no `status` and no derived total**; a payload that is not an object **refused rather than guessed at**; the multipart batch as `photos[0]`… with a client-minted name; a bad upload shape refused; `reportable-sites` asked at its own path; daily submit with **no body**; and the PDF request using a verb that bypasses envelope decoding | `test/features/site_reports/data/api_site_reports_test.dart` (10) |
 
 **Two non-obvious guarantees worth keeping under test:**
 
@@ -525,7 +550,7 @@ it cannot be pointed at development data by mistake.
   interceptor and the controller can notice. The sign-in form's own message
   must survive.
 
-### 5.2 Widget ✅ (Phases 3–6)
+### 5.2 Widget ✅ (Phases 3–7)
 
 | Screen | States verified |
 |---|---|
@@ -541,6 +566,12 @@ it cannot be pointed at development data by mistake.
 | Holidays list | readable with any permission at all (no gate — `HolidayPolicy::viewAny` says yes); rows show the scope, not just the type; *add* and row navigation appear only for `holidays.manage`; the type filter is a query parameter and clearing it removes the key; retired days stay on the list |
 | Timesheets list | rows carry day, owner, worked hours and the day's status; overtime shown **separately**, never folded into the total; *generate* only for `timesheets.manage` and it really calls the server; **a session without `timesheets.view` is a lock and never asked for rows** |
 | Overtime list | rows show date, ask and owner; the payroll flag is its own chip and not a status; `?payroll_eligible=true` toggled off **removes the key**; the claim door only for `overtime.create`; **a session without `overtime.view` is a lock and never asked for claims** |
+| Site activity list (7) | **a session without `site_activity_reports.view` is drawn as a lock and `listCalls` stays 0**; a 403 lands on the list's own error surface with the server's sentence; empty says what will appear; one row per report carrying day, site, author and state; *file a report* only with `site_activity_reports.create`; tapping a row walks the router to an id, asserted as `stub /site-reports/2`; the status filter sends `status` and **removes the key** when cleared |
+| Site activity detail (9) | the same lock, and **`findCalls` stays 0** — the gate is read before the request; a 403 left on screen rather than retried; a 404 offering *Try again* that really re-asks; every fact, with **`Not recorded` in place of blank lines**; coordinates printed only when all three arrived; a half-populated fix described as no location at all; *Edit report* present only with `…update` **and** a draft; a filed report never offering it; navigation to `…/edit` carrying the id |
+| Site activity form (18) | three permission gates (create, edit, and a 403 *while saving* landing as the lock rather than a silent no-op); four required fields plus the row errors named in one sentence each; the project **derived from the site**, and no author and no status in the body; progress as a whole-number slider travelling as the number on screen; GPS refused before submit with the message pointing at *Take reading*, then taken and sent with the submit; the camera sheet (add → shutter → retake → use) with frames held until the report exists, then uploaded as **one batch**; a frame droppable with no confirmation; an upload failure naming what did and did not make it; the 422 landing on its field **with the typed text still there**; and a local draft written after a pause, restored, labelled local, and clearable |
+| Daily report list (7) | the lock before any request; a 403 on the error surface; empty; one row per site-day with author and head count; *prepare* only with `daily_site_reports.create`; row navigation carrying the id; status filter sending and removing the key |
+| Daily report detail (15) | the lock before any request; a 403 left on screen; a 404 with a working retry; the official record — prepared-by, total, the three child cards, and `Not recorded` for what nobody filled; the total preferring the rows over a stale stored figure; *Edit* only with `…update` on a draft; **the PDF button absent without `daily_site_reports.pdf`** and asked for with the right id and filename; 403 → "You are not allowed to export this report." and **not retried**; 401 → sign-in-again wording; 422 → "check it is complete"; transport → "check your connection"; and **"Preparing…" with the button disabled** so the document is never requested twice |
+| Daily report form (12) | two permission gates (create, edit — the second never asking for the row); four field errors and `Row 1: category is needed.` after one save attempt, with **no error before it**; rows sent as child objects under `manpower`/`materials`/`equipment` with `total_manpower` their sum and no `employee_id`/`created_by`/`status`; removing the last row meaning **`manpower: []` rather than one blank row**; the duplicate-day refusal landing on the date rather than a banner; PUT for an edit with **no local draft written**; submit with no body; a refusal leaving it a draft; and the local draft written after a pause, restored with its rows, and start-over clearing it |
 
 > **Don't read `TextFormField.obscureText`** — it is not public. Read the
 > widget's own `TextField.obscureText` field instead.
@@ -610,6 +641,31 @@ the extra methods their own contracts need — transitions record
 generation records `generateCalls`), plus `scopedPhase6(...)` and
 `phase6Router()`. It re-exports `advance`, `useTallScreen`, `forbidden403`
 and `notFound404` so a Phase 6 test needs exactly one import.
+
+Phase 7 added `test/support/site_reports.dart`: `testSite`, `testPhoto`,
+`testActivityReport`, `testDailyReport`, `ScriptedSiteActivityReports`,
+`ScriptedDailySiteReports`, `MemoryReportDraftStore`,
+`FakeReportPhotoSource`, `FakeReportPdfOpener` (with a `Completer` to park
+on, because a double that answers immediately never renders a loading
+state), `ScriptedApiClient` / `RecordedCall`, `siteReportsRouter(...)`,
+and the three helpers the forms are impossible to drive without —
+`pickDate` (through the real date picker), `chooseSite` and `type`.
+
+**Two things about `siteReportsRouter` worth knowing before you use it.**
+The path under test is wired to the screen and every other path resolves to
+a stub that renders `stub <uri>`, so "the save navigated to report 7" is
+asserted as `find.text('stub /site-reports/7')` — an id, not just "the screen
+changed" — without needing an API on `GoRouter` to ask where it went. And
+that stub is a `Scaffold`, because `ScaffoldMessenger` presents a queued
+`SnackBar` on the next Scaffold it is handed; a bare `SizedBox()` would
+swallow the "saved" message shown immediately before navigation and fail a
+test on something that did happen.
+
+`scopedSiteReports(...)` overrides **both** report repositories whether or
+not you pass them. The daily form opens the *activity* repository for its
+site picker, so leaving it alone would build the real HTTP client — a
+request to a server that does not exist, behind a spinner that never stops,
+timing out `pumpAndSettle` on something no test asked about.
 
 `flutter_secure_storage` talks to the platform keychain over a method channel,
 and `ApiAuthRepository` would need a live server; neither has anything useful
@@ -840,9 +896,10 @@ A phase is complete only when:
 |---|---|
 | Test strategy (this document) | ✅ Written |
 | Development/testing database split (`hrms_laravel` vs `hrms_testing`) | ✅ Phase 2 safety cleanup |
-| Backend test suite | ✅ **383 passed (2017 assertions)** — 75 Phase 2 + 45 Phase 3 + 70 Phase 4 + 131 Phase 5 (incl. selfie hardening) + **62 Phase 6** (22 `LeaveRequestTest` · 11 `LeaveCertificateTest` · 13 `OvertimeTest` · 9 `TimesheetTest` · 7 `HolidayApiTest`) |
-| Flutter test suite | ✅ **215 passed** — 89 Phases 3–4 + 87 Phase 5 + **39 Phase 6** |
-| Phase 6 registration checks | ✅ `php artisan route:list` (86 routes) · `php artisan schedule:list` shows `EnforceSickCertificateDeadlines` |
+| Backend test suite | ✅ **425 passed (2370 assertions)** — 75 Phase 2 + 45 Phase 3 + 70 Phase 4 + 131 Phase 5 (incl. selfie hardening) + 62 Phase 6 (22 `LeaveRequestTest` · 11 `LeaveCertificateTest` · 13 `OvertimeTest` · 9 `TimesheetTest` · 7 `HolidayApiTest`) + **42 Phase 7** (19 `SiteActivityReportTest` · 15 `DailySiteReportTest` · 8 `DailySiteReportPdfTest`) |
+| Flutter test suite | ✅ **303 passed** — 89 Phases 3–4 + 87 Phase 5 + 39 Phase 6 + **88 Phase 7** |
+| Phase 6 registration checks | ✅ `php artisan route:list` (86 route definitions at that point) · `php artisan schedule:list` shows `EnforceSickCertificateDeadlines` |
+| Phase 7 registration checks | ✅ `php artisan route:list` — **104 route definitions under `api/*`, 109 registered** (18 Phase 7) · `php artisan migrate:status` all `Ran` · `composer validate` valid · `vendor\bin\pint --test` clean |
 | `flutter analyze` / `pint --test` / `composer validate` clean | ✅ |
 | CI pipeline running tests on every commit | ⬜ |
 | Coverage measurement (needs xdebug/pcov) | ⬜ |

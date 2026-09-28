@@ -19,7 +19,7 @@ use App\Support\Visibility;
  * public holidays, company holidays, and site holidays for sites they are
  * assigned to. The collection's half of that lives in HolidayController's
  * query and the single-day half in [view()] through Visibility — one place
- * each, sharing holidaySiteIds(), so `show` cannot answer `index` a different
+ * each, sharing attachedSiteIds(), so `show` cannot answer `index` a different
  * question.
  *
  * Writing is a different question with a different answer.

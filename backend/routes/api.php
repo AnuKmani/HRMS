@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\V1\ApprovalWorkflowController;
 use App\Http\Controllers\Api\V1\AttendanceController;
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\DailySiteReportController;
 use App\Http\Controllers\Api\V1\DepartmentController;
 use App\Http\Controllers\Api\V1\DesignationController;
 use App\Http\Controllers\Api\V1\EmployeeController;
@@ -16,6 +17,7 @@ use App\Http\Controllers\Api\V1\OvertimeController;
 use App\Http\Controllers\Api\V1\PasswordResetController;
 use App\Http\Controllers\Api\V1\ProjectController;
 use App\Http\Controllers\Api\V1\RoleController;
+use App\Http\Controllers\Api\V1\SiteActivityReportController;
 use App\Http\Controllers\Api\V1\SiteController;
 use App\Http\Controllers\Api\V1\SiteVisitController;
 use App\Http\Controllers\Api\V1\TimesheetController;
@@ -353,5 +355,108 @@ Route::prefix('v1')->group(function () {
         Route::put('overtime/{overtimeRequest}', [OvertimeController::class, 'update'])
             ->whereNumber('overtimeRequest')
             ->middleware('permission:overtime.create');
+
+        /* ----------------------------------------- Phase 7: site reporting */
+
+        // Two modules, two coarse gates, and both are narrower than they
+        // look:
+        //
+        //   `site_activity_reports.*`  a person's own note about a site-day.
+        //                              Held by every account expected to
+        //                              stand on a site; Visibility then
+        //                              narrows the rows to the sites that
+        //                              account is actually attached to.
+        //
+        //   `daily_site_reports.*`     the official, unique-per-site-per-date
+        //                              record. Not held by Employee at all —
+        //                              two official reports for one day is a
+        //                              contradiction nobody can resolve.
+        //
+        // Sub-routes (`/photos`, `/submit`, `/pdf`) are registered before
+        // `/{report}` in every case; the `{report}` routes are also
+        // `whereNumber`, so a literal could not be swallowed by them even
+        // with the ordering reversed. Belt and braces is cheap here because
+        // a mis-bound route would silently route a request to the wrong
+        // controller rather than 404.
+
+        // --- site activity reports -----------------------------------
+        Route::get('site-activity-reports', [SiteActivityReportController::class, 'index'])
+            ->middleware('permission:site_activity_reports.view');
+
+        // The answer to "which sites may I write about?" — asked because
+        // `GET /sites` needs `sites.view`, which no Employee holds, and the
+        // field-reporting form exists precisely for Employees.
+        Route::get('site-activity-reports/reportable-sites', [SiteActivityReportController::class, 'reportableSites'])
+            ->middleware('permission:site_activity_reports.view');
+
+        Route::get('site-activity-reports/{siteActivityReport}/photos/{photo}', [SiteActivityReportController::class, 'showPhoto'])
+            ->whereNumber('siteActivityReport')
+            ->whereNumber('photo')
+            ->middleware('permission:site_activity_reports.view');
+
+        Route::post('site-activity-reports/{siteActivityReport}/photos', [SiteActivityReportController::class, 'storePhotos'])
+            ->whereNumber('siteActivityReport')
+            ->middleware('permission:site_activity_reports.update');
+
+        Route::delete('site-activity-reports/{siteActivityReport}/photos/{photo}', [SiteActivityReportController::class, 'destroyPhoto'])
+            ->whereNumber('siteActivityReport')
+            ->whereNumber('photo')
+            ->middleware('permission:site_activity_reports.update');
+
+        Route::post('site-activity-reports/{siteActivityReport}/submit', [SiteActivityReportController::class, 'submit'])
+            ->whereNumber('siteActivityReport')
+            ->middleware('permission:site_activity_reports.update');
+
+        Route::get('site-activity-reports/{siteActivityReport}', [SiteActivityReportController::class, 'show'])
+            ->whereNumber('siteActivityReport')
+            ->middleware('permission:site_activity_reports.view');
+
+        Route::put('site-activity-reports/{siteActivityReport}', [SiteActivityReportController::class, 'update'])
+            ->whereNumber('siteActivityReport')
+            ->middleware('permission:site_activity_reports.update');
+
+        Route::post('site-activity-reports', [SiteActivityReportController::class, 'store'])
+            ->middleware('permission:site_activity_reports.create');
+
+        // --- daily site reports --------------------------------------
+        Route::get('daily-site-reports', [DailySiteReportController::class, 'index'])
+            ->middleware('permission:daily_site_reports.view');
+
+        Route::get('daily-site-reports/{dailySiteReport}/photos/{photo}', [DailySiteReportController::class, 'showPhoto'])
+            ->whereNumber('dailySiteReport')
+            ->whereNumber('photo')
+            ->middleware('permission:daily_site_reports.view');
+
+        Route::post('daily-site-reports/{dailySiteReport}/photos', [DailySiteReportController::class, 'storePhotos'])
+            ->whereNumber('dailySiteReport')
+            ->middleware('permission:daily_site_reports.update');
+
+        Route::delete('daily-site-reports/{dailySiteReport}/photos/{photo}', [DailySiteReportController::class, 'destroyPhoto'])
+            ->whereNumber('dailySiteReport')
+            ->whereNumber('photo')
+            ->middleware('permission:daily_site_reports.update');
+
+        Route::post('daily-site-reports/{dailySiteReport}/submit', [DailySiteReportController::class, 'submit'])
+            ->whereNumber('dailySiteReport')
+            ->middleware('permission:daily_site_reports.update');
+
+        // Its own permission rather than reusing `.view`: reading the
+        // numbers and being handed a document you can forward are
+        // different acts, and DailySiteReportPolicy::pdf() asks both this
+        // and the row-level question.
+        Route::get('daily-site-reports/{dailySiteReport}/pdf', [DailySiteReportController::class, 'pdf'])
+            ->whereNumber('dailySiteReport')
+            ->middleware('permission:daily_site_reports.pdf');
+
+        Route::get('daily-site-reports/{dailySiteReport}', [DailySiteReportController::class, 'show'])
+            ->whereNumber('dailySiteReport')
+            ->middleware('permission:daily_site_reports.view');
+
+        Route::put('daily-site-reports/{dailySiteReport}', [DailySiteReportController::class, 'update'])
+            ->whereNumber('dailySiteReport')
+            ->middleware('permission:daily_site_reports.update');
+
+        Route::post('daily-site-reports', [DailySiteReportController::class, 'store'])
+            ->middleware('permission:daily_site_reports.create');
     });
 });

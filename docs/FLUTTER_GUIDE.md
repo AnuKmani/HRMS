@@ -1,14 +1,16 @@
 # Flutter Guide
 
-> **Status:** Phase 6 — four new modules are built and tested on top of the
-> organisation, auth and attendance slices: `leave/`, `holidays/`, `timesheet/`
-> and `overtime/`, in the same `data / domain / presentation` shape as
-> everything before them. `dart format .` clean, `flutter analyze` clean,
-> `flutter test` **215 passed**. This guide explains the concepts and patterns
-> the app uses, written for someone who knows PHP/Laravel but is new to
-> Flutter/Dart. Sections that were written as a plan in earlier phases — the
-> offline queue, the location and camera permission flows, the approval chain,
-> the module permission gates — are now describing shipped code, and say so.
+> **Status:** Phase 7 — the organisation, auth and attendance slices plus
+> `leave/`, `holidays/`, `timesheet/` and `overtime/`, and now
+> `features/site_reports/` (activity form, official daily report, repeatable
+> rows, GPS, camera photographs, local drafts and the PDF download), all in
+> the same `data / domain / presentation` shape. `dart format .` clean,
+> `flutter analyze` clean, `flutter test` **303 passed**. This guide explains
+> the concepts and patterns the app uses, written for someone who knows
+> PHP/Laravel but is new to Flutter/Dart. Sections that were written as a plan
+> in earlier phases — the offline queue, the location and camera permission
+> flows, the approval chain, the module permission gates — are now describing
+> shipped code, and say so.
 
 ---
 
@@ -708,6 +710,42 @@ does not**: `HolidayPolicy::viewAny()` is unconditionally true on the server,
 so a lock there would be the app inventing a rule the API does not have —
 and would hide the calendar from exactly the people who need to plan around it.
 
+### 11.3 Three seams the report screens add (Phase 7 ✅)
+
+The report feature needed three things a widget test must be able to reach,
+and each was given an abstraction rather than a package:
+
+| Seam | Provider | Why it is a seam |
+|---|---|---|
+| `ReportPhotoSource` | `reportPhotoSourceProvider` | Draws a photograph by *ids*, never by URL. The app has no public photo URL to draw, so `ReportPhotoSource` fetches the bytes through the authenticated `ApiClient` and hands them to `Image.memory`. This is why **no `Image.network` appears anywhere in the app**: a bare URL would have to be public to be fetchable, and there isn't one |
+| `ReportPdfOpener` | `reportPdfOpenerProvider` | Writes the bytes the API returned to a temp file and hands them to the OS viewer. A test replaces it with a fake that records the id, filename and bytes — and can park on a `Completer` so the *loading* state can be asserted, which a double that answers immediately would never render |
+| `ReportDraftStore` | `reportDraftStoreProvider` | `SharedPreferencesReportDraftStore` in the app, an in-memory fake in tests. The slot for a create screen is `activity:new` / `daily:new`, written after a 600 ms pause rather than on every keystroke |
+
+**The draft is not a queue.** It exists so a half-written form survives a
+tapped Back button; it says *Local draft* on the screen precisely because it
+has **not** been sent. It is deleted only after a successful save, only for
+the create screen (`widget.reportId == null`) — editing an already-filed
+report must not wipe an unrelated local draft — and through **Start over**.
+Photographs are deliberately not part of the snapshot: a byte array in
+`SharedPreferences` is not a place to put twelve megabytes.
+
+**GPS is owned by the parent, not the widget.** `ReportGpsField` borrows
+`locationGatewayProvider` from the attendance feature and hands the fix back
+up. The screen decides what a usable fix is, and the submit button asks for a
+*new* one: the server does not merge a stored reading (§5 of the API doc), so
+`submit()` carries the coordinates as arguments. No background location, no
+polling — the reading is taken on demand and held in memory while the form is
+open.
+
+**Rows that can be added.** `RepeatableRowsField` is one widget used three
+times (manpower, materials, equipment) because those interactions are the
+same one; only the column list differs, and it is data. Two rules keep it
+honest: cells call `onRowChanged`, because a total derived from the rows and
+a deferred draft would otherwise both sit at yesterday's answer while the
+person typed; and `errorText` renders only **after the first save attempt**
+(`_rowsValidated`), so an untouched form does not scold you for a row you
+have not reached yet.
+
 ---
 
 ## 12. Project structure
@@ -750,10 +788,11 @@ mobile/lib/
 │   │   └── splash_screen.dart
 │   ├── home/home_screen.dart           # permission-gated module tiles
 │   │
-│   │   └── each of the nine below has the same three layers:
+│   │   └── each of the ten below has the same three layers:
 │   ├── employees/   ├── departments/   ├── designations/
 │   ├── projects/    ├── sites/         ├── attendance/
 │   ├── leave/       ├── timesheet/     ├── overtime/      ├── holidays/
+│   ├── site_reports/
 │   │
 │   └── <feature>/
 │       ├── data/
@@ -791,6 +830,17 @@ kind of seam, this time shared**: a camera used by two features is not a
 feature's private source, so it moved out of `attendance/` into
 `core/data/device_camera.dart` — and `features/attendance/data/selfie_camera.dart`
 was deleted rather than left behind as a stale import.
+
+**`site_reports/` is the first feature with two screens per side of the same
+idea** (an activity report is a person's note; a daily report is an official
+document), so it carries a little more of its own: `repeatable_rows.dart`
+(the one widget used for manpower, materials and equipment),
+`report_gps_field.dart`, `report_photos_section.dart`,
+`site_report_photo_sheet.dart`, `report_photo_source.dart`,
+`report_pdf_opener.dart` and `data/report_draft_store.dart`. Two repositories,
+two models and two controllers rather than one of each — the alternative is
+a model with a nullable field for every key the other family has, and a
+`kind:` switch in every screen.
 
 ---
 
@@ -877,6 +927,13 @@ flutter build appbundle         # build an AAB for Play Store
 | Put two identical rows in a list fixture | Make them distinct, or scope the assertion (`find.text('Pending').last`, `find.widgetWithText(FilledButton, 'OK').last`) — otherwise `findsOneWidget` fails with "too many" for a reason unrelated to the code |
 | Blank a query parameter to clear a filter | Delete the key — `status=` matches the empty string and returns nothing, while an absent `status` means "every status". The tests assert this with `expectQuery(..., absent)` |
 | Pop() back to a detail screen after editing it | `context.go(...)` so the detail re-runs `initState` and re-fetches what was just written |
+| Draw a report photograph with `Image.network(...)` | Fetch the bytes through `ApiClient` via `ReportPhotoSource` — there is no public photo URL, and creating one would break the storage rule the server enforces |
+| Re-send the fix you stored when the report was saved | Pass the coordinates as arguments to `submit(...)` — the server does not merge a stored reading, because the field is named for the moment of submission |
+| Let a repeatable-row cell update only the local list | Call `onRowChanged` (the screen `setState`s and schedules the draft) — a total derived from the rows and a deferred draft would otherwise both sit stale while the person types |
+| Show `errorText` on the repeatable sections from the first frame | Gate it on `_rowsValidated`, set inside the first save attempt — an untouched form must not scold you for a row you have not reached |
+| Put the pending photographs into the draft snapshot | Keep them in memory for the session: `SharedPreferences` is not a place for twelve megabytes, and the draft's job is the *words* |
+| Assert `find.text('0 rows')` on a screen with three repeatable sections | Look the row up by key (`manpower-count`) — every section renders the same phrase, so a text match counts the neighbours too |
+| `pumpAndSettle` over a screen holding a spinner | Drive it with `advance(tester)` (six × 100 ms). `pumpAndSettle` advances 100 ms per iteration and never stops while a `CircularProgressIndicator` runs |
 
 ---
 
@@ -889,7 +946,8 @@ flutter build appbundle         # build an AAB for Play Store
 | Flutter project skeleton | ✅ Phase 1b |
 | Packages: `flutter_riverpod` 3.4.3 · `dio` 5.11.1 · `go_router` 18.0.1 · `flutter_secure_storage` 11.2.0 | ✅ Phase 3 |
 | Packages: `geolocator` ^14.1.0 · `camera` ^0.12.1 · `image` ^4.10.1 · `shared_preferences` ^2.5.5 · `path_provider` ^2.1.6 | ✅ Phase 5 — five additions, each checked for Dart 3.13 / Flutter 3.47 compatibility before it was added |
-| Packages deliberately **not** added | ✅ Phase 5 — `connectivity_plus` (the queue learns a failure is transport-level from the failed request itself; a connectivity plugin would report "online" at a captive portal) and `permission_handler` (it drags in platform channels the two permissions we need do not require — `geolocator` and `camera` already surface their own statuses) · ✅ Phase 6 — `file_picker` (the certificate is captured with the back camera rather than chosen from disk, so the one package the feature would have needed is not added) and `intl` (the app formats its own dates) |
+| Package: `open_filex` ^4.7.0 | ✅ Phase 7 — the only dependency a downloaded PDF needs. The bytes come from the API, land in a temp file, and the system's own viewer opens them; no in-app PDF engine, no rendering of untrusted content |
+| Packages deliberately **not** added | ✅ Phase 5 — `connectivity_plus` (the queue learns a failure is transport-level from the failed request itself; a connectivity plugin would report "online" at a captive portal) and `permission_handler` (it drags in platform channels the two permissions we need do not require — `geolocator` and `camera` already surface their own statuses) · ✅ Phase 6 — `file_picker` (the certificate is captured with the back camera rather than chosen from disk, so the one package the feature would have needed is not added) and `intl` (the app formats its own dates) · ✅ Phase 7 — `image_picker` (the report photographs are taken with the **camera**, through the same `DeviceCamera` the selfie and the certificate already use) |
 | `core/` — config, network, storage, router | ✅ Phase 3 |
 | `core/data` page envelope · `core/permissions` scope · `core/presentation` list + form widgets | ✅ Phase 4 |
 | `core/presentation` `StatusChip` · `NoPermission` · `CameraCaptureSheet`; `core/data` `device_camera`; `core/data` `approval_step` | ✅ Phase 6 |
@@ -909,8 +967,18 @@ flutter build appbundle         # build an AAB for Play Store
 | `features/overtime` — list · detail (with *minutes to allow*) · form | ✅ Phase 6 |
 | Back-lens document capture sharing the front-lens selfie flow | ✅ Phase 6 |
 | `NoPermission` gate drawn **before** the list controller is built | ✅ Phase 6 |
-| `dart format .` | ✅ clean (34 files reflowed in Phase 6) |
+| `features/site_reports/` — 2 repositories · 4 models · 3 controllers · 8 screens | ✅ Phase 7 |
+| Site activity list · detail · form (camera photographs, submit-time GPS, local draft) | ✅ Phase 7 |
+| Daily report list · detail · form (manpower/materials/equipment rows, derived total, local draft) | ✅ Phase 7 |
+| `RepeatableRowsField` — one widget, three sections, errors only after the first save attempt | ✅ Phase 7 |
+| Private photograph fetching through the API (`ReportPhotoSource`, **no `Image.network`**) | ✅ Phase 7 |
+| On-demand PDF download (`ReportPdfOpener` → `open_filex`) with loading / 401 / 403 / 422 / transport states | ✅ Phase 7 |
+| Local draft store (`ReportDraftStore`, 600 ms debounce, labelled *Local draft*, not a sync queue) | ✅ Phase 7 |
+| `reportable-sites` picker — the site list for a role that holds no `sites.view` | ✅ Phase 7 |
+| Router: **23 routes** (Phase 7 added 8) · home tiles gated on the two report permissions | ✅ Phase 7 |
+| Camera-only capture for report photographs (gallery deferred — `image_picker` deliberately not added) | ✅ Phase 7 |
+| `dart format .` | ✅ clean (8 files reflowed in Phase 7) |
 | `flutter analyze` | ✅ clean |
-| `flutter test` | ✅ **215 passed** |
+| `flutter test` | ✅ **303 passed** (215 before Phase 7, +88 in `test/features/site_reports/`) |
 | Local database (Drift) + relational offline cache | ⬜ Not started — Phase 5 proved the queue does not need it (§10); revisit when a module is genuinely relational |
 | Shared widgets under `core/widgets/` | ⬜ The list and form widgets live in `core/presentation/` today; the split is worth it once a second, differently-shaped widget set appears |

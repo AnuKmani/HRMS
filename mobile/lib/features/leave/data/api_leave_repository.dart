@@ -120,29 +120,8 @@ class ApiLeaveRepository implements LeaveRepository {
   }
 
   @override
-  Future<Uint8List> certificate(int id) async {
-    try {
-      final response = await _client.dio.get<dynamic>(
-        '$_path/$id/certificate',
-        options: Options(responseType: ResponseType.bytes),
-      );
-
-      final data = response.data;
-
-      if (data is! List<int>) {
-        throw const ApiException(
-          statusCode: 0,
-          message:
-              'The server sent a response this app does not understand. '
-              'Please check for an app update.',
-        );
-      }
-
-      return Uint8List.fromList(data);
-    } on DioException catch (failure) {
-      throw apiExceptionFrom(failure);
-    }
-  }
+  Future<Uint8List> certificate(int id) =>
+      _client.bytes('$_path/$id/certificate');
 
   @override
   Future<PageResult<LeaveType>> types({

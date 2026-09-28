@@ -1,15 +1,17 @@
 # Database Design
 
-> **Status:** Phase 5 — core schema, the auth addition, the first slice
-> **using** it, and now GPS attendance and site movement. Laravel's base
-> tables plus 10 Phase 2 migrations, the Phase 3 `users.status` column and
-> the two Phase 5 migrations all exist: `settings`, `departments`,
-> `designations`, `shifts`, `projects`, `employees`, `sites`,
-> `employee_site_assignments`, **`attendances`**, **`site_visits`** and the
-> `spatie/laravel-permission` RBAC tables. Tables for later phases
-> (`leave_requests`, `payrolls`, `site_activity_reports`, …) are **design
-> only** and have not been created. `hrms_testing` mirrors this schema for
-> the test suite.
+> **Status:** Phase 7 — core schema, GPS attendance and site movement, and now
+> the two report families. Laravel's base tables plus 10 Phase 2 migrations,
+> the Phase 3 `users.status` column, the two Phase 5 migrations, the nine
+> Phase 6 migrations and the seven Phase 7 migrations all exist:
+> `settings`, `departments`, `designations`, `shifts`, `projects`,
+> `employees`, `sites`, `employee_site_assignments`, `attendances`,
+> `site_visits`, the leave/timesheet/overtime/holiday tables and
+> **the seven site-report tables (§2.9)**, plus the
+> `spatie/laravel-permission` RBAC tables — **41 tables across 33
+> migrations**. Tables for later phases (`payrolls`, `employee_documents`,
+> …) are **design only** and have not been created. `hrms_testing` mirrors
+> this schema for the test suite.
 
 **DBMS:** MariaDB 10.4.28 (XAMPP)
 **Charset:** `utf8mb4` / collation `utf8mb4_unicode_ci`
@@ -196,9 +198,7 @@ than copying hours into its own columns — configuration is referenced, not dup
 |---|---|---|
 | `attendances` | **One row per employee per work day** — check-in/out, GPS, accuracy, distance, selfie, shift, scheduled window, minutes, status, source, idempotency keys | ✅ Phase 5 |
 | `site_visits` | A bounded two-point episode at another site: start/end time, start/end GPS, purpose, remarks, status | ✅ Phase 5 |
-| `site_activity_reports` | Work performed, progress %, materials, manpower, equipment, issues, safety | ⬜ Later |
-| `site_report_photos` | Multiple photos per report | ⬜ Later |
-| `daily_site_reports` | Supervisor's daily report (workforce, planned/completed, delays) | ⬜ Later |
+| *site activity reports & daily site reports* | *moved to §2.9 — built in Phase 7* | ✅ Phase 7 |
 
 #### `attendances` shape — as built
 
@@ -405,6 +405,62 @@ marked LOP, approved loans, approved expenses.
 
 ---
 
+### 2.9 Site Reports — Phase 7 ✅
+
+Seven tables, in two families. The first family is a *personal* record; the
+second is an *official* one, and the difference between them is what most
+of the schema is encoding.
+
+| Table | Purpose |
+|---|---|
+| `site_activity_reports` | One person's account of one site-day: `employee_id` (derived from the session), project/site, `report_date`, `work_category`, `work_performed`, `progress_percentage` (0–100), free-text `manpower` / `materials_used` / `equipment_used`, `issues`, `safety_issues`, `remarks`, `latitude` / `longitude` / `gps_accuracy`, `status`, `submitted_at` |
+| `site_activity_report_photos` | One row per frame: private `path`, `mime_type`, `size_bytes`, `caption`, `sort_order` |
+| `daily_site_reports` | The official site-day: `created_by` (derived), project/site, `report_date`, `total_manpower`, `work_planned`, `work_completed`, `safety_observations`, `delays`, `issues`, `remarks`, `status`, `submitted_at`, `approved_at` *(reserved)* |
+| `daily_site_report_manpower` | One row per workforce **category** — free text, not a lookup, not an ENUM |
+| `daily_site_report_materials` | One row per consumed line: name, `quantity` `DECIMAL(12,3)`, unit, remarks |
+| `daily_site_report_equipment` | One row per plant item: name, quantity, `operating_hours`, `condition`, remarks |
+| `daily_site_report_photos` | Identical in shape to the activity table, separate on purpose (see below) |
+
+**Why two shapes.** The activity report is filled in on a phone between two
+pours, so its resources are `text` and the row is one insert. The daily
+report is read by somebody who was not there, so its resources are child
+rows that can be summed, compared between days and corrected one line at a
+time. Both rules are real; putting either one on the wrong table would make
+one of the two documents unusable.
+
+**Categories are words, not ids.** `daily_site_report_manpower.category` is
+`VARCHAR(60)` with no FK and no ENUM: a fixed list would need a re-deploy
+the first time a site reports "scaffolders", and a lookup table would put a
+master-data module between a supervisor and the line they are recording.
+`daily_site_reports.total_manpower` is the derived sum, written from those
+rows on save, so the headline number never has to be trusted from a client
+that could have computed it differently.
+
+**One official report per site per day** is enforced by
+`dsr_site_date_unique` — plus `Rule::unique` scoped to `site_id` in the
+request (so the user sees a field error) plus a `QueryException` guard in
+the service (so a caller that bypasses the request does not see a 500).
+Three layers, because "two documents for the same site-day" is a
+correctness failure, not a nuisance.
+
+**The photo tables are separate rather than polymorphic.** A shared
+`report_photos` with `reportable_id`/`reportable_type` would make "which
+reports may this photograph travel with?" a string comparison inside a
+policy instead of a foreign key the database can check — and these two
+report families have different policies. Two small tables is the cheaper
+lie. Neither carries a URL, and neither stores bytes: `path` is a name
+under `storage/app/private/site-report-photos/`.
+
+**No soft deletes** on any of the seven: unlike master data, a report is
+an assertion about a day, and quietly removing one is what `status` and a
+later approval step are for.
+
+**`approved_at` exists and is never written.** Phase 7 ships submit and
+stops; the column means adding approval later is a code change, not a
+schema change on a table already holding reports.
+
+---
+
 ## 3. Relationship Summary
 
 **Implemented (Phase 2) — solid lines exist in the database today:**
@@ -464,6 +520,33 @@ decisions are already recorded in `approval_records`.
 (polymorphic subject, see §2.6). Everything else above uses `RESTRICT`,
 except `timesheets.attendance_id`, which is `nullOnDelete`.
 
+**Added in Phase 7 ✅:**
+
+```
+employees ──*── site_activity_reports *── projects
+                        │                        │
+                        ├──*── site_activity_report_photos
+                        └──*── sites ────────────┘
+users ────*── daily_site_reports *── projects
+                        │                        │
+                        ├──*── site_id → sites ──┘
+                        ├──*── daily_site_report_manpower
+                        ├──*── daily_site_report_materials
+                        ├──*── daily_site_report_equipment
+                        └──*── daily_site_report_photos
+```
+
+Both families point at `projects` and `sites` with `RESTRICT`: a site-day
+that has been written about is what turns a site or a project into
+historical record. The photo tables are the only `cascadeOnDelete` here,
+and only in the direction you would want — a photograph cannot outlive the
+report it is evidence for.
+
+`site_activity_reports.employee_id` and `daily_site_reports.created_by` are
+both derived server-side from the bearer token. Neither column is read from
+a payload anywhere, so no migration, request rule or policy has to defend
+against a client claiming a different author.
+
 **Circular-reference note:** `employees.primary_project_id → projects` and
 `projects.project_manager_id → employees` are mutually referential, as are
 `employees.primary_site_id → sites` and `sites.site_manager_id → employees`. Both
@@ -471,11 +554,10 @@ pairs are created across two migrations (see §6) to avoid a circular dependency
 at schema-creation time. They are *not* an architectural loop — one side is a
 "current placement" pointer, the other is a staffed-role pointer.
 
-**Designed but not yet created (Phases 7–12):**
+**Designed but not yet created (Phases 8–12):**
 
 ```
-employees ──*── site_activity_reports *── sites
-           ├──*── payrolls *── payroll_items
+employees ──*── payrolls *── payroll_items
            ├──*── salary_slips
            ├──*── salary_certificate_requests
            ├──*── loans *── loan_installments
@@ -512,6 +594,9 @@ for the two to disagree.
 | Timesheet window | **UNIQUE** `(employee_id, timesheet_date)` + `(timesheet_date, status)` |
 | Overtime queue / payroll feed | `(status, overtime_date)` + `payroll_eligible` |
 | Approval chain lookup | **UNIQUE** on the step's `(workflow_id, sequence)` and on the record's subject + step; `(subject_type, subject_id, status)` |
+| Activity report by author / site / project | `sar_emp_date_idx` `(employee_id, report_date)` · `sar_site_date_idx` · `sar_project_date_idx`, plus an index on `status` |
+| Official report lookup | **UNIQUE** `dsr_site_date_unique` `(site_id, report_date)` + `dsr_project_date_idx` + `dsr_creator_date_idx` |
+| Report photographs in order | `sarp_…` / `dsrp_…` `(…_report_id, sort_order)` — and the same pair on the three child tables |
 | Document expiry | `(expiry_date)` |
 | Payroll period | `(period_month, employee_id)` |
 
@@ -528,9 +613,9 @@ All counts below are **live and verified** against `hrms_laravel` after
 | Seeded | Count | Seeder |
 |---|---|---|
 | Roles | 10 | `RoleSeeder` |
-| Permissions | **51** | `PermissionSeeder` |
-| Role → permission grants | **236** | `RolePermissionSeeder` |
-| Settings | 12 | `SettingSeeder` |
+| Permissions | **59** | `PermissionSeeder` |
+| Role → permission grants | **278** | `RolePermissionSeeder` |
+| Settings | **13** | `SettingSeeder` |
 | Approval workflows | 3 — `LEAVE-STD` (default for leave, 3 steps), `LEAVE-FAST` (1 step), `OT-STD` (default for overtime, 3 steps) | `ApprovalWorkflowSeeder` |
 | Approval workflow steps | 7 — reporting manager → role → role / permission | `ApprovalWorkflowSeeder` |
 | Leave types | 5 — `AL` Annual, `SL` Sick (certificate, 2-day deadline), `EL` Emergency, `UL` Unpaid (may go negative), `OTH` Other | `LeaveTypeSeeder` |
@@ -542,11 +627,22 @@ Permission counts by phase: Phase 2 seeded **40**; Phase 4 added
 `employees.salary.view` → 41; Phase 6 added 11
 (`approvals.view/manage`, `leave.balance.view/manage`, `holidays.manage`,
 `timesheets.view/manage`, `overtime.view/create/approve/manage`) → **51**, and
-retired `leave.request` in favour of `leave.create`. Phase 5 added no
-permission but granted the existing `attendance.view` to `Employee`. Grants
-grew 168 → **236**. `PermissionSeeder::flat()` is the single source of truth
-and `RbacTest` asserts the seeded count matches it exactly, so this number
-cannot drift silently.
+retired `leave.request` in favour of `leave.create`; Phase 7 added
+8 (`site_activity_reports.{view,create,update}` and
+`daily_site_reports.{view,create,update,manage,pdf}`) → **59**. Phase 5 added
+no permission but granted the existing `attendance.view` to `Employee`.
+Grants grew 168 → 236 → **278**. `PermissionSeeder::flat()` is the single
+source of truth and `RbacTest` asserts the seeded count matches it exactly,
+so this number cannot drift silently.
+
+**Who holds the Phase 7 eight.** `site_activity_reports.view` includes
+`Employee` — recording your own day is the reason the module exists.
+`daily_site_reports.view` and `.pdf` deliberately **exclude** `Employee`
+(and Payroll Admin and Finance): the official record about a site-day is
+read by the people who prepare and manage it — Super Admin, HR Admin, HR
+Executive, Project Manager, Site Engineer, Site Supervisor and Management.
+`.create`/`.update` go to Project Manager, Site Engineer and Site
+Supervisor; `.manage` to Project Manager alone.
 
 Re-running the seeders brings an older dev database up to date without
 touching anything else — they are `firstOrCreate` / `syncPermissions` only.
@@ -554,6 +650,11 @@ touching anything else — they are `firstOrCreate` / `syncPermissions` only.
 > The sick-leave deadline default comes from
 > `settings.leave.sick_certificate_deadline_days` (**2**) and is overridden
 > per type by `leave_types.document_deadline_days` when that is `> 0`.
+
+> The heading on an exported daily report comes from
+> `settings.reporting.company_name` (**`HRMS`** by default, group
+> `reporting`) and falls back to `config('app.name')`. It is the thirteenth
+> setting and the first one a deployment is likely to want to change.
 
 > ⚠️ `DevelopmentDataSeeder` contains **sample structure only**. It creates no
 > employees, users, salaries or assignments. Every row it writes is labelled
@@ -574,6 +675,7 @@ touching anything else — they are `firstOrCreate` / `syncPermissions` only.
 | 4 | **None.** Controllers, Form Requests, Resources, services and six policies on the tables Phase 2 already created | ✅ |
 | 5 | `2026_09_27_110001_create_attendances_table`, `2026_09_27_110002_create_site_visits_table` | ✅ |
 | 6 | `2026_09_27_120001` … `2026_09_27_120009` — nine migrations, see below | ✅ |
+| 7 | `2026_09_28_130001` … `2026_09_28_130007` — seven migrations, see below | ✅ |
 
 ### Phase 2 migrations (all `Ran`)
 
@@ -611,8 +713,20 @@ touching anything else — they are `firstOrCreate` / `syncPermissions` only.
 | 20 | `2026_09_27_120008_create_overtime_requests_table` | `overtime_requests` | Whole minutes only; `payroll_eligible` is indexed because it is the future payroll feed's filter |
 | 21 | `2026_09_27_120009_create_approval_records_table` | `approval_records` | Polymorphic `subject_type`/`subject_id` with **no FK** — the service is the only writer (see §2.6) |
 
-**34 tables** total in `hrms_laravel`, across **26 migrations** (3 framework,
-1 Sanctum, 10 Phase 2, 1 Phase 3, 2 Phase 5, 9 Phase 6).
+### Phase 7 migrations (all `Ran`)
+
+| # | Migration | Creates | Why it looks like this |
+|---|---|---|---|
+| 22 | `2026_09_28_130001_create_site_activity_reports_table` | `site_activity_reports` | `employee_id` is derived from the session and **never read from the payload**; resources are free `text` so the row is one insert; three `(…, report_date)` indexes because every filter is a date range |
+| 23 | `2026_09_28_130002_create_site_activity_report_photos_table` | `site_activity_report_photos` | Private `path` only — no URL column, no `disk`, no bytes; `cascadeOnDelete` so a photograph cannot outlive its report |
+| 24 | `2026_09_28_130003_create_daily_site_reports_table` | `daily_site_reports` | `created_by` (not `employee_id`) because this document is *authored*; **`dsr_site_date_unique`** is the business rule in the database; `approved_at` reserved for a later phase |
+| 25 | `2026_09_28_130004_create_daily_site_report_manpower_table` | `daily_site_report_manpower` | `category` is free text — no ENUM, no lookup — so the vocabulary belongs to the site rather than to the schema |
+| 26 | `2026_09_28_130005_create_daily_site_report_materials_table` | `daily_site_report_materials` | `DECIMAL(12,3)`: three tonnes and 250 kg are both real quantities on the same day. **No stock, no valuation** — this is not an inventory |
+| 27 | `2026_09_28_130006_create_daily_site_report_equipment_table` | `daily_site_report_equipment` | `operating_hours` is a nullable meter reading; **no asset tag, no maintenance** — this is not an asset register |
+| 28 | `2026_09_28_130007_create_daily_site_report_photos_table` | `daily_site_report_photos` | Separate from the activity photos rather than polymorphic, so "which report may this travel with?" is a foreign key, not a string comparison |
+
+**41 tables** total in `hrms_laravel`, across **33 migrations** (3 framework,
+1 Sanctum, 10 Phase 2, 1 Phase 3, 2 Phase 5, 9 Phase 6, 7 Phase 7).
 
 ### Why two foreign keys are "deferred"
 
@@ -650,11 +764,16 @@ by a cascade.**
 | `sites.site_manager_id` / `site_supervisor_id` | `SET NULL` | Staffing changes, not data deletion. |
 | `sites.working_hours_setting_id` → `settings` | `SET NULL` | Config reference, falls back to the global default. |
 | `roles`/`permissions` pivot tables | `CASCADE` | RBAC pivots are derived data, safe to rebuild. |
+| `site_activity_report_photos` → `site_activity_reports` | **CASCADE** | A photograph is evidence *of* a report; it has no meaning alone. The only cascade in the schema that removes a record somebody wrote. |
+| `daily_site_report_photos` / `_manpower` / `_materials` / `_equipment` → `daily_site_reports` | **CASCADE** | Child rows of one document, removed with it. |
+| `site_activity_reports` / `daily_site_reports` → `employees` / `users` / `projects` / `sites` | **RESTRICT** | A site-day that has been reported on is what makes a site or project historical. |
 
 **Soft deletes** (`deleted_at`) are used on master data where recoverability
 matters: `departments`, `designations`, `employees`, `projects`, `sites`, `shifts`.
 `employee_site_assignments` and `settings` are **not** soft-deleted — assignments
-are immutable history, settings are a small config table.
+are immutable history, settings are a small config table. **None of the seven
+Phase 7 tables is soft-deleted either**: a report is an assertion about a day,
+and retracting one is what `status` and a later approval step are for.
 
 > **Note:** a *soft* delete does not fire any FK rule, so references stay intact
 > and the record can be restored. Only `forceDelete()` triggers `SET NULL` /
@@ -694,6 +813,16 @@ are immutable history, settings are a small config table.
 | `site_visits` | `UNIQUE (client_event_id)`, `UNIQUE (end_client_event_id)` | Start and end each replay safely |
 | `site_visits` | `(employee_id, started_at)` — `sv_emp_started_idx` | "Where was this person today?" |
 | `site_visits` | `(site_id, started_at)` — `sv_site_started_idx` | Visits to a site, by date |
+| `site_activity_reports` | `(employee_id, report_date)` — `sar_emp_date_idx` | "What did I file?" — the activity list's own filter |
+| `site_activity_reports` | `(site_id, report_date)` — `sar_site_date_idx` | Who reported this site, in this window |
+| `site_activity_reports` | `(project_id, report_date)` — `sar_project_date_idx` | Project-wide date range |
+| `site_activity_reports` | `(status)` | The status dropdown |
+| `daily_site_reports` | **UNIQUE** `(site_id, report_date)` — `dsr_site_date_unique` | One official document per site-day, in the database rather than merely intended |
+| `daily_site_reports` | `(project_id, report_date)` — `dsr_project_date_idx` | Project window |
+| `daily_site_reports` | `(created_by, report_date)` — `dsr_creator_date_idx` | "What did I prepare?" |
+| `site_activity_report_photos` | `(site_activity_report_id, sort_order)` — `sarp_report_order_idx` | Gallery order without a `ORDER BY id` coincidence |
+| `daily_site_report_photos` | `(daily_site_report_id, sort_order)` — `dsrp_report_order_idx` | Same |
+| `daily_site_report_manpower` / `_materials` / `_equipment` | `(…_report_id, sort_order)` | The three child sets, in the order they were entered |
 
 Composite indexes were chosen for the two filters that appear together most
 often in HR reports: *department × status* and *site × start date*. The two
@@ -708,7 +837,9 @@ verified with `DB::enableQueryLog()` during testing.
 ## 9. Phase 2 Tables — Full Column Reference
 
 > The Phase 5 tables (`attendances`, `site_visits`) are documented in full in
-> §2.4 above, alongside their design reasons.
+> §2.4 above, alongside their design reasons. The Phase 7 report tables are
+> documented in full in **§2.9** — and, column by column, in the docblocks of
+> their own migrations.
 
 ```
 settings
@@ -815,8 +946,7 @@ assert the exact vocabulary:
 
 `audit_logs`, `notifications`, `notification_preferences`, `employee_documents`,
 `employee_onboarding`, `trainings`, `employee_trainings`, `assets`,
-`asset_assignments`, `site_activity_reports`, `site_report_photos`,
-`daily_site_reports`, `payrolls`, `payroll_items`, `salary_slips`,
+`asset_assignments`, `payrolls`, `payroll_items`, `salary_slips`,
 `salary_certificate_requests`, `loans`, `loan_installments`, `expenses`,
 `expense_receipts`, `device_tokens`.
 
@@ -825,6 +955,13 @@ assert the exact vocabulary:
 > nothing payroll-shaped was created in Phase 6 beyond the two facts a future
 > run needs: `overtime_requests.payroll_eligible` and
 > `leave_requests.lop_days`.
+>
+> Phase 7 added no inventory and no asset module either. What a site *used*
+> on a day lives in `daily_site_report_materials` and
+> `daily_site_report_equipment` as facts about one report, with no stock
+> level, no valuation, no asset tag and no maintenance schedule — so a real
+> stock or asset module can be built later without inheriting numbers the
+> daily reports have already grown to depend on.
 
 > **Current state:** only `hrms_laravel` (development) and `hrms_testing` (automated
 > tests) are used. Other databases on this machine belong to previous, unrelated

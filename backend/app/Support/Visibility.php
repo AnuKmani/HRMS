@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\Attendance;
+use App\Models\DailySiteReport;
 use App\Models\Employee;
 use App\Models\EmployeeSiteAssignment;
 use App\Models\Holiday;
@@ -10,6 +11,7 @@ use App\Models\LeaveRequest;
 use App\Models\OvertimeRequest;
 use App\Models\Project;
 use App\Models\Site;
+use App\Models\SiteActivityReport;
 use App\Models\SiteVisit;
 use App\Models\Timesheet;
 use App\Models\User;
@@ -650,22 +652,28 @@ final class Visibility
     }
 
     /**
-     * The sites whose site-specific holidays this reader may reach.
+     * The sites this account is actually attached to.
      *
      * Active postings, their own primary site, and the sites they run — three
      * sources because they answer three different questions: where they are
      * posted, where their contract puts them, and what they are responsible
-     * for. Public and company days are never governed by this list; it exists
-     * only for `type = site`.
+     * for.
      *
-     * Here rather than on HolidayController because the same set has to be
-     * read by HolidayPolicy when a single day is opened by id — a `show` that
+     * Two modules read this set and neither is named after the other: the
+     * holiday calendar uses it to place site-specific days off, and site
+     * reporting uses it twice over — to decide which site a person may file
+     * a report about, and which reports they may then read back. Those are
+     * the same physical question ("is this their site?"), so they get the
+     * same answer from one method rather than two copies that could drift.
+     *
+     * Here rather than on a controller because the same set has to be read
+     * by the policy when a single record is opened by id — a `show` that
      * answered "yes" while `index` hid the row would let the narrower of the
      * two be found first.
      *
      * @return Collection<int, int>
      */
-    public static function holidaySiteIds(User $user): Collection
+    public static function attachedSiteIds(User $user): Collection
     {
         $employee = $user->employee;
 
@@ -687,7 +695,7 @@ final class Visibility
     /**
      * Does this one holiday fall inside the calendar this reader may see?
      *
-     * The row-level twin of holidaySiteIds(), so `GET /holidays/{id}` cannot
+     * The row-level twin of attachedSiteIds(), so `GET /holidays/{id}` cannot
      * answer "yes" to a site day that `GET /holidays` deliberately hid. Public
      * and company days are visible to everybody, because the reason
      * HolidayPolicy grants `viewAny()` to every signed-in account applies to
@@ -706,7 +714,269 @@ final class Visibility
         }
 
         return $holiday->site_id !== null
-            && self::holidaySiteIds($user)->contains($holiday->site_id);
+            && self::attachedSiteIds($user)->contains($holiday->site_id);
+    }
+
+    /* -------------------------------------------------------- site reports */
+
+    /**
+     * May this user read somebody *else's* site activity report?
+     *
+     * Three ways in, exactly as attendance — a listed field overseer, an
+     * explicit reporting grant, or `employees.view` — and it fails CLOSED
+     * for the reason attendance does: an ordinary employee holds
+     * `site_activity_reports.view` for their *own* notes, so the permission
+     * cannot also mean "the company's".
+     *
+     * The middle grant here is `daily_site_reports.manage` rather than a
+     * `site_activity_reports.manage` that does not exist: this module has
+     * three permissions (view / create / update) because it has no approval
+     * step, and the role that *does* run reporting — Project Manager, and
+     * Super Admin through `*` — is the natural holder of the one override
+     * that exists.
+     */
+    public static function mayViewOthersSiteActivityReports(User $user): bool
+    {
+        if (! $user->can('site_activity_reports.view')) {
+            return false;
+        }
+
+        if (self::attendanceIsScopedFor($user)) {
+            return true;
+        }
+
+        return $user->can('daily_site_reports.manage') || $user->can('employees.view');
+    }
+
+    /**
+     * May this user read somebody *else's* official daily site report?
+     *
+     * Same three doors as the activity report with `daily_site_reports.view`
+     * and `daily_site_reports.manage` swapped in. An Employee holds neither,
+     * so their answer to "whose daily reports may I see?" is "none" — the
+     * official site-day record is prepared by a supervisor and read by
+     * back-office, and handing the entire company's site-days to every phone
+     * in it because a coarse permission said `view` would be a leak the
+     * permission was never meant to grant.
+     */
+    public static function mayViewOthersDailySiteReports(User $user): bool
+    {
+        if (! $user->can('daily_site_reports.view')) {
+            return false;
+        }
+
+        if (self::attendanceIsScopedFor($user)) {
+            return true;
+        }
+
+        return $user->can('daily_site_reports.manage') || $user->can('employees.view');
+    }
+
+    /**
+     * May a report be filed about this site at all?
+     *
+     * Asked on create, on update and again at submit, because the site a
+     * report points at is the one thing a client sends that says *where*
+     * somebody claims to have been, and "you may only report where you are
+     * placed" is worthless if it is checked once against the first draft.
+     *
+     * Three ways in, and no fourth:
+     *  - the site is one of theirs — an active posting, their primary site,
+     *    or a site they manage or supervise (attachedSiteIds);
+     *  - a project they personally run (scopedProjectIds) — a Project
+     *    Manager is on every site of the project by definition and on none
+     *    of them by posting;
+     *  - `daily_site_reports.manage`, the explicit "you run reporting"
+     *    grant, which is what lets Super Admin file from a desk.
+     *
+     * Deliberately does NOT fall open for roles that are unscoped. The
+     * class's general convention — an unlisted role reads what its
+     * permission admits — is right for *reading* and wrong for *filing*:
+     * there is no permission-only answer to "is this their site?".
+     */
+    public static function mayReportAt(User $user, Site $site): bool
+    {
+        if (self::attachedSiteIds($user)->contains($site->id)) {
+            return true;
+        }
+
+        if (self::scopedProjectIds($user)->contains($site->project_id)) {
+            return true;
+        }
+
+        return $user->can('daily_site_reports.manage');
+    }
+
+    /**
+     * Restrict a site activity report query to what this user may see.
+     *
+     * @param  Builder<SiteActivityReport>  $query
+     * @return Builder<SiteActivityReport>
+     */
+    public static function siteActivityReportsFor(Builder $query, User $user)
+    {
+        if (! self::mayViewOthersSiteActivityReports($user)) {
+            // Fails closed, `0` rather than `whereRaw('1 = 0')` for the same
+            // reason attendanceFor() uses it: indexable, and honest about
+            // meaning "no employee record, therefore no rows".
+            return $query->where('site_activity_reports.employee_id', $user->employee?->id ?? 0);
+        }
+
+        if (! self::attendanceIsScopedFor($user)) {
+            return $query;
+        }
+
+        $own = $user->employee?->id;
+        $sites = self::attachedSiteIds($user);
+        $projects = self::scopedProjectIds($user);
+
+        if ($own === null && $sites->isEmpty() && $projects->isEmpty()) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->where(function ($q) use ($own, $sites, $projects) {
+            if ($own !== null) {
+                $q->where('site_activity_reports.employee_id', $own);
+            }
+
+            if ($sites->isNotEmpty()) {
+                $q->orWhereIn('site_activity_reports.site_id', $sites);
+            }
+
+            if ($projects->isNotEmpty()) {
+                $q->orWhereIn('site_activity_reports.project_id', $projects);
+            }
+        });
+    }
+
+    /**
+     * Does this one activity report fall inside what this reader may see?
+     *
+     * The row-level twin of siteActivityReportsFor().
+     */
+    public static function siteActivityReportIsVisible(User $user, SiteActivityReport $report): bool
+    {
+        if ($user->employee?->id === $report->employee_id) {
+            return true;
+        }
+
+        if (! self::mayViewOthersSiteActivityReports($user)) {
+            return false;
+        }
+
+        if (! self::attendanceIsScopedFor($user)) {
+            return true;
+        }
+
+        return self::attachedSiteIds($user)->contains($report->site_id)
+            || self::scopedProjectIds($user)->contains($report->project_id);
+    }
+
+    /**
+     * Restrict a daily site report query to what this user may see.
+     *
+     * @param  Builder<DailySiteReport>  $query
+     * @return Builder<DailySiteReport>
+     */
+    public static function dailySiteReportsFor(Builder $query, User $user)
+    {
+        if (! self::mayViewOthersDailySiteReports($user)) {
+            return $query->where('daily_site_reports.created_by', $user->id);
+        }
+
+        if (! self::attendanceIsScopedFor($user)) {
+            return $query;
+        }
+
+        $sites = self::attachedSiteIds($user);
+        $projects = self::scopedProjectIds($user);
+
+        // Own rows first, and unconditionally: a scoped role that manages
+        // nothing yet has still written reports, and a site-only scope would
+        // delete the documents it prepared from its own list. The empty case
+        // therefore needs no `1 = 0` — `created_by = ?` is already a real
+        // predicate, unlike an empty `orWhereIn` group.
+        return $query->where(function ($q) use ($user, $sites, $projects) {
+            $q->where('daily_site_reports.created_by', $user->id);
+
+            if ($sites->isNotEmpty()) {
+                $q->orWhereIn('daily_site_reports.site_id', $sites);
+            }
+
+            if ($projects->isNotEmpty()) {
+                $q->orWhereIn('daily_site_reports.project_id', $projects);
+            }
+        });
+    }
+
+    /**
+     * Does this one daily site report fall inside what this reader may see?
+     *
+     * Own rows are always readable: a supervisor who prepared a report for a
+     * site they are later moved off must not lose access to the document
+     * they wrote, which is exactly what a site-only scope would do.
+     */
+    public static function dailySiteReportIsVisible(User $user, DailySiteReport $report): bool
+    {
+        if ($report->created_by === $user->id) {
+            return true;
+        }
+
+        if (! self::mayViewOthersDailySiteReports($user)) {
+            return false;
+        }
+
+        if (! self::attendanceIsScopedFor($user)) {
+            return true;
+        }
+
+        return self::attachedSiteIds($user)->contains($report->site_id)
+            || self::scopedProjectIds($user)->contains($report->project_id);
+    }
+
+    /**
+     * The sites this account may actually file a report about, as a query.
+     *
+     * The list half of {@see self::mayReportAt()} — the two must agree, or a
+     * picker would offer a site the store endpoint then refuses, which is
+     * the most annoying way to be told "no": after the work is typed.
+     *
+     * A named endpoint needs this for a reason worth stating: an Employee
+     * holds no `sites.view`, so `GET /sites` is 403 for exactly the role the
+     * field-reporting form exists to serve. Offering `sites.view` to close
+     * that gap would hand every phone in the company the whole site
+     * directory with its coordinates; `site-activity-reports/reportable-sites`
+     * answers the narrower question — *which sites may you write about* — and
+     * needs no new permission to ask it.
+     *
+     * @param  Builder<Site>  $query
+     * @return Builder<Site>
+     */
+    public static function reportableSitesFor(Builder $query, User $user)
+    {
+        // `daily_site_reports.manage` is the third way in on mayReportAt():
+        // a holder of it may file anywhere, so narrowing would disagree with
+        // the store endpoint they are about to call.
+        if ($user->can('daily_site_reports.manage')) {
+            return $query;
+        }
+
+        $sites = self::attachedSiteIds($user);
+        $projects = self::scopedProjectIds($user);
+
+        if ($sites->isEmpty() && $projects->isEmpty()) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->where(function ($q) use ($sites, $projects) {
+            if ($sites->isNotEmpty()) {
+                $q->orWhereIn('id', $sites);
+            }
+
+            if ($projects->isNotEmpty()) {
+                $q->orWhereIn('project_id', $projects);
+            }
+        });
     }
 
     /* ------------------------------------------------------------ helpers */

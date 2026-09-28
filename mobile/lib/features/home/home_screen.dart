@@ -96,6 +96,25 @@ class HomeScreen extends ConsumerWidget {
           '/overtime',
           'Extra hours and their approvals',
         ),
+      // Phase 7. The two report trees are separate doors because they are
+      // separate questions: one is "what did I do today?", the other is
+      // "what is the site's day, as a document?". Only the second is
+      // withheld from an Employee — see DailySiteReportListScreen for why,
+      // and the seeders for which roles hold each.
+      if (scope.canViewSiteActivityReports)
+        _Module(
+          'Site reports',
+          Icons.assignment_outlined,
+          '/site-reports',
+          'What you did at a site, day by day',
+        ),
+      if (scope.canViewDailySiteReports)
+        _Module(
+          'Daily site reports',
+          Icons.description_outlined,
+          '/daily-reports',
+          'The official record of a site-day',
+        ),
       _Module(
         'Holidays',
         Icons.calendar_month_outlined,

@@ -3,10 +3,10 @@
 namespace App\Services\Attendance;
 
 use App\Models\Employee;
+use App\Services\Images\StoresPrivateImages;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Where attendance selfies live, and how they are read back.
@@ -29,6 +29,13 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  *    stripping is a side effect of re-encoding rather than a step of its
  *    own is `SelfieSanitizer`'s story to tell.
  *
+ * The accept/reject screen and the read-back path now come from
+ * `StoresPrivateImages`, shared with the Phase 7 report-photo store — they
+ * are the same three questions about an upload and the same containment
+ * check about a stored path, and two copies of the second one would be two
+ * chances for a path to escape its directory. Which files this class
+ * *writes*, and under what name, remain this class's own decision.
+ *
  * The actual MIME/extension/size *rejection* — and the `ImageContent` check
  * that the bytes decode into an image at all — happens in
  * StoreCheckInRequest so the user gets a 422 naming the field. The checks
@@ -38,10 +45,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 final class SelfieStore
 {
-    /** Everything a selfie may arrive as. Image data only — never a document. */
-    public const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
-
-    public const ALLOWED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp'];
+    use StoresPrivateImages;
 
     public function __construct(private readonly SelfieSanitizer $sanitizer) {}
 
@@ -68,98 +72,13 @@ final class SelfieStore
         return $path;
     }
 
-    /**
-     * Stream a stored selfie back, or null when it has gone missing.
-     *
-     * Never a `readFile()` into memory: a 5 MB image per request is how a
-     * list screen takes a server down.
-     */
-    public function response(string $path): ?StreamedResponse
-    {
-        if (! $this->isSafe($path)) {
-            return null;
-        }
-
-        $disk = Storage::disk('local');
-
-        if (! $disk->exists($path)) {
-            return null;
-        }
-
-        // Every selfie written since sanitisation is `.jpg`; the png/webp
-        // arms exist only for rows stored before it, so a record from last
-        // week is not served as the wrong type. Which type is announced is
-        // decided by the extension the server minted, never by the upload.
-        $mime = match (pathinfo($path, PATHINFO_EXTENSION)) {
-            'png' => 'image/png',
-            'webp' => 'image/webp',
-            default => 'image/jpeg',
-        };
-
-        return $disk->response($path, basename($path), [
-            'Content-Type' => $mime,
-            // A selfie is personal data. It must never sit in a proxy or a
-            // browser cache where a shared tablet would hand it to the next
-            // person who picks the device up.
-            'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
-            'Content-Disposition' => 'inline',
-            'X-Content-Type-Options' => 'nosniff',
-        ]);
-    }
-
-    public function delete(?string $path): void
-    {
-        if ($path === null || ! $this->isSafe($path)) {
-            return;
-        }
-
-        Storage::disk('local')->delete($path);
-    }
-
     public function directory(): string
     {
         return trim((string) config('hrms.storage.selfie_directory', 'attendance-selfies'), '/');
     }
 
-    public function isAcceptable(UploadedFile $file): bool
+    public function maxKilobytes(): int
     {
-        if (! $file->isValid()) {
-            return false;
-        }
-
-        $maxBytes = max(1, (int) config('hrms.storage.selfie_max_kilobytes', 5120)) * 1024;
-
-        if ($file->getSize() > $maxBytes) {
-            return false;
-        }
-
-        $extension = strtolower($file->getClientOriginalExtension());
-
-        if (! in_array($extension, self::ALLOWED_EXTENSIONS, true)) {
-            return false;
-        }
-
-        // Sniffed from the bytes, not from the part's Content-Type: an HTTP
-        // client is free to label an upload `application/octet-stream`, and
-        // refusing a perfectly good selfie for a header nobody reads would
-        // be a worse failure than the one this check exists to prevent.
-        //
-        // This is still only a sniff — it reads a header, not the picture.
-        // Whether the bytes decode into an image at all is SelfieSanitizer's
-        // question, and it is asked again here rather than instead of this.
-        return in_array((string) $file->getMimeType(), self::ALLOWED_MIME_TYPES, true);
-    }
-
-    /**
-     * Path containment. Cheap, and it is the one thing standing between a
-     * corrupted row and `storage/app/private/../../../.env`.
-     */
-    private function isSafe(string $path): bool
-    {
-        if ($path === '' || str_contains($path, '..') || str_starts_with($path, '/')) {
-            return false;
-        }
-
-        return str_starts_with($path, $this->directory().'/');
+        return (int) config('hrms.storage.selfie_max_kilobytes', 5120);
     }
 }

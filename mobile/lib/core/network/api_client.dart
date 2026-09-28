@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -99,23 +101,74 @@ class ApiClient {
   Future<ApiEnvelope> post(String path, {Object? body}) =>
       _send(() => dio.post<dynamic>(path, data: body));
 
-  /// A POST carrying a file — the check-in selfie, and nothing else today.
+  /// A POST carrying files — the check-in selfie, and a batch of site-report
+  /// photographs.
   ///
   /// Written as a separate verb rather than letting `post` guess: `post`
   /// sends JSON, and a `FormData` handed to a JSON endpoint would arrive as
   /// an empty body with a multipart header, which is the kind of failure
-  /// that looks like a server bug for an hour. Fields and the file are
+  /// that looks like a server bug for an hour. Fields and the files are
   /// named explicitly so the caller's payload is readable at the call site.
+  ///
+  /// A value may be one [MultipartFile] or a **list** of them. `FormData`
+  /// turns a list into `photos[0]`, `photos[1]`, … which is exactly the
+  /// shape PHP reads back as one array under one key, so "these six frames
+  /// are one batch with one caption" needs no wrapper object and no request
+  /// per frame.
   Future<ApiEnvelope> postMultipart(
     String path, {
     required Map<String, Object?> fields,
-    Map<String, MultipartFile>? files,
+    Map<String, Object>? files,
   }) {
     final form = <String, Object?>{...fields};
 
     files?.forEach((name, file) => form[name] = file);
 
     return _send(() => dio.post<dynamic>(path, data: FormData.fromMap(form)));
+  }
+
+  /// The body of an endpoint whose body is *not* the envelope.
+  ///
+  /// One caller today: `GET /daily-site-reports/{id}/pdf`, which answers with
+  /// a PDF stream rather than `{success, message, data}`. Deliberately a
+  /// separate method rather than a flag on [get] — every other response in
+  /// this app goes through `_envelopeOf`, and a mode that skipped that check
+  /// for one caller would be a mode that could silently skip it for two.
+  ///
+  /// The request asks for bytes and only bytes: a PDF handed to a JSON
+  /// decoder comes back as a mangled string, and a `content-type` somebody
+  /// guessed wrong must not decide whether the document is readable.
+  Future<Uint8List> bytes(String path) async {
+    try {
+      final response = await dio.get<List<int>>(
+        path,
+        options: Options(responseType: ResponseType.bytes),
+      );
+
+      final body = response.data;
+      if (body == null) throw unexpectedShapeException;
+
+      return Uint8List.fromList(body);
+    } on DioException catch (failure) {
+      // A failure arrives with the same bytes this method was built to read,
+      // so the envelope is still there — just not in the shape
+      // `apiExceptionFrom` expects. Decoding it first is what lets a 403 on
+      // the PDF report *the server's* sentence ("you may not export this
+      // document") instead of a generic "unexpected response", which would
+      // tell the person nothing about what to do next.
+      final body = failure.response?.data;
+
+      if (body is List<int>) {
+        try {
+          failure.response?.data = jsonDecode(utf8.decode(body));
+        } catch (_) {
+          // Not JSON after all — a proxy's HTML error page, say. The
+          // generic wording below is the honest answer for that.
+        }
+      }
+
+      throw apiExceptionFrom(failure);
+    }
   }
 
   Future<ApiEnvelope> put(String path, {Object? body}) =>

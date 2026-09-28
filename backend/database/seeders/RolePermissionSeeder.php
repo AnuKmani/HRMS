@@ -44,6 +44,8 @@ class RolePermissionSeeder extends Seeder
             'shifts.view', 'shifts.manage',
             'assignments.view', 'assignments.manage',
             'reports.view', 'reports.export',
+            'site_activity_reports.view',
+            'daily_site_reports.view', 'daily_site_reports.pdf',
             'documents.view', 'documents.manage',
             'expenses.view',
             'settings.view', 'settings.manage',
@@ -71,6 +73,8 @@ class RolePermissionSeeder extends Seeder
             'shifts.view',
             'assignments.view', 'assignments.manage',
             'reports.view',
+            'site_activity_reports.view',
+            'daily_site_reports.view', 'daily_site_reports.pdf',
             'documents.view', 'documents.manage',
             'settings.view',
         ],
@@ -108,6 +112,9 @@ class RolePermissionSeeder extends Seeder
             'overtime.view', 'overtime.create', 'overtime.approve',
             'assignments.view', 'assignments.manage',
             'reports.view',
+            'site_activity_reports.view', 'site_activity_reports.create', 'site_activity_reports.update',
+            'daily_site_reports.view', 'daily_site_reports.create', 'daily_site_reports.update',
+            'daily_site_reports.manage', 'daily_site_reports.pdf',
             'documents.view',
             'expenses.view', 'expenses.approve',
         ],
@@ -122,6 +129,9 @@ class RolePermissionSeeder extends Seeder
             'timesheets.view',
             'overtime.view', 'overtime.create',
             'reports.view',
+            'site_activity_reports.view', 'site_activity_reports.create', 'site_activity_reports.update',
+            'daily_site_reports.view', 'daily_site_reports.create', 'daily_site_reports.update',
+            'daily_site_reports.pdf',
             'documents.view',
         ],
 
@@ -143,6 +153,9 @@ class RolePermissionSeeder extends Seeder
             'overtime.view', 'overtime.create', 'overtime.approve',
             'assignments.view', 'assignments.manage',
             'reports.view',
+            'site_activity_reports.view', 'site_activity_reports.create', 'site_activity_reports.update',
+            'daily_site_reports.view', 'daily_site_reports.create', 'daily_site_reports.update',
+            'daily_site_reports.pdf',
             'documents.view',
         ],
 
@@ -174,6 +187,8 @@ class RolePermissionSeeder extends Seeder
             'overtime.view', 'overtime.approve',
             'payroll.view',
             'reports.view', 'reports.export',
+            'site_activity_reports.view',
+            'daily_site_reports.view', 'daily_site_reports.pdf',
             'documents.view',
             'expenses.view',
             'audit.view',
@@ -196,6 +211,19 @@ class RolePermissionSeeder extends Seeder
             'leave.balance.view',
             'timesheets.view',
             'overtime.view', 'overtime.create',
+            // The field worker's own reporting door. Creating a *site
+            // activity report is writing your own note about your own site,
+            // so the coarse gate goes to every account expected to stand on
+            // one; Visibility::attachedSiteIds() then narrows "which site?"
+            // to the ones this person is actually assigned to, which is why
+            // an Employee with no assignment is refused rather than offered
+            // a picker of every site in the company. Deliberately NOT
+            // `daily_site_reports.*` — the official site-day record is a
+            // supervisor's artefact, and two official reports for one
+            // site-date is a contradiction.
+            'site_activity_reports.view',
+            'site_activity_reports.create',
+            'site_activity_reports.update',
             'documents.view',
         ],
     ];

@@ -109,6 +109,21 @@ class SettingSeeder extends Seeder
             'description' => 'Organisation-wide default schedule. Sites may point at a different working_hours row instead of copying these values.',
         ],
 
+        // --- reporting --------------------------------------------------
+        [
+            // The heading printed on every server-generated document —
+            // today that is the daily site report PDF, and nothing else.
+            // It lives in settings rather than in config/app.php because a
+            // company name is a business value an operator edits at 4pm
+            // before a tender, not something that should need a deploy.
+            'key' => 'reporting.company_name',
+            'value' => 'HRMS',
+            'type' => 'string',
+            'group' => 'reporting',
+            'label' => 'Company name',
+            'description' => 'Company name printed in the heading of generated reports.',
+        ],
+
         // --- system -----------------------------------------------------
         [
             'key' => 'system.date_format',

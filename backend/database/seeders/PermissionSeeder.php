@@ -121,6 +121,38 @@ class PermissionSeeder extends Seeder
             'reports.view',
             'reports.export',
         ],
+        /*
+        | Site reporting (Phase 7).
+        |
+        | Two modules rather than one, because they answer different
+        | questions. A *site activity report* is a person's note about what
+        | they did at a site today — the person who wrote it owns it, and
+        | `site_activity_reports.create` is held by everyone expected to be
+        | standing on the site. A *daily site report* is the official record
+        | of a site-day: one per site per date, prepared by a supervisor,
+        | read by back-office, and the artefact a PDF is generated from.
+        | Holding `daily_site_reports.create` therefore excludes Employees on
+        | purpose — two "official" reports for the same day is a contradiction
+        | nobody can resolve later, so the door is not offered.
+        |
+        | `daily_site_reports.manage` is approval/override authority (and the
+        | one role that may file a report for a site it does not run);
+        | `daily_site_reports.pdf` is separated from `.view` so a reader can
+        | be given the numbers without being given a document they could
+        | forward.
+        */
+        'site_activity_reports' => [
+            'site_activity_reports.view',
+            'site_activity_reports.create',
+            'site_activity_reports.update',
+        ],
+        'daily_site_reports' => [
+            'daily_site_reports.view',
+            'daily_site_reports.create',
+            'daily_site_reports.update',
+            'daily_site_reports.manage',
+            'daily_site_reports.pdf',
+        ],
         'documents' => [
             'documents.view',
             'documents.manage',

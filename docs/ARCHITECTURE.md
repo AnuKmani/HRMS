@@ -1,9 +1,9 @@
 # Architecture
 
-> **Status:** Phase 4 — RBAC, authentication and the first full business slice
-> (departments, designations, employees, projects, sites, site assignments)
-> are implemented and documented as built. Sections marked ⬜ are planned but
-> not yet built.
+> **Status:** Phase 7 — RBAC, authentication, the business slices through
+> attendance and leave, and now the site vertical slice (activity reports,
+> the official daily report and its on-demand PDF) are implemented and
+> documented as built. Sections marked ⬜ are planned but not yet built.
 
 ---
 
@@ -343,6 +343,39 @@ the rule is now: `app/Policies/{Model}Policy.php`, always, no shorthand.
 refused, and the check sits in the one place every transition passes through
 rather than in six controllers that could each forget it.
 
+**Implemented in Phase 7 ✅** — two more policies, `SiteActivityReportPolicy`
+and `DailySiteReportPolicy`, and a **`App\Support\Visibility`** helper that
+holds the row-scoping so the two policies and the two list queries cannot
+drift apart:
+
+| Route group | Gate |
+|---|---|
+| `GET /site-activity-reports` | `permission:site_activity_reports.view` **then** `siteActivityReportsFor()` |
+| `GET /site-activity-reports/reportable-sites` | `permission:site_activity_reports.view` |
+| `GET /site-activity-reports/{id}` | `permission:…view` **then** `SiteActivityReportPolicy::view` |
+| `POST /site-activity-reports` | `permission:…create` **then** `create` → `mayReportAt(site)` |
+| `PUT /site-activity-reports/{id}`, `.../submit` | `permission:…update` **then** `update`/`submit` |
+| `POST`/`DELETE` `.../photos` | `permission:…update` **then** policy (404 on mismatch, 409 when filed) |
+| `GET /daily-site-reports` | `permission:daily_site_reports.view` **then** `dailySiteReportsFor()` |
+| `GET /daily-site-reports/{id}` | `permission:…view` **then** `DailySiteReportPolicy::view` |
+| `POST /daily-site-reports` | `permission:…create` **then** `create` |
+| `PUT /daily-site-reports/{id}`, `.../submit` | `permission:…update` **then** policy |
+| `GET /daily-site-reports/{id}/pdf` | `permission:daily_site_reports.pdf` **then** `DailySiteReportPolicy::pdf` |
+
+The scoping is coarse where it must be and closed by default where it can
+be: `mayViewOthersSiteActivityReports()` and `mayViewOthersDailySiteReports()`
+**return `false` for `Employee`**, so a permission string alone never decides
+whose rows appear. An Employee sees their own activity reports; a Site
+Supervisor sees the sites they run; a Project Manager sees the sites on the
+projects they manage; HR, Management and Super Admin are gated by the
+permission and nothing else.
+
+The policies also deliberately answer `true` to `update` on a *filed* row.
+The refusal a user actually meets is `409`, raised by
+`assertReportIsEditable()` — "this is filed, and here is why that matters"
+— rather than a `403`, which would say "you are not allowed to edit your own
+report" and be untrue.
+
 **Rule 4 — only the current step may act.**
 
 The chain is materialised into `approval_records` at submit. Approve/reject
@@ -362,8 +395,8 @@ else's, in both the list query and the single-row check.
 | | |
 |---|---|
 | Roles | 10 — Super Admin, HR Admin, HR Executive, Payroll Admin, Project Manager, Site Engineer, Site Supervisor, Finance, Management, Employee |
-| Permissions | **51**, all named `resource.action` (lowercase) |
-| Grants | **236** rows in `role_has_permissions` |
+| Permissions | **59**, all named `resource.action` (lowercase) |
+| Grants | **278** rows in `role_has_permissions` |
 | Seeders | `RoleSeeder` → `PermissionSeeder` → `RolePermissionSeeder` (order matters) |
 
 Permission catalogue lives in one place — `PermissionSeeder::PERMISSIONS`, grouped by
@@ -383,6 +416,8 @@ overtime     overtime.view | .create | .approve | .manage
 payroll      payroll.view | .manage
 projects     projects.view | .manage
 sites        sites.view | .manage
+site_activity_reports site_activity_reports.view | .create | .update
+daily_site_reports    daily_site_reports.view | .create | .update | .manage | .pdf
 shifts       shifts.view | .manage
 assignments  assignments.view | .manage
 reports      reports.view | .export
@@ -406,11 +441,23 @@ joining the `resource.action` shape every other verb follows;
 `PermissionSeeder::RETIRED` deletes it when the seeder re-runs, so an older
 database does not keep a permission nothing references.
 
+Phase 7 added eight in the same shape and one asymmetry worth stating:
+`site_activity_reports.view` **includes** `Employee`, because filing your own
+day is the point of the module, while `daily_site_reports.view` and
+`.pdf` **exclude** `Employee` — the official record about a site-day is
+prepared by the people who run the site. (`daily_site_reports.view`/`.pdf`
+reach seven roles: Super Admin, HR Admin, HR Executive, Project Manager,
+Site Engineer, Site Supervisor and Management; Payroll Admin and Finance
+are out of it as well as `Employee`.) And `.pdf` is a permission of its
+own rather than a rider on `.view`: reading the numbers and being handed a
+document you can forward are different acts, so `DailySiteReportPolicy::pdf()`
+asks for both this and the row-level question.
+
 **Super Admin** holds `['*']` — every permission, resolved from the catalogue at seed
 time rather than hard-coded, so a newly added permission is granted automatically.
 Every other role is an explicit allow-list: anything absent is **denied**. The mapping
 is `RolePermissionSeeder::MAP`, and `RbacTest` asserts both directions (Super Admin has
-all 51; `Employee` is denied `payroll.manage`, `employees.delete`, `attendance.manage`,
+all 59; `Employee` is denied `payroll.manage`, `employees.delete`, `attendance.manage`,
 `leave.approve`, `audit.view`).
 
 `employees.salary.view` — added in Phase 4 — is the one permission that is *not*
@@ -551,7 +598,10 @@ mobile/lib/
 │   ├── leave/                          # ← Phase 6, three-layer
 │   ├── timesheet/                      # ← Phase 6, three-layer
 │   ├── overtime/                       # ← Phase 6, three-layer
-│   └── holidays/                       # ← Phase 6, three-layer
+│   ├── holidays/                       # ← Phase 6, three-layer
+│   └── site_reports/                   # ← Phase 7, three-layer: activity form,
+│                                       #    daily report, PDF download, GPS,
+│                                       #    repeatable rows, local drafts
 └── main.dart
 ```
 
@@ -880,6 +930,54 @@ There are deliberately two vocabularies:
 
 ---
 
+### 5.11 A report's author and its project are derived, never asserted (Phase 7)
+
+Neither report family accepts an author. `employee_id` and `created_by` are
+read from the bearer token in the service, and `project_id` is not trusted
+either: both stores require it *alongside* `site_id`, the request refuses
+any pair whose project does not own the site, and the service writes
+`$site->project_id` anyway. Three layers for one idea — a report is about a
+place somebody is standing, and the place decides the project.
+
+The same reasoning gives status its own verb. There is no `status` key in
+any create or update body; `POST …/submit` is the only transition, and an
+edit to a filed report answers `409` rather than quietly reopening it.
+Making status a writable field would mean the author could un-submit their
+own work by sending a form with the word `draft` in it.
+
+Location follows the pattern. GPS is optional on a draft and required at
+submit — but taken *from the submit request*, never merged from the stored
+row. A reading taken five minutes earlier describes a different moment from
+the one at which the report left the phone, and the field is named for the
+moment of submission.
+
+### 5.12 The PDF is rendered on demand and never stored (Phase 7)
+
+`GET /daily-site-reports/{report}/pdf` builds the document at request time
+with `barryvdh/laravel-dompdf` and streams it, with
+`Cache-Control: no-store` on the response. Nothing is written to disk, no
+`pdf_path` column exists, and no queue job produces one.
+
+The alternative — storing a PDF at submit — was rejected for reasons that
+all reduce to the same one: **a stored document is a second source of
+truth.** It freezes the report at the moment of filing (a correction would
+leave the old PDF answering questions the row no longer supports), it needs
+a lifecycle (when is it deleted? who may see it after a re-submit?) and it
+turns a private file into a URL that must then be protected forever. On
+demand has no second copy to expire, no path to leak, and always renders
+what the row says now.
+
+The cost is that building one takes a moment on each press, which the app
+answers with an explicit "Preparing…" state on a disabled button. `html()`
+and `response()` are separate methods precisely so a test can assert on the
+document's *content* without parsing PDF bytes.
+
+Photographs are embedded as `data:` URIs rather than referenced, capped at
+six, so the file is genuinely self-contained when it reaches a reader — and
+so generating it never has to write an image anywhere.
+
+---
+
 ## 6. Deployment Topology (cloud-ready)
 
 ```
@@ -892,7 +990,8 @@ Laravel REST API      ← behind nginx/Apache, TLS terminated
 Private File Storage  ← encrypted at rest, versioned backups
 
 Side processes:
-  • Queue worker      (LOP conversion today; PDF generation, exports later)
+  • Queue worker      (LOP conversion today; exports later — the report
+                       PDF is rendered on demand, §5.12, and needs no job)
   • Laravel Scheduler (LOP conversion now; document expiry, reminders later)
   • FCM               (push delivery)
   • Backup job
@@ -941,3 +1040,4 @@ The following are explicitly **out of scope** unless later requested:
 | Phase 5 | GPS attendance and site movement — `attendances` + `site_visits` (2 migrations), `GeofenceService`, `WorkingTimeCalculator`, `AttendanceStatusCalculator`, `AttendanceService`, 11 routes, `Attendance`/`SiteVisit` policies, private selfie storage, `attendance` rate limiter, movement timeline; Flutter `features/attendance/` with location + camera permission flows, advisory geofence, offline queue with `client_event_id`, 176 tests |
 | Phase 6 | Leave, timesheets and overtime — 9 migrations (34 tables total), configurable leave types, transactional balances, `LeaveDayCalculator`, holiday calendar, materialised approval workflow engine, sick-certificate upload + hourly deadline job with LOP conversion, derived timesheets, overtime with `payroll_eligible`; 7 policies (with the `<Model>Policy>` naming rule), 11 permissions (51 total / 236 grants), 37 routes; Flutter `features/{leave,timesheet,overtime,holidays}` + shared `StatusChip` / `CameraCaptureSheet` / `NoPermission`, 215 tests |
 | Post-Phase 5 hardening | Server-side selfie sanitisation — `SelfieSanitizer` (GD decode → flatten → JPEG re-encode, EXIF/GPS stripped, original never stored) + `App\Rules\ImageContent` (header decode check + pixel budget); closes §4.3's "EXIF is stripped by the app, not by the server" gap; no new dependency; `AttendanceSelfieSanitizationTest` (13), backend 321 tests |
+| Phase 7 | Site activity reports and daily site reports — 7 migrations (**41 tables total**), `SiteActivityReportService` / `DailySiteReportService` (author and project derived, `draft → submitted` only, one official report per site-day), `StoresPrivateImages`/`ReportPhotoStore` on the fail-closed `SelfieSanitizer`, `DailySiteReportPdf` on demand with dompdf (**§5.12**), 2 policies + `Visibility` row scoping, 8 permissions (**59 total / 278 grants**), 18 routes (104 definitions / 109 registered); Flutter `features/site_reports/` with GPS, repeatable rows, camera photos and local drafts, **303 tests** |

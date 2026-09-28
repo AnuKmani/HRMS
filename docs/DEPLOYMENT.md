@@ -394,20 +394,29 @@ server {
 backend/storage/app/private/
 ├── attendance-selfies/{employeeId}/{uuid}.jpg   Phase 5, re-encoded by GD
 ├── leave-certificates/{employeeId}/{uuid}.pdf   Phase 6, kept exactly as sent
+├── site-report-photos/activity/{reportId}/{uuid}.jpg   Phase 7, re-encoded
+├── site-report-photos/daily/{reportId}/{uuid}.jpg      Phase 7, re-encoded
 ├── documents/employees/     passports, IDs, visas, contracts   ⬜ Phase 9
-├── documents/payroll/       salary slips, certificates         ⬜ Phase 10
-└── reports/                 generated PDFs                     ⬜ Phase 7
+└── documents/payroll/       salary slips, certificates         ⬜ Phase 10
 ```
 
-Never inside the web root. Both live directories are reachable only through
-an authenticated route that runs a policy — `GET /attendance/{id}/selfie`
-and `GET /leave/{id}/certificate` — and both answer `Cache-Control: no-store`.
-No response body ever contains a filesystem path, so there is no URL to leak
-even if a JSON payload is logged somewhere.
+There is **no `reports/` directory and no stored PDF.** The daily site
+report's document is rendered on demand by `GET /daily-site-reports/{id}/pdf`
+and streamed, so nothing to back up, nothing to expire, and no path a
+response could leak.
 
-`selfie_directory` and `certificate_directory` come from `config/hrms.php`
-(`HRMS_SELFIE_DIRECTORY`, `HRMS_CERTIFICATE_DIRECTORY`) — change them there,
-not by moving the folders afterwards.
+Never inside the web root. All three live directories are reachable only
+through an authenticated route that runs a policy — `GET /attendance/{id}/selfie`,
+`GET /leave/{id}/certificate` and
+`GET /daily-site-reports/{id}/photos/{photo}` (plus its activity-report
+twin) — and all answer `Cache-Control: no-store`. No response body ever
+contains a filesystem path, so there is no URL to leak even if a JSON
+payload is logged somewhere.
+
+`selfie_directory`, `certificate_directory` and `report_photo_directory`
+come from `config/hrms.php` (`HRMS_SELFIE_DIRECTORY`,
+`HRMS_CERTIFICATE_DIRECTORY`, `HRMS_REPORT_PHOTO_DIRECTORY`) — change them
+there, not by moving the folders afterwards.
 
 ### 7.2 Backup strategy
 

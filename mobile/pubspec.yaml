@@ -48,6 +48,12 @@ dependencies:
   image: ^4.10.1
   shared_preferences: ^2.5.5
   path_provider: ^2.1.6
+  # Phase 7 — showing the report PDF after the server has rendered it.
+  # Nothing else here opens a file in another app, and nothing else needs
+  # to: `daily_site_reports.pdf` is the only document in this build that a
+  # person downloads, and a PDF rendered on demand deserves to be *read*
+  # rather than saved to a path nobody can open.
+  open_filex: ^4.7.0
 
 dev_dependencies:
   flutter_test:

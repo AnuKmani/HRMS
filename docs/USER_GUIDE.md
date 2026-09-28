@@ -1,7 +1,8 @@
 # User Guide
 
-> **Status:** Phase 6 — sign-in, the organisation screens, GPS attendance with
-> site visits, and now **leave, the holiday calendar, timesheets and overtime**
+> **Status:** Phase 7 — sign-in, the organisation screens, GPS attendance with
+> site visits, **leave, the holiday calendar, timesheets and overtime**, and now
+> **site activity reports and the official daily site report (with its PDF)**
 > exist and are usable. This guide describes the workflows each role will have
 > once the corresponding phase ships. Sections are marked with the phase that
 > delivers them; ✅ means it is in the app today.
@@ -52,10 +53,16 @@ your token immediately.
 
 After signing in you land on **Home**. It draws one tile per module your role may
 open — Employees, Departments, Designations, Projects, Sites (Phase 4),
-Attendance (Phase 5), and since **Phase 6** Leave, Timesheets, Overtime and
-Holidays — and nothing else. A role that cannot open a module is not shown a
-door it would be refused behind. **Holidays is the one tile drawn for
-everyone**: reading the calendar is not a privilege anyone grants you.
+Attendance (Phase 5), Leave, Timesheets, Overtime and Holidays (Phase 6), and
+since **Phase 7** **Site activity** and **Daily site reports** — and nothing
+else. A role that cannot open a module is not shown a door it would be
+refused behind. **Holidays is the one tile drawn for everyone**: reading the
+calendar is not a privilege anyone grants you.
+
+The two report tiles are gated separately on purpose: `Site activity` is
+drawn for anyone who may file their own, while `Daily site reports` is not
+drawn for an Employee at all — the official record about a site-day belongs
+to the people who run the site.
 
 Every module follows the same three screens:
 
@@ -182,17 +189,42 @@ inside the boundary cannot be ended from outside it.
 > when you press one of these buttons, and nothing in between is recorded —
 > there is no trail of where you were at 11:30.
 
-### 3.3 Site activity report ⬜ Phase 7
+### 3.3 Site activity report ✅ Phase 7
 
-Record what was actually done on site:
+Your own account of what happened on a site today. It is yours: only you and
+the people responsible for that site can see it, and nobody has to approve
+it.
 
-- Date, project, site
-- Work category and work performed
-- Progress percentage
-- Materials used, manpower, equipment
-- Issues and safety concerns
-- Photos (multiple)
-- Remarks
+1. Open **Site activity** from the home screen (or **File a site report**)
+2. Tap **File a site report**
+3. Pick the **site** — the project fills in from it, because a site belongs
+   to one project
+4. Set the **date** (today is offered; a future date is refused)
+5. Choose a **work category** and describe **what was done**
+6. Slide **progress** to the completed percentage
+7. Optionally add **manpower**, **materials used** and **equipment used**
+8. Record anything that went wrong under **Issues**, and anything unsafe
+   under **Safety** — these are plain notes, one block each
+9. Add **photos** with the camera (up to 12 for the whole report)
+10. Tap **Take reading** for the location — the phone shows you the accuracy
+    it got before you commit to it
+11. **Save** as a draft, or **Submit** to file it
+
+**Drafts vs filed.** A draft is yours to edit and delete. Once submitted it
+is filed and read-only: editing it afterwards answers *"This report has
+already been filed…"* rather than quietly reopening it. Submitting is the
+only moment the location reading is required, and the reading is taken then
+— a fix saved earlier on the form is not reused, because five minutes is a
+long time on a site.
+
+**Losing your work.** The form keeps a local copy of what you typed while you
+are still creating the report, so leaving and coming back brings it back
+labelled *"Local draft"*. That label is honest: the report has **not** been
+sent to the server yet — **Saved** on the server means the row exists and
+will list for everyone who can see it. Photos are held on the phone until the
+report itself exists, then sent as one batch; if that batch fails, the report
+is kept and the frames are not, and the app says exactly that. Filing this
+report never blocks or delays your attendance.
 
 ### 3.4 Applying for leave ✅ Phase 6
 
@@ -286,30 +318,61 @@ Track status: *Pending → Approved / Rejected*.
 
 ## 4. Site Supervisor
 
-> ✅ Phase 5 (attendance viewing) · ✅ Phase 6 (overtime approval) · ⬜ Phase 7–8 (site reports)
+> ✅ Phase 5 (attendance viewing) · ✅ Phase 6 (overtime approval) · ✅ Phase 7 (site reports & the official daily report)
 
 | Capability | Detail |
 |---|---|
-| **Daily site report** | Workforce categories, total manpower, work planned/completed, materials, equipment, safety observations, delays, issues, photos, remarks |
-| **Approve site activity reports** | Review reports from your team |
+| **File your own site activity reports** ✅ | What you did on a site today — free text, progress %, photos, GPS at submit |
+| **Read the activity reports for the sites you run** ✅ | Your team's, not the company's. A person's own report is always visible to its author |
+| **Daily site report** ✅ | Workforce categories, total manpower, work planned/completed, materials, equipment, safety observations, delays, issues, photos, remarks — **one official report per site per day** |
+| **Approve site activity reports** | ⬜ Not built: Phase 7 files and stops; there is no approve step yet |
 | **Approve overtime** ✅ | First step in the overtime approval chain — only while your report has it waiting, never your own claim |
 | **Read your team's timesheets** ✅ | Working days and hours for the people and sites you run. There is no timesheet to approve: the row is derived from attendance |
 | **Approve leave** ✅ | If the standard chain names you as the supervisor step |
 | **View your site's attendance** ✅ | Who was on site, and when — restricted to the sites you run. You also see visits to your sites, and you cannot read a day recorded anywhere else |
 
-**Daily Site Report** can be exported as **PDF**.
+**Filing the official daily site report ✅:**
+
+1. Open **Daily site reports** from the home screen
+2. Tap **Prepare today's report**
+3. Pick the site and the date. If somebody has already filed that site-day,
+   the date field says so and will not accept the same pair again —
+   *one official document per site per day*
+4. Add **workforce categories** as rows: name the category the way this site
+   does (`Carpenters`, `Electricians`, `Helpers` …) and its count. The
+   **total is worked out from the rows** — you do not type it
+5. Describe what was **planned** and what was **completed**
+6. Add **materials used** and **equipment on site** as rows — name,
+   quantity, unit; operating hours and condition for plant. These are facts
+   about today's work, not an inventory and not an asset register
+7. Note **safety observations**, **delays** and **issues**, plus remarks
+8. Attach **photos** (up to 12), then **Save** (draft) or **Submit**
+
+**Exporting to PDF ✅.** Open the report and tap **Download PDF**. The
+document is prepared by the server from the row as it stands *now* —
+heading with your company name, project, site, date, prepared-by, the
+workforce summary, work planned/completed, materials, equipment, safety,
+delays, issues, remarks, the photographs and a timestamp with a reference
+number. While it is being prepared the button says *Preparing…* and is
+disabled so it cannot be tapped twice. Nothing is stored as a file, so
+there is no link to share: the document comes through you, and only while
+you are signed in with `daily_site_reports.pdf`.
 
 ---
 
 ## 5. Site Engineer
 
-> ✅ Phase 6 (own leave, balances, timesheets, overtime) · ⬜ Phase 7 (site reports)
+> ✅ Phase 6 (own leave, balances, timesheets, overtime) · ✅ Phase 7 (site reports)
 
 Similar to Site Supervisor, focused on technical reporting:
 
-- Submit site activity reports with progress percentages
-- Record materials, manpower and equipment
-- Flag issues and safety concerns
+- File site activity reports with progress percentages ✅ — for the sites
+  you are assigned to, with photos and a location reading at submit
+- Record materials, manpower and equipment ✅ (free text on your own
+  activity report; rows on the official daily report)
+- Flag issues and safety concerns ✅
+- Read and prepare the **official daily site report** for the sites you run,
+  and download it as PDF ✅
 - View site assignments for your project
 - Apply for leave and watch it move through the chain ✅
 - See your own working days and claim overtime ✅ — but **not** approve
@@ -337,6 +400,10 @@ Similar to Site Supervisor, focused on technical reporting:
 - **Attendance on the projects you manage** — every day recorded on your
   projects and their sites, with the GPS distance and the photograph where
   one was taken. A project's own days and nobody else's
+- **Site reports across your projects** ✅ — every activity report and every
+  official daily report filed on a site belonging to a project you manage,
+  with the photographs and the PDF export. `daily_site_reports.manage` is
+  yours alone among the business roles
 
 > Scope is limited to projects assigned to you — the server narrows your list,
 > so you are not shown projects you do not run. Asking for a colleague's
@@ -521,6 +588,23 @@ no into a yes.
 > does not become acceptable by being sent later. Retrying sends the *same*
 > event id, so a lost reply can never become a second attendance record.
 
+**Reports are a different story, and deliberately so.**
+
+A report is not queued. While you are *creating* one, the form keeps a local
+copy so a tap on Back or a crash does not lose what you typed — that copy is
+labelled **Local draft** and means "on this phone only". Pressing **Save**
+sends it to the server, and only then does it appear in the list for
+everybody. If you are offline when you press Save, the save fails and says
+so; the local draft stays for you to retry later.
+
+The photographs ride the same way: they are held on the phone until the
+report itself has been created, then sent as one batch. If that batch
+fails, the report is already on the server and the frames are not — the
+app tells you which is which.
+
+Filing a report never enters the attendance sync queue, and the queue never
+sends a report. The two flows do not touch.
+
 ---
 
 ## 15. Permissions — what you will and will not see
@@ -529,10 +613,14 @@ The menu you see is built from your role's permissions. For example:
 
 | Role | Sees |
 |---|---|
-| Employee | Own attendance, own leave requests and balances, own timesheets, own overtime claims, the holiday calendar |
-| Site Supervisor | Plus their site's team, reports, overtime approval (their step), leave approval (their step) |
-| Project Manager | Plus projects, sites, workforce, overtime approvals, leave approvals |
+| Employee | Own attendance, own leave requests and balances, own timesheets, own overtime claims, the holiday calendar, **and their own site activity reports**. The official daily report and its PDF are **not** in an Employee's app |
+| Site Supervisor | Plus their site's team, reports, the official daily report and its PDF for the sites they run, overtime approval (their step), leave approval (their step) |
+| Site Engineer | Plus site activity reports and the official daily report for their sites — prepare, edit, submit, export |
+| Project Manager | Plus projects, sites, workforce, overtime approvals, leave approvals, and every report on the projects they manage (`daily_site_reports.manage`) |
 | HR | Plus all employees, attendance, leave, balances, holiday calendar editing, workflow configuration |
+| Payroll Admin / Finance | Organisation-wide for their own modules; **no** official daily report — it is about a site-day, not about money |
+| Management | Read-only across the reports and the PDF export |
+| Super Admin | Everything |
 | Payroll | Plus payroll runs, payslips, loans — and every **approved** overtime claim |
 | Finance | Plus expenses, loan deductions |
 | Management | Dashboards and reports |
@@ -575,6 +663,14 @@ permission — contact your administrator.
 | "That certificate is too large." | Keep the scan under the configured limit (5 MB by default) |
 | Leave shows **LOP** | The certificate deadline passed. The conversion is server-side and final for that request — apply again or ask HR |
 | An approve button you cannot press | You are not the step the chain is waiting on, or it is your own request. Nobody approves their own |
+| "A location reading is needed before this can be submitted." | Tap **Take reading** on the form, wait for the accuracy to settle, then submit again. A reading saved earlier on the form is deliberately not reused |
+| "This report has already been filed and can no longer be edited." | Submitting is final. If the row is wrong, tell the person who manages the site — there is no un-submit, and there is no approve step yet either |
+| "Another official report already exists for this site on this date." | Somebody has already filed that site-day. Open it from the list — one official report per site per day |
+| "A report for that project and site does not match." | The site was picked from a project it does not belong to. Re-pick the site and the project follows |
+| A photograph fails to upload | The report itself is saved. The app says which of the two happened; the frames are held on the phone so you can try the upload again |
+| "Preparing…" never finishes | The server is slow or unreachable. The button stays disabled while it works so a second tap cannot start a second document; leave the screen if it will not finish |
+| "You are not allowed to export this report." | Your role holds no `daily_site_reports.pdf`. Viewing the report and exporting it are separate permissions |
+| A draft labelled **Local draft** | It is on this phone only and has not been sent. **Save** sends it; **Start over** throws it away |
 
 ---
 
@@ -588,7 +684,8 @@ permission — contact your administrator.
 | Attendance + geofence + selfie | 5 | ✅ |
 | Offline sync | 5 | ✅ (manual **Sync now**; automatic background sync not built) |
 | Site visits & daily movement timeline | 5 | ✅ |
-| Site activity reports & PDF export | 7 | ⬜ |
+| **Site activity reports (own + your sites)** | **7** | ✅ |
+| **Official daily site report + on-demand PDF** | **7** | ✅ |
 | Shifts | 8 | ⬜ |
 | **Leave, balances & sick-cert → LOP** | **6** | ✅ |
 | **Timesheets & overtime** | **6** | ✅ |

@@ -49,7 +49,7 @@ class HolidayController extends Controller
         $query = Holiday::query()->with('site');
 
         if (! $user->can('holidays.manage')) {
-            $siteIds = Visibility::holidaySiteIds($user);
+            $siteIds = Visibility::attachedSiteIds($user);
 
             $query->where(function ($q) use ($siteIds) {
                 $q->whereIn('type', [Holiday::TYPE_PUBLIC, Holiday::TYPE_COMPANY]);

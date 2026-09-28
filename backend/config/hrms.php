@@ -178,6 +178,28 @@ return [
         'certificate_directory' => (string) env('HRMS_CERTIFICATE_DIRECTORY', 'leave-certificates'),
 
         'certificate_max_kilobytes' => (int) env('HRMS_CERTIFICATE_MAX_KB', 5120),
+
+        /*
+        | Photographs on site reports (Phase 7).
+        |
+        | Identical in kind to a selfie — private disk, no public URL,
+        | server-minted filename, re-encoded by SelfieSanitizer so EXIF and
+        | GPS are discarded — and served only through the report's own
+        | policy-checked photo route with `no-store`.
+        |
+        | A directory and a size ceiling of its own rather than reusing the
+        | selfie ones: they are separate rows in an operator's mental model
+        | (an attendance photo is about a person, a report photo is about a
+        | building), and being able to retune one without touching the other
+        | is worth two lines of config. The decode budget and the JPEG
+        | quality are NOT repeated here — those are properties of
+        | SelfieSanitizer, which reads `selfie_max_pixels` and
+        | `selfie_jpeg_quality` for every image it processes, reports
+        | included.
+        */
+        'report_photo_directory' => (string) env('HRMS_REPORT_PHOTO_DIRECTORY', 'site-report-photos'),
+
+        'report_photo_max_kilobytes' => (int) env('HRMS_REPORT_PHOTO_MAX_KB', 5120),
     ],
 
     /*
