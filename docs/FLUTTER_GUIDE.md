@@ -1,11 +1,12 @@
 # Flutter Guide
 
-> **Status:** Phase 7 — the organisation, auth and attendance slices plus
-> `leave/`, `holidays/`, `timesheet/` and `overtime/`, and now
-> `features/site_reports/` (activity form, official daily report, repeatable
-> rows, GPS, camera photographs, local drafts and the PDF download), all in
-> the same `data / domain / presentation` shape. `dart format .` clean,
-> `flutter analyze` clean, `flutter test` **303 passed**. This guide explains
+> **Status:** Phase 8 — the organisation, auth and attendance slices plus
+> `leave/`, `holidays/`, `timesheet/`, `overtime/`, `site_reports/` and now
+> **`payroll/`, `loans/` and `salary_certificates/`** (the ledger, the run
+> report and its ladder, salary slips handed to the OS viewer, a loan
+> schedule, and a certificate that is asked for, decided and exported), all
+> in the same `data / domain / presentation` shape. `dart format .` clean,
+> `flutter analyze` clean, `flutter test` **377 passed**. This guide explains
 > the concepts and patterns the app uses, written for someone who knows
 > PHP/Laravel but is new to Flutter/Dart. Sections that were written as a plan
 > in earlier phases — the offline queue, the location and camera permission
@@ -508,6 +509,33 @@ GoRouter and Laravel both match in declaration order, and the bug on either
 side is "your new page 404s", which is easy to misread as a permission
 problem.
 
+**Phase 7 route table (8 routes):**
+
+| Path | Screen | Notes |
+|---|---|---|
+| `/site-reports` · `/site-reports/new` | list · form | the form owns a GPS fix and up to six camera photographs |
+| `/site-reports/:id` · `/site-reports/:id/edit` | detail · form | |
+| `/daily-reports` · `/daily-reports/new` | list · form | repeatable manpower / materials / equipment rows |
+| `/daily-reports/:id` · `/daily-reports/:id/edit` | detail · form | |
+
+**Phase 8 route table (10 routes):**
+
+| Path | Screen | Notes |
+|---|---|---|
+| `/payroll` | list | **two doors on one path**: `payroll.view` draws the ledger, `payroll.summary.view` *alone* draws the totals card and **never builds the rows provider** |
+| `/payroll/:id` | detail | the itemised slip plus exactly one ladder step (review / finalize / lock), each behind its own grant |
+| `/salary-slips` | list | its own feature, its own permission — it reads `/salary-slips` and never the ledger |
+| `/loans` · `/loans/new` | list · form | the form never asks for an employee id; it defaults to you |
+| `/loans/:id` · `/loans/:id/edit` | detail · form | detail carries the schedule, submit / cancel while a draft, and decide only for `loans.approve` |
+| `/salary-certificates` · `/salary-certificates/new` | list · form | only `purpose` and `request_date` in the body |
+| `/salary-certificates/:id` | detail | approve / reject / issue / export, decided by `can_issue` from the server rather than re-derived from `status` |
+
+There is **no `/payroll/:id/edit`** and no delete route for anything in this
+family: a row moves one way along the ladder and a correction is a new entry
+with its own sign, so the routes that would have offered an edit simply do
+not exist. GoRouter will 404 them the same way Laravel 404s an unregistered
+path — the absence *is* the rule.
+
 **Screens navigate with `context.go(...)`, not `context.pop()`.** After a
 save, a detail screen must re-run `initState` to fetch what was just written;
 `pop()` would return to a stale detail still holding the pre-edit model.
@@ -746,6 +774,27 @@ person typed; and `errorText` renders only **after the first save attempt**
 (`_rowsValidated`), so an untouched form does not scold you for a row you
 have not reached yet.
 
+### 11.4 Three things the money screens add (Phase 8 ✅)
+
+| Seam / rule | Where | Why it is one |
+|---|---|---|
+| `PdfOpener` | `core/presentation/pdf_opener.dart` → `pdfOpenerProvider` | Phase 8 needed "write these bytes somewhere private and hand them to the OS" twice — a payslip and a certificate — and Phase 7's `ReportPdfOpener` already had exactly those three lines. **The file handling was lifted out of the feature and the report opener now delegates to it** (`DeviceReportPdfOpener` takes a `PdfOpener?`), because two implementations of "where does the temp file go" is how you find out they disagree. `openBytes(Uint8List, String)` takes *bytes*, never an id or a URL: the document is rendered for this press and there is nothing to fetch twice |
+| `Money` / `MoneyText` | `core/presentation/money.dart` | The only thing in the app allowed to turn a figure into text. It parses the server's decimal **string** into an integer of minor units and never holds a `double`, so the screen, the list column and the PDF agree to the cent — and a screen that hand-writes `"₹ 30,000"` will be wrong the first time `system.currency` changes |
+| **A totals-only session never creates a list provider** | `PayrollListController.initialQuery` → `currentPayrollQuery()` | `PagedListController.build()` opens with `Future.microtask(reload)`, so merely *watching* a list provider issues a request. A Management session holding `payroll.summary.view` must be shown totals without being sent a ledger it is not allowed to read — the card builds its own provider, and **the rows provider is never constructed**, which is stronger than a permission check because no request exists to be refused. `payroll_list_screen_test` asserts `listCalls == 0` |
+
+**One ladder, drawn from the server's answer.** `/payroll/:id` offers
+review, finalize or lock — never two of them — because the button is chosen
+from `PayrollResource.next_action`, and `lock` additionally requires
+`can_lock`. The screen does not re-derive state from a status string: a
+client that guessed the next step would eventually guess a step the server
+has frozen, and the error it got back would read as a bug rather than as the
+rule.
+
+**SnackBars queue.** A run shows *Running payroll…* first and the report
+second, so the report is behind a four-second banner. `pumpAndSettle` stops
+the moment nothing animates and never reaches it — pump a fixed loop of
+100 ms steps instead (§5.3 of TESTING).
+
 ---
 
 ## 12. Project structure
@@ -771,6 +820,8 @@ mobile/lib/
 │   │   ├── remote_picker.dart             # debounced searchable option sheet
 │   │   ├── status_chip.dart               # ← Phase 6: StatusChip + StatusTone, every module
 │   │   ├── no_permission.dart             # ← Phase 6: the lock a list draws instead of fetching
+│   │   ├── money.dart                     # ← Phase 8: Money + MoneyText, the only formatter
+│   │   ├── pdf_opener.dart                # ← Phase 8: bytes → private temp file → the OS
 │   │   └── camera_capture_sheet.dart      # ← Phase 6: shared capture → preview → retake flow
 │   ├── data/approval_step.dart            # ← Phase 6: one link of an approval chain
 │   ├── router/app_router.dart          # GoRouter + refreshListenable guard
@@ -788,11 +839,11 @@ mobile/lib/
 │   │   └── splash_screen.dart
 │   ├── home/home_screen.dart           # permission-gated module tiles
 │   │
-│   │   └── each of the ten below has the same three layers:
+│   │   └── each of the fourteen below has the same three layers:
 │   ├── employees/   ├── departments/   ├── designations/
 │   ├── projects/    ├── sites/         ├── attendance/
 │   ├── leave/       ├── timesheet/     ├── overtime/      ├── holidays/
-│   ├── site_reports/
+│   ├── site_reports/ ├── payroll/      ├── loans/         ├── salary_certificates/
 │   │
 │   └── <feature>/
 │       ├── data/
@@ -934,6 +985,10 @@ flutter build appbundle         # build an AAB for Play Store
 | Put the pending photographs into the draft snapshot | Keep them in memory for the session: `SharedPreferences` is not a place for twelve megabytes, and the draft's job is the *words* |
 | Assert `find.text('0 rows')` on a screen with three repeatable sections | Look the row up by key (`manpower-count`) — every section renders the same phrase, so a text match counts the neighbours too |
 | `pumpAndSettle` over a screen holding a spinner | Drive it with `advance(tester)` (six × 100 ms). `pumpAndSettle` advances 100 ms per iteration and never stops while a `CircularProgressIndicator` runs |
+| Print a salary with `double.toStringAsFixed(2)` | Format it with `Money.format()` / `MoneyText`. The API sends a decimal **string**; turning it into a `double` re-rounds a figure the server already settled, and two screens will then disagree about one payslip by a cent |
+| Watch a list provider to render a totals card | Give the card its own provider from `currentPayrollQuery()`. `PagedListController.build()` schedules a reload the moment it is built, so the "read-only summary" would have requested a ledger — and no permission check can refuse a request that was never made |
+| Guess the next payroll step from `status` | Read `next_action`, and `can_lock` for the lock. The ladder is the server's answer; a client that guesses will eventually guess a step the row has frozen, and the `409` it gets back will look like a bug instead of the rule |
+| `pumpAndSettle` to reach the second SnackBar | Pump a fixed loop of 100 ms steps — banners queue, and the first one's four seconds are not animation, so nothing tells `pumpAndSettle` to keep going |
 
 ---
 
@@ -977,8 +1032,16 @@ flutter build appbundle         # build an AAB for Play Store
 | `reportable-sites` picker — the site list for a role that holds no `sites.view` | ✅ Phase 7 |
 | Router: **23 routes** (Phase 7 added 8) · home tiles gated on the two report permissions | ✅ Phase 7 |
 | Camera-only capture for report photographs (gallery deferred — `image_picker` deliberately not added) | ✅ Phase 7 |
+| `features/payroll/` — repository · model · `PagedListController` + a period window · ledger list · detail with one ladder step · salary-slip list | ✅ Phase 8 |
+| `features/loans/` — repository · model · schedule · list · form (no employee-id field) · detail with submit / cancel / decide | ✅ Phase 8 |
+| `features/salary_certificates/` — repository · model · list · form (`purpose`, `request_date` only) · detail with approve / reject / issue / export | ✅ Phase 8 |
+| `core/presentation/money.dart` — `Money` + `MoneyText`, minor units from a decimal string, half away from zero, no `double`, **`intl` still deliberately not added** | ✅ Phase 8 |
+| `core/presentation/pdf_opener.dart` — `PdfOpener` / `DevicePdfOpener` / `safePdfFilename`, lifted out of the report feature so the file handling exists once | ✅ Phase 8 |
+| Totals-only session never builds a list provider (`currentPayrollQuery()`) | ✅ Phase 8 |
+| Home tiles for the four money doors, each gated on its own permission | ✅ Phase 8 |
+| Router: **33 routes** (Phase 8 added 10 — `/payroll`, `/payroll/:id`, `/salary-slips`, four loan paths, three certificate paths) · no edit or delete path exists for a payroll row | ✅ Phase 8 |
 | `dart format .` | ✅ clean (8 files reflowed in Phase 7) |
 | `flutter analyze` | ✅ clean |
-| `flutter test` | ✅ **303 passed** (215 before Phase 7, +88 in `test/features/site_reports/`) |
+| `flutter test` | ✅ **377 passed** (303 before Phase 8, +74 in `test/features/{payroll,loans,salary_certificates}/` + `money_test` + the route and home tests) |
 | Local database (Drift) + relational offline cache | ⬜ Not started — Phase 5 proved the queue does not need it (§10); revisit when a module is genuinely relational |
 | Shared widgets under `core/widgets/` | ⬜ The list and form widgets live in `core/presentation/` today; the split is worth it once a second, differently-shaped widget set appears |

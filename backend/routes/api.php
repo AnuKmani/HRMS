@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\V1\AllowanceController;
 use App\Http\Controllers\Api\V1\ApprovalWorkflowController;
 use App\Http\Controllers\Api\V1\AttendanceController;
 use App\Http\Controllers\Api\V1\AuthController;
@@ -12,11 +13,16 @@ use App\Http\Controllers\Api\V1\HolidayController;
 use App\Http\Controllers\Api\V1\LeaveBalanceController;
 use App\Http\Controllers\Api\V1\LeaveRequestController;
 use App\Http\Controllers\Api\V1\LeaveTypeController;
+use App\Http\Controllers\Api\V1\LoanController;
 use App\Http\Controllers\Api\V1\MovementController;
 use App\Http\Controllers\Api\V1\OvertimeController;
 use App\Http\Controllers\Api\V1\PasswordResetController;
+use App\Http\Controllers\Api\V1\PayrollAdjustmentController;
+use App\Http\Controllers\Api\V1\PayrollController;
 use App\Http\Controllers\Api\V1\ProjectController;
 use App\Http\Controllers\Api\V1\RoleController;
+use App\Http\Controllers\Api\V1\SalaryCertificateRequestController;
+use App\Http\Controllers\Api\V1\SalarySlipController;
 use App\Http\Controllers\Api\V1\SiteActivityReportController;
 use App\Http\Controllers\Api\V1\SiteController;
 use App\Http\Controllers\Api\V1\SiteVisitController;
@@ -458,5 +464,187 @@ Route::prefix('v1')->group(function () {
 
         Route::post('daily-site-reports', [DailySiteReportController::class, 'store'])
             ->middleware('permission:daily_site_reports.create');
+
+        /* --------------------------------------- Phase 8: payroll, loans... */
+
+        // Four coarse gates, one per thing a person might actually be
+        // granted, and the row-level answer always comes from the policy
+        // rather than from the middleware:
+        //
+        //   `payroll.view`             the payroll module - and, on its own,
+        //                              narrowed to your own row.
+        //   `payroll.process`          run a month, re-run one row.
+        //   `payroll.manage`           correct the inputs, review, finalize.
+        //   `payroll.lock`             the one irreversible button.
+        //   `payroll.summary.view`     company totals with no rows behind
+        //                              them - deliberately NOT a branch of
+        //                              `payroll.view`, because a role that
+        //                              may see the totals and a role that
+        //                              may see the list are two roles.
+        //
+        // `salary_slips.*`, `salary_certificates.*` and `loans.*` are
+        // separate families rather than sub-grants of payroll, so an
+        // Employee can hold the documents without holding the ledger and a
+        // Payroll Admin can hold the ledger without holding certificates.
+
+        // --- payroll ----------------------------------------------------
+        // `/summary` is registered before `/{payroll}`. It is also
+        // `whereNumber` on the dynamic half, so a literal could not be
+        // swallowed by it either way round - the same belt-and-braces as
+        // Phase 7, and for the same reason: a mis-bound route sends a
+        // request to the wrong controller instead of 404-ing.
+        Route::get('payroll', [PayrollController::class, 'index'])
+            ->middleware('permission:payroll.view');
+
+        Route::get('payroll/summary', [PayrollController::class, 'summary'])
+            ->middleware('permission:payroll.summary.view');
+
+        Route::post('payroll/process', [PayrollController::class, 'process'])
+            ->middleware('permission:payroll.process');
+
+        Route::post('payroll/{payroll}/recalculate', [PayrollController::class, 'recalculate'])
+            ->whereNumber('payroll')
+            ->middleware('permission:payroll.process');
+
+        Route::post('payroll/{payroll}/review', [PayrollController::class, 'review'])
+            ->whereNumber('payroll')
+            ->middleware('permission:payroll.manage');
+
+        Route::post('payroll/{payroll}/finalize', [PayrollController::class, 'finalize'])
+            ->whereNumber('payroll')
+            ->middleware('permission:payroll.manage');
+
+        Route::post('payroll/{payroll}/lock', [PayrollController::class, 'lock'])
+            ->whereNumber('payroll')
+            ->middleware('permission:payroll.lock');
+
+        Route::get('payroll/{payroll}', [PayrollController::class, 'show'])
+            ->whereNumber('payroll')
+            ->middleware('permission:payroll.view');
+
+        // --- salary slips -----------------------------------------------
+        // `salary_slips.view` on both, not `payroll.view` - the pair exists
+        // so a role can be given payslips without being given the payroll
+        // module, and collapsing them would make one of the two grants
+        // meaningless.
+        Route::get('salary-slips', [SalarySlipController::class, 'index'])
+            ->middleware('permission:salary_slips.view');
+
+        Route::get('salary-slips/{payroll}/pdf', [SalarySlipController::class, 'pdf'])
+            ->whereNumber('payroll')
+            ->middleware('permission:salary_slips.view');
+
+        // --- allowances --------------------------------------------------
+        // `payroll.view` to read (narrowed to your own rows), `payroll.manage`
+        // for every write - including your own.
+        Route::get('allowances', [AllowanceController::class, 'index'])
+            ->middleware('permission:payroll.view');
+
+        Route::post('allowances', [AllowanceController::class, 'store'])
+            ->middleware('permission:payroll.manage');
+
+        Route::put('allowances/{allowance}', [AllowanceController::class, 'update'])
+            ->whereNumber('allowance')
+            ->middleware('permission:payroll.manage');
+
+        Route::delete('allowances/{allowance}', [AllowanceController::class, 'destroy'])
+            ->whereNumber('allowance')
+            ->middleware('permission:payroll.manage');
+
+        // --- payroll adjustments (bonuses, other deductions) -------------
+        // Reads narrow to your own rows unless `payroll.manage`; every write
+        // needs `payroll.manage`, including for the employee the adjustment
+        // is about.
+        Route::get('payroll-adjustments', [PayrollAdjustmentController::class, 'index'])
+            ->middleware('permission:payroll.view');
+
+        Route::post('payroll-adjustments', [PayrollAdjustmentController::class, 'store'])
+            ->middleware('permission:payroll.manage');
+
+        Route::post('payroll-adjustments/{adjustment}/approve', [PayrollAdjustmentController::class, 'approve'])
+            ->whereNumber('adjustment')
+            ->middleware('permission:payroll.manage');
+
+        Route::post('payroll-adjustments/{adjustment}/reject', [PayrollAdjustmentController::class, 'reject'])
+            ->whereNumber('adjustment')
+            ->middleware('permission:payroll.manage');
+
+        Route::post('payroll-adjustments/{adjustment}/cancel', [PayrollAdjustmentController::class, 'cancel'])
+            ->whereNumber('adjustment')
+            ->middleware('permission:payroll.manage');
+
+        Route::put('payroll-adjustments/{adjustment}', [PayrollAdjustmentController::class, 'update'])
+            ->whereNumber('adjustment')
+            ->middleware('permission:payroll.manage');
+
+        Route::get('payroll-adjustments/{adjustment}', [PayrollAdjustmentController::class, 'show'])
+            ->whereNumber('adjustment')
+            ->middleware('permission:payroll.view');
+
+        // --- loans and salary advances -----------------------------------
+        // Sub-routes first, `{loan}` second, and `{loan}` is `whereNumber` -
+        // the Phase 7 ordering rule, repeated because a `POST /loans/approve`
+        // that bound `approve` as a loan id would 404 into a 409 instead of
+        // reaching the handler.
+        Route::get('loans', [LoanController::class, 'index'])
+            ->middleware('permission:loans.view');
+
+        Route::post('loans', [LoanController::class, 'store'])
+            ->middleware('permission:loans.create');
+
+        Route::post('loans/{loan}/submit', [LoanController::class, 'submit'])
+            ->whereNumber('loan')
+            ->middleware('permission:loans.create');
+
+        Route::post('loans/{loan}/approve', [LoanController::class, 'approve'])
+            ->whereNumber('loan')
+            ->middleware('permission:loans.approve');
+
+        Route::post('loans/{loan}/reject', [LoanController::class, 'reject'])
+            ->whereNumber('loan')
+            ->middleware('permission:loans.approve');
+
+        Route::post('loans/{loan}/cancel', [LoanController::class, 'cancel'])
+            ->whereNumber('loan')
+            ->middleware('permission:loans.view');
+
+        Route::get('loans/{loan}', [LoanController::class, 'show'])
+            ->whereNumber('loan')
+            ->middleware('permission:loans.view');
+
+        Route::put('loans/{loan}', [LoanController::class, 'update'])
+            ->whereNumber('loan')
+            ->middleware('permission:loans.view');
+
+        // --- salary certificate requests ---------------------------------
+        // `salary_certificates.view` is enough to *ask*, because an employee
+        // cannot be granted a permission to request a document about their
+        // own salary that they are then refused for exercising. `manage` is
+        // what decides.
+        Route::get('salary-certificate-requests', [SalaryCertificateRequestController::class, 'index'])
+            ->middleware('permission:salary_certificates.view');
+
+        Route::post('salary-certificate-requests', [SalaryCertificateRequestController::class, 'store'])
+            ->middleware('permission:salary_certificates.view');
+
+        Route::post('salary-certificate-requests/{salaryCertificateRequest}/approve', [SalaryCertificateRequestController::class, 'approve'])
+            ->whereNumber('salaryCertificateRequest')
+            ->middleware('permission:salary_certificates.manage');
+
+        Route::post('salary-certificate-requests/{salaryCertificateRequest}/reject', [SalaryCertificateRequestController::class, 'reject'])
+            ->whereNumber('salaryCertificateRequest')
+            ->middleware('permission:salary_certificates.manage');
+
+        Route::post('salary-certificate-requests/{salaryCertificateRequest}/cancel', [SalaryCertificateRequestController::class, 'cancel'])
+            ->whereNumber('salaryCertificateRequest')
+            ->middleware('permission:salary_certificates.view');
+
+        Route::get('salary-certificate-requests/{salaryCertificateRequest}/pdf', [SalaryCertificateRequestController::class, 'pdf'])
+            ->whereNumber('salaryCertificateRequest')
+            ->middleware('permission:salary_certificates.view');
+
+        Route::get('salary-certificate-requests/{salaryCertificateRequest}', [SalaryCertificateRequestController::class, 'show'])
+            ->whereNumber('salaryCertificateRequest')
+            ->middleware('permission:salary_certificates.view');
     });
 });

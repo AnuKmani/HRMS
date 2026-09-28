@@ -163,6 +163,71 @@ class PermissionScope {
 
   bool get canWriteSiteReports =>
       canCreateSiteActivityReports || canCreateDailySiteReports;
+
+  /* ---------------------------------------------------------- payroll */
+
+  /// The payroll module's own coarse gate.
+  ///
+  /// Holding it does **not** mean "everybody's payroll": `Visibility` narrows
+  /// the rows to your own unless you also hold `payroll.manage` or
+  /// `employees.salary.view`, so an Employee and a Payroll Admin can both
+  /// hold this and see two completely different lists. The seeders grant it
+  /// to the roles the spec names and to nobody else — Project Manager and
+  /// Site Supervisor deliberately have no `payroll.*` at all.
+  bool get canViewPayroll => can('payroll.view');
+
+  /// Correcting the inputs, reviewing and finalising. Never the lock.
+  bool get canManagePayroll => can('payroll.manage');
+
+  /// Running a month, or re-running one row. Separate from `manage` because
+  /// "may fix a figure" and "may restate a whole period" are different
+  /// acts with different blast radii.
+  bool get canProcessPayroll => can('payroll.process');
+
+  /// The one irreversible button in the module — Payroll Admin and Super
+  /// Admin only, and never implied by either grant above.
+  bool get canLockPayroll => can('payroll.lock');
+
+  /// Company totals with no rows behind them. Deliberately **not** a branch
+  /// of [canViewPayroll]: a role that may read the totals and a role that may
+  /// read the list are two roles, and merging them would hand Management the
+  /// building's salaries along with the sum.
+  bool get canViewPayrollSummary => can('payroll.summary.view');
+
+  bool get canRunPayroll => canProcessPayroll;
+
+  /* ------------------------------------------------------ salary slips */
+
+  /// Reading a payslip. Every role that has any payroll visibility holds
+  /// this, plus `salary_slips.manage` where an analyst needs to pull
+  /// somebody else's document rather than only their own.
+  bool get canViewSalarySlips => can('salary_slips.view');
+
+  bool get canManageSalarySlips => can('salary_slips.manage');
+
+  /* ----------------------------------------------- salary certificates */
+
+  /// Enough to *ask* for a certificate about your own salary and to read the
+  /// decision on it. Approving is `.manage`, and asking for somebody else's
+  /// is `.manage` too — see `StoreSalaryCertificateRequest`.
+  bool get canViewSalaryCertificates => can('salary_certificates.view');
+
+  bool get canManageSalaryCertificates => can('salary_certificates.manage');
+
+  /* ------------------------------------------------------------- loans */
+
+  bool get canViewLoans => can('loans.view');
+
+  /// Asking for one **for yourself**. A loan on somebody else's behalf needs
+  /// [canManageLoans], and the server says so on the field.
+  bool get canCreateLoans => can('loans.create');
+
+  /// Answering somebody else's request. Never implied by
+  /// [canCreateLoans] — nobody signs off on their own debt, and the seeders
+  /// give the two grants to different roles on purpose.
+  bool get canApproveLoans => can('loans.approve');
+
+  bool get canManageLoans => can('loans.manage');
 }
 
 /// Recomputed whenever the session changes, so a permission revoked by a

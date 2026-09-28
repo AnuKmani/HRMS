@@ -2,14 +2,18 @@
 
 namespace App\Support;
 
+use App\Models\Allowance;
 use App\Models\Attendance;
 use App\Models\DailySiteReport;
 use App\Models\Employee;
 use App\Models\EmployeeSiteAssignment;
 use App\Models\Holiday;
 use App\Models\LeaveRequest;
+use App\Models\Loan;
 use App\Models\OvertimeRequest;
+use App\Models\Payroll;
 use App\Models\Project;
+use App\Models\SalaryCertificateRequest;
 use App\Models\Site;
 use App\Models\SiteActivityReport;
 use App\Models\SiteVisit;
@@ -977,6 +981,237 @@ final class Visibility
                 $q->orWhereIn('project_id', $projects);
             }
         });
+    }
+
+    /* ---------------------------------------------------- Phase 8: pay */
+
+    /*
+    | Payroll is the one module whose scoping rule is *not* the workforce
+    | rule, and the difference matters.
+    |
+    | Attendance, leave, timesheets and overtime all follow "whose people
+    | are these?" - a Project Manager reads their own project's rows because
+    | they run that project. Payroll has no equivalent: nobody in this
+    | system is *assigned* the company's salaries, they are **granted** them.
+    | So the question here is a flat "is this a back-office reader?", and the
+    | answer comes from permissions alone rather than from a visibility list
+    | in config/hrms.php. Narrowing by project would be meaningless - a
+    | manager does not pay their project differently - and would silently
+    | give a Site Supervisor the salaries of everyone on a site they happen
+    | to run, which is precisely the disclosure the spec rules out.
+    |
+    | The second difference: these queries fail closed against
+    | `payroll.view`, not against a separate "may see others" permission, so
+    | an Employee who holds `payroll.view` for their own slip is narrowed to
+    | exactly one row rather than to an empty list.
+    */
+
+    /**
+     * May this user read somebody *else's* payroll row?
+     *
+     * Two ways in and no third: `payroll.manage` (the role that prepares
+     * pay) or `employees.salary.view` (the pre-existing "this role is
+     * trusted with pay figures" grant - Super Admin, HR Admin, Payroll Admin
+     * and Finance, and nobody else). Management deliberately holds neither,
+     * which is what makes its `payroll.view` a window onto its own row rather
+     * than onto the company's.
+     */
+    public static function mayViewOthersPayroll(User $user): bool
+    {
+        if (! $user->can('payroll.view')) {
+            return false;
+        }
+
+        return $user->can('payroll.manage') || $user->can('employees.salary.view');
+    }
+
+    /**
+     * @param  Builder<Payroll>  $query
+     * @return Builder<Payroll>
+     */
+    public static function payrollFor(Builder $query, User $user)
+    {
+        if (! self::mayViewOthersPayroll($user)) {
+            return $query->where('payrolls.employee_id', $user->employee?->id ?? 0);
+        }
+
+        return $query;
+    }
+
+    public static function payrollIsVisible(User $user, Payroll $payroll): bool
+    {
+        if ($user->employee?->id === $payroll->employee_id) {
+            return true;
+        }
+
+        return self::mayViewOthersPayroll($user);
+    }
+
+    /**
+     * May this user read somebody *else's* salary slip?
+     *
+     * Asked separately from payroll because the two grants are separate:
+     * `salary_slips.view` is held by every role that should ever see a
+     * payslip, and `salary_slips.manage` (or the underlying
+     * `payroll.manage`) is what says *whose*. A slip is the same numbers as
+     * the payroll row in document form, so it would be a strange boundary
+     * that refused the row and handed over the PDF.
+     */
+    public static function mayViewOthersSalarySlips(User $user): bool
+    {
+        if (! $user->can('salary_slips.view')) {
+            return false;
+        }
+
+        return $user->can('salary_slips.manage') || $user->can('payroll.manage');
+    }
+
+    /**
+     * @param  Builder<Payroll>  $query
+     * @return Builder<Payroll>
+     */
+    public static function salarySlipsFor(Builder $query, User $user)
+    {
+        if (! self::mayViewOthersSalarySlips($user)) {
+            return $query->where('payrolls.employee_id', $user->employee?->id ?? 0);
+        }
+
+        return $query;
+    }
+
+    /**
+     * May this user read somebody *else's* loan or salary advance?
+     *
+     * Fails closed with no `employees.view` fallback - unlike leave,
+     * attendance and overtime, which all grant the override to a role that
+     * already holds the directory. A loan says how much somebody owes, and
+     * "you may see the staff list" is not a decision about that. The two ways
+     * in are the two that *are* a decision about it: you may approve loans,
+     * or you may maintain them.
+     */
+    public static function mayViewOthersLoans(User $user): bool
+    {
+        if (! $user->can('loans.view')) {
+            return false;
+        }
+
+        return $user->can('loans.manage') || $user->can('loans.approve');
+    }
+
+    /**
+     * @param  Builder<Loan>  $query
+     * @return Builder<Loan>
+     */
+    public static function loansFor(Builder $query, User $user)
+    {
+        if (! self::mayViewOthersLoans($user)) {
+            return $query->where('loans.employee_id', $user->employee?->id ?? 0);
+        }
+
+        return $query;
+    }
+
+    public static function loanIsVisible(User $user, Loan $loan): bool
+    {
+        if ($user->employee?->id === $loan->employee_id) {
+            return true;
+        }
+
+        return self::mayViewOthersLoans($user);
+    }
+
+    /**
+     * May this user read somebody *else's* salary certificate request?
+     *
+     * One way in: `salary_certificates.manage`, the decision-making grant.
+     * The requester always keeps their own - including after approval,
+     * because a document requested about yourself is yours whether or not
+     * HR has signed it off yet.
+     */
+    public static function mayViewOthersSalaryCertificates(User $user): bool
+    {
+        if (! $user->can('salary_certificates.view')) {
+            return false;
+        }
+
+        return $user->can('salary_certificates.manage');
+    }
+
+    /**
+     * @param  Builder<SalaryCertificateRequest>  $query
+     * @return Builder<SalaryCertificateRequest>
+     */
+    public static function salaryCertificateRequestsFor(Builder $query, User $user)
+    {
+        if (! self::mayViewOthersSalaryCertificates($user)) {
+            return $query->where('salary_certificate_requests.employee_id', $user->employee?->id ?? 0);
+        }
+
+        return $query;
+    }
+
+    public static function salaryCertificateRequestIsVisible(
+        User $user,
+        SalaryCertificateRequest $request,
+    ): bool {
+        if ($user->employee?->id === $request->employee_id) {
+            return true;
+        }
+
+        return self::mayViewOthersSalaryCertificates($user);
+    }
+
+    /**
+     * Restrict an allowance query: everybody who prepares pay reads every
+     * allowance, everybody else reads their own.
+     *
+     * @param  Builder<Allowance>  $query
+     * @return Builder<Allowance>
+     */
+    public static function allowancesFor(Builder $query, User $user)
+    {
+        if ($user->can('payroll.manage')) {
+            return $query;
+        }
+
+        return $query->where('allowances.employee_id', $user->employee?->id ?? 0);
+    }
+
+    public static function allowanceIsVisible(User $user, Allowance $allowance): bool
+    {
+        if ($user->employee?->id === $allowance->employee_id) {
+            return true;
+        }
+
+        return $user->can('payroll.manage');
+    }
+
+    /**
+     * Restrict an adjustment query. Same shape as allowances: `payroll.manage`
+     * is the whole answer, and without it the rows you can reach are your
+     * own.
+     *
+     * @param  Builder<PayrollAdjustment>  $query
+     * @return Builder<PayrollAdjustment>
+     */
+    public static function payrollAdjustmentsFor(Builder $query, User $user)
+    {
+        if ($user->can('payroll.manage')) {
+            return $query;
+        }
+
+        return $query->where('payroll_adjustments.employee_id', $user->employee?->id ?? 0);
+    }
+
+    public static function payrollAdjustmentIsVisible(
+        User $user,
+        PayrollAdjustment $adjustment,
+    ): bool {
+        if ($user->employee?->id === $adjustment->employee_id) {
+            return true;
+        }
+
+        return $user->can('payroll.manage');
     }
 
     /* ------------------------------------------------------------ helpers */

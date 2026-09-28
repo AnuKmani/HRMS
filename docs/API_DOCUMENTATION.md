@@ -153,10 +153,12 @@ Behaviour that holds across every authenticated endpoint:
 
 > **Implemented:** §2.1 (Phase 3), §2.2–§2.3 (Phase 4), §2.4–§2.5 (Phase 5),
 > §2.6 in **Phase 7**, §2.7 (timesheets + overtime), §2.8 (leave), §2.9
-> (holidays) and §2.7's approval-workflows in **Phase 6**. Everything still
-> pending is listed here as the contract to build against.
+> (holidays) and §2.7's approval-workflows in **Phase 6**, and §2.10 in
+> **Phase 8**. Everything still pending is listed here as the contract to
+> build against.
 
-**Two gates, both live on every Phase 4, Phase 5, Phase 6 and Phase 7 route**
+**Two gates, both live on every Phase 4, Phase 5, Phase 6, Phase 7 and Phase 8
+route**
 (the three exceptions are named in §2.7 / §2.9 — holiday reads, and the
 certificate read/write, which are policy-only on purpose):
 
@@ -853,7 +855,9 @@ idempotent). Any sick request past its deadline with no file becomes `lop`
 with `lop_days`, `lop_reason`, `lop_applied_at` recorded and
 `LeaveConvertedToLop` dispatched — the paid leave type's reservation is
 released in the same transaction. `GET /leave?status=lop` lists them.
-**No payroll figure is computed from `lop_days` in this phase.**
+**The figure is consumed by payroll in Phase 8** — `PayrollCalculationService`
+prices `lop_days` into a `lop` line on the salary slip (see §2.10); the leave
+module itself still computes no money.
 
 ### 2.9 Holidays — (Phase 6 ✅)
 
@@ -873,18 +877,141 @@ cannot be silently erased, so it is retired with `status=inactive` instead
 (→ `405` if you try). A duplicate on `(date, type, site_id)` is refused with
 `422` — including a real `IS NULL` check for the company-wide rows.
 
-### 2.10 Payroll & Finance
+### 2.10 Payroll, Loans & Salary Documents — (Phase 8 ✅)
 
-| Method | Path | Permission |
+**36 routes.** Nothing in this section is deleted or edited in place: the
+money ladder only climbs, and every step is its own endpoint so that refusing
+a transition (409) is a different answer from refusing a caller (403).
+
+#### Payroll runs
+
+| Method | Path | Gate |
 |---|---|---|
-| GET | `/payroll?month=2026-09` | `payroll.view` |
-| POST | `/payroll/process` | `payroll.manage` |
-| GET | `/salary-slips` | Own only, unless `payroll.view` |
-| GET | `/salary-slips/{id}/pdf` | Signed / authorized |
-| GET/POST | `/salary-certificates` | request + generate |
-| GET/POST/PUT | `/loans` … | `payroll.manage` |
-| GET/POST/PUT | `/expenses` … | workflow approval |
-| POST | `/expenses/{id}/approve` | `expenses.approve` |
+| GET | `/payroll?year=2026&month=9` | `payroll.view` |
+| GET | `/payroll/{payroll}` | `payroll.view` + policy (own row without it) |
+| GET | `/payroll/summary?year=2026&month=9` | `payroll.summary.view` |
+| POST | `/payroll/process` | `payroll.process` |
+| POST | `/payroll/{payroll}/recalculate` | `payroll.process` |
+| POST | `/payroll/{payroll}/review` | `payroll.manage` |
+| POST | `/payroll/{payroll}/finalize` | `payroll.manage` |
+| POST | `/payroll/{payroll}/lock` | `payroll.lock` |
+
+`draft → calculated → reviewed → processed → locked`, one way, each transition
+its own endpoint. A row already at or beyond the step you asked for is left
+alone — a second `POST /payroll/process` reports `updated: 0` and the rows it
+skipped rather than re-pricing them. **A locked row is never recalculated**
+(409), and no endpoint moves a row backwards.
+
+`/payroll/summary` returns `year, month, employee_count, gross_payroll,
+total_deductions, net_payroll, currency` and **no names** — it is the only
+thing `payroll.summary.view` gives Management, so it must not smuggle rows
+behind the totals.
+
+A row with no salary on record comes back with `status: draft`,
+`net_salary: "0.00"` **and** `blocked_reason`; the reason, not the zero, is
+what the UI is expected to show. Negative `net_salary` is passed through as
+it stands: a loan balance larger than the month's pay is a real figure, and
+clamping it would make the slip lie.
+
+#### The calculation
+
+Everything is derived server-side by `PayrollCalculationService` — a client
+sends no figures of its own. `App\Support\Money` (scale 2, half-away-from-zero)
+and the one currency formatter are the only places a number is rounded or
+printed.
+
+| Setting | Default | Effect |
+|---|---|---|
+| `payroll.lop_divisor_mode` | `fixed` | `fixed`, or `working_days` (the period's own working days) |
+| `payroll.lop_divisor` | `30` | Also the divisor that derives the daily rate, and therefore the hourly one (`basic / divisor / daily_hours`, default 8) |
+| `payroll.overtime_rate_multiplier` | `1.5` | Applied to the derived hourly rate |
+
+Overtime is priced only for entries that are **`approved` *and*
+`payroll_eligible`**. The multiplier is a generic engine parameter — the
+UAE/statutory rates a production deployment must use have **not** been wired
+in and must be validated before go-live. `lop_days` from Phase 6 is priced
+into a `lop` line here; leave taken unpaid appears as `leave_unpaid`.
+
+#### Allowances & adjustments
+
+| Method | Path | Gate |
+|---|---|---|
+| GET | `/allowances` | `payroll.view` (own rows without it) |
+| POST / PUT / DELETE | `/allowances` · `/allowances/{allowance}` | `payroll.manage` |
+| GET | `/payroll-adjustments` · `/payroll-adjustments/{adjustment}` | `payroll.view` |
+| POST / PUT | `/payroll-adjustments` · `/{adjustment}` | `payroll.manage` |
+| POST | `/payroll-adjustments/{adjustment}/approve` · `/reject` · `/cancel` | `payroll.manage` |
+
+An allowance is `monthly` or `one_time` and applies for as long as its dates
+say. An adjustment — a bonus, an other-deduction, an `adjustment` — **enters
+payroll only once it is `approved`**: `pending`, `rejected` and `cancelled`
+rows are computed nowhere. There is no DELETE on an adjustment either:
+cancelling it is the record.
+
+#### Salary slips
+
+| Method | Path | Gate |
+|---|---|---|
+| GET | `/salary-slips` | `salary_slips.view` (returns `PayrollResource`) |
+| GET | `/salary-slips/{payroll}/pdf` | `salary_slips.view` + row scope |
+
+A separate family from `payroll.*` on purpose, so a role can be given its own
+payslips without being given the ledger. The PDF is rendered **on demand from
+the row and never stored**: no file, no URL, no path, `Cache-Control:
+no-store`. It is the locked payroll that prints, so a slip cannot go stale
+behind a recalculation.
+
+#### Loans & salary advances
+
+| Method | Path | Gate |
+|---|---|---|
+| GET | `/loans` · `/loans/{loan}` | `loans.view` |
+| POST | `/loans` | `loans.create` (defaults `employee_id` to the caller) |
+| POST | `/loans/{loan}/submit` | `loans.create` |
+| POST | `/loans/{loan}/approve` · `/reject` | `loans.approve` |
+| POST | `/loans/{loan}/cancel` | `loans.view` |
+| PUT | `/loans/{loan}` | `loans.view` + **draft only** |
+
+`draft → pending → approved → active → completed`, with `rejected` and
+`cancelled` as the branches. The repayment schedule is minted **at approval,
+inside the same transaction**, and never re-split afterwards; the last
+installment carries whatever the even split leaves over. `employee_id` is
+`required` on POST and `prohibited` on PUT — the identity of the borrower is
+not an editable field.
+
+Installments are `pending → deducted | skipped | adjusted` and can be taken
+**once**: the row is locked with `SELECT … FOR UPDATE` and carries the
+`payroll_id` that took it, so a concurrent run cannot deduct it twice. The
+balance may exceed the month's pay; the resulting negative `net_salary`
+reaches the slip unclamped.
+
+#### Salary certificate requests
+
+| Method | Path | Gate |
+|---|---|---|
+| GET | `/salary-certificate-requests` · `/{id}` | `salary_certificates.view` |
+| POST | `/salary-certificate-requests` | `salary_certificates.view` (**asking is not a second grant**) |
+| POST | `/{id}/approve` · `/{id}/reject` | `salary_certificates.manage` |
+| POST | `/{id}/cancel` | `salary_certificates.view` |
+| GET | `/{id}/pdf` | `salary_certificates.view` + policy |
+
+`pending → approved → generated`, with `rejected` and `cancelled` as
+branches. The reference is minted as `SAL-CERT-{id:06d}`. The PDF is rendered
+first and `markGenerated()` runs after, so a failed render leaves the row
+`approved` and answerable again; `generated_at` moves **once**. The
+resource's `can_issue` is the server's own answer (grant **and** state) and
+is the only gate a client should apply — a client that re-derives it from
+`status` will offer a button the API refuses.
+
+Asking for one for a **colleague** needs an explicit `employee_id`, which the
+Flutter form does not offer yet (see `docs/FLUTTER_GUIDE.md`); the API does.
+
+#### What is *not* here yet
+
+`/expenses` (Phase 9), `/documents`, `/training`, `/assets` (Phase 10) and
+`/notifications` (Phase 11) remain contracts, as §2.11–§2.13 say. Phase 8 adds
+**no rate limiter**: none of these routes accepts a credential, a file or an
+unbounded body — see §3.
 
 ### 2.11 Documents, Training, Assets
 
@@ -933,6 +1060,7 @@ attached at the route as `throttle:{name}`. Never inline a number in a route.
 | `POST /auth/login` | **5 / minute** | client IP | ✅ Phase 3 |
 | `POST /auth/forgot-password`, `POST /auth/reset-password` | **5 / 15 minutes** | client IP | ✅ Phase 3 |
 | `POST /attendance/check-in`, `POST /attendance/check-out`, `POST /site-visits/start`, `POST /site-visits/{id}/end` | **30 / minute** | authenticated user id | ✅ Phase 5 |
+| Payroll / loans / certificate writes (36 routes) | none | — | ✅ Phase 8, **deliberately** — see below |
 | General API | 60 / minute | — | ⬜ Planned |
 | Exports (PDF/Excel) | 10 / minute | — | ⬜ Phase 11 |
 
@@ -942,6 +1070,19 @@ a policy, and rate-limiting them would punish a user retrying a flaky mobile
 connection — which is exactly this product's normal condition. The one write
 that could be abused, certificate upload, is bounded instead by the byte
 ceiling and MIME rules in §4.
+
+**Phase 7 added no limiter either** — a report is a record, not an expense;
+the upload is bounded structurally (6 per request, 12 per report).
+
+**Phase 8 added no limiter, deliberately — with one eye open.** None of the
+36 payroll-family routes accepts a credential, a file or an unbounded body,
+and each is behind `auth:sanctum` + a permission + a policy. The single
+expensive call is `POST /payroll/process`, which prices a month across every
+employee; it is bounded by *who may call it* (`payroll.process`: Super Admin,
+HR Admin, Payroll Admin) and by the one-way ladder, so a repeat call costs
+`updated: 0` rather than a second recalculation. A `process` limiter would be
+the first thing to add if the general limiter (§row above) stays unwelcome —
+it belongs in `config/rate_limiting.php`, not inline.
 
 Exceeded → **HTTP 429** in the standard envelope, with a `Retry-After` header.
 
@@ -971,7 +1112,9 @@ letting the user tap into the same wall repeatedly.
 
 Phase 6 uploads exactly one kind of file: the **medical certificate** for a
 sick-leave request. It is described in §4.2 below. Phase 5's check-in
-**selfie** follows the same shape with stricter rules (§4.1).
+**selfie** follows the same shape with stricter rules (§4.1), and Phase 7
+adds the report photographs (§4.3). **Phase 8 uploads nothing** — its two
+documents are rendered from a row on demand, described in §4.4.
 
 - `multipart/form-data`, field name `selfie`, on `POST /attendance/check-in` only
 - Max size **5120 KB** — `hrms.storage.selfie_max_kilobytes` (`HRMS_SELFIE_MAX_KB`)
@@ -1109,6 +1252,31 @@ leave-request row and no file are changed.
   report, answers `409` and `404` respectively — the id is checked
   *against the row*, not merely whether it exists.
 
+### 4.4 Salary documents — Phase 8 (slips & certificates)
+
+**Phase 8 uploads nothing at all**, which is the point rather than an
+omission. Both of its documents are *rendered by the server from a row* and
+streamed back:
+
+- `GET /salary-slips/{payroll}/pdf` — the `payrolls` row, behind
+  `salary_slips.view` **and** the same row scope as `GET /payroll/{id}`
+- `GET /salary-certificate-requests/{id}/pdf` — behind
+  `salary_certificates.view` **and** `SalaryCertificateRequestPolicy`; the
+  call also runs `markGenerated()`, and only **after** the bytes are written
+  to the response, so a failed render leaves the row `approved` (ask again)
+  rather than `generated` with nothing behind it
+
+Both: `application/pdf`, `Cache-Control: no-store`, `Pragma: no-cache`,
+`X-Content-Type-Options: nosniff`, `Content-Disposition: inline` with a
+**server-minted** filename (`safePdfFilename()`-shaped, never a value a
+client sent). Same dompdf instance as §4.3's report PDF — no second PDF
+package to install, secure or upgrade.
+
+There is no `salary_slips` table, no `pdf_path` column and no file on disk
+anywhere in this flow. The document does not exist until it is asked for, so
+it cannot go stale behind a recalculation, cannot be listed, cannot be
+guessed at by path, and needs no expiry policy.
+
 ---
 
 ## 5. Offline Sync Contract
@@ -1177,21 +1345,24 @@ Syncing is manual ("Sync now"), oldest first, and stops at the first 0 or
 | §2.7 Timesheets / Overtime / Approval workflows | ✅ Phase 6 |
 | §2.8 Leave / §2.8a Certificates & LOP / §2.9 Holidays | ✅ Phase 6 |
 | §2.6 Site Activity & Daily Reports | ✅ **Phase 7** |
-| §2.10–§2.13 Everything else | ⬜ Phases 8–12 |
+| §2.10 Payroll / Loans / Salary documents | ✅ **Phase 8** |
+| §2.11–§2.13 Everything else | ⬜ Phases 9–12 |
 | Rate limiting — auth routes | ✅ Phase 3 |
 | Rate limiting — attendance writes | ✅ Phase 5 |
 | Rate limiting — leave/timesheet/overtime/holiday writes | **deliberately none** — see §3 |
 | Rate limiting — site-report writes | **deliberately none** — see §3 |
+| Rate limiting — payroll / loan / certificate writes | **deliberately none** — see §3 |
 | Rate limiting — remaining scopes | ⬜ As their modules land |
 | §4.1 File upload rules (selfie) | ✅ Phase 5, **sanitised server-side since the post-Phase 5 hardening pass** |
 | §4.2 File upload rules (medical certificate) | ✅ Phase 6 |
 | §4.3 File upload rules (report photographs) | ✅ **Phase 7** |
+| §4.4 Salary documents (rendered, never uploaded) | ✅ **Phase 8** |
 | §4 File upload rules (employee documents) | ⬜ Phase 10 |
 
-Backend proof: `php artisan test` → **425 passed (2370 assertions)**; **104
-route definitions** under `api/*` (109 registered) — Phase 6 added 37,
-Phase 7 added 18. Flutter proof: `dart format .` clean, `flutter analyze`
-clean, `flutter test` → **303 passed**.
+Backend proof: `php artisan test` → **458 passed (2761 assertions)**; **140
+route definitions** under `api/*` (145 registered) — Phase 6 added 37,
+Phase 7 added 18, **Phase 8 added 36**. Flutter proof: `dart format .` clean,
+`flutter analyze` clean, `flutter test` → **377 passed**.
 
 > To explore a running API later, use Laravel's generated OpenAPI/Swagger UI or
 > a tool such as Postman.

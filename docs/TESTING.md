@@ -1,11 +1,12 @@
 # Testing
 
-> **Status:** Phase 7 — leave, certificates, LOP, holidays, timesheets,
-> overtime and now the site vertical slice (activity reports, the official
-> daily report, its photographs and its on-demand PDF) are covered end to end
-> on top of Phases 1–6. Backend **425 passed (2370 assertions)**, Flutter
-> **303 passed**. This document defines the strategy for the modules still to
-> come (Phases 8–12).
+> **Status:** Phase 8 — leave, certificates, LOP, holidays, timesheets,
+> overtime, the site vertical slice (activity reports, the official daily
+> report, its photographs and its on-demand PDF) and now **the payroll
+> vertical slice** (ledger, calculation, loans and salary documents) are
+> covered end to end on top of Phases 1–7. Backend **458 passed (2761
+> assertions)**, Flutter **377 passed**. This document defines the strategy
+> for the modules still to come (Phases 9–12).
 
 ---
 
@@ -103,11 +104,11 @@ to contain **no** SQL, stack trace, model class or internal path.
 | Test | Expectation |
 |---|---|
 | Employee hits an HR endpoint | `403` |
-| Employee reads another employee's salary slip | `403` |
+| Employee reads another employee's salary slip | `403` | ✅ Phase 8 (`PayrollTest`) |
 | Employee reads another employee's attendance | `403` | ✅ Phase 5 |
 | Employee deletes an employee | `403` |
 | HR Executive creates an employee | `201` (has permission) |
-| HR Executive processes payroll | `403` (no permission) |
+| HR Executive processes payroll | `403` (no permission) | ✅ Phase 8 (`PayrollTest`) |
 | Site Supervisor approves leave | `403` |
 | Project Manager views own project sites | `200` |
 | Unauthenticated request | `401` |
@@ -387,21 +388,64 @@ not there.
 | **Retired by status, and there is no way to delete it** | `DELETE /holidays/{id}` → `405` |
 | Editing cannot make it collide with another | the duplicate check excludes the row being edited |
 
-### 3.7 Payroll
+### 3.7 Payroll, loans & salary documents ✅ (Phase 8 — `PayrollTest`, `LoanTest`, `SalaryDocumentTest`)
+
+**33 tests, 338 assertions** — `PayrollTest` 13 (140), `LoanTest` 11 (112),
+`SalaryDocumentTest` 9 (86). All on `hrms_testing`, all behind the shared
+`SignsInAccounts` concern.
+
+**`PayrollTest` — 13**
 
 | Test | Expectation |
 |---|---|
-| Basic + allowances | gross correct |
-| Overtime added (approved only) | included |
-| LOP days deducted | deducted correctly |
-| Loan installment deducted | outstanding balance decremented |
-| Tax/deduction applied | correct |
-| `net = gross − deductions` | **asserted exactly** |
-| Running payroll twice for same month | prevented |
-| Employee views another's payslip | `403` |
-| Non-payroll user views payroll list | `403` |
+| a run prices a month from sources it never writes | reads attendance/overtime/leave/loans and asserts **those tables are unchanged** afterwards |
+| overtime pays only when both the approval and the flag say so | `status=approved` **and** `payroll_eligible`; either alone pays nothing |
+| only approved adjustments are paid and each one carries its own sign | `pending`/`rejected`/`cancelled` are computed nowhere; `+` and `−` keep their signs |
+| the divisor is a setting and not a constant | `payroll.lop_divisor` and `payroll.overtime_rate_multiplier` re-read between runs |
+| an employee with no salary is a visible draft not a missing row | the row exists, `status=draft`, and `blocked_reason` says why |
+| a row walks the flow one way and then freezes | `draft → calculated → reviewed → processed → locked`; **every backwards step refused** |
+| a second run never rewrites a row that has been decided | a repeat run reports `updated: 0` and leaves the figures alone |
+| a recalculation gives a loan installment back before it takes it again | the installment is released and re-taken inside one transaction, never twice |
+| the summary is aggregates only and reaches a role that cannot read the list | `payroll.summary.view` alone returns counts and totals with **no names** |
+| an employee reads exactly one row and never the others | own-row scoping on list and on `show` |
+| site roles have no payroll visibility at all | Project Manager / Site Engineer / Site Supervisor get `403`, not an empty list |
+| running a month needs the process grant not just the permission to read | `payroll.view` alone cannot POST `/payroll/process` |
+| a period outside the window is refused before it reaches the calculator | `422` at the request, no calculation attempted |
 
-Use **exact decimal assertions** — money must never be compared as floats.
+**`LoanTest` — 11**
+
+| Test | Expectation |
+|---|---|
+| a loan starts as a draft with no schedule and no balance moved | installments are minted at **approval**, not at creation |
+| nobody has to know their own employee id to borrow | `employee_id` defaults to the caller |
+| a loan may only be asked for by someone who has a salary to repay | `employees.salary.view` present on the record |
+| nobody approves their own loan even when they hold the grant | `403` at the policy, `409` at the service |
+| an approval mints a schedule that closes the principal exactly | the last installment carries the remainder; the sum is the principal |
+| a refusal leaves nothing to repay | `rejected` has no outstanding balance and no installments to take |
+| a draft can be edited and a submitted one cannot | `422`/`409` on a PUT past the draft |
+| a loan can be withdrawn until a decision is made and not after | `cancel` allowed on `draft`/`pending`, refused afterwards |
+| a loan is readable only by its borrower or by someone who may manage them | no `employees.view` fallback |
+| a role without the approve grant cannot reach the decision | `403` before the service |
+| a repayment is taken by a run and given back before a recalculation | `payroll_id` recorded, released, re-taken |
+
+**`SalaryDocumentTest` — 9**
+
+| Test | Expectation |
+|---|---|
+| a slip is rendered from the row and never stored | `200`, `application/pdf`, `Cache-Control: no-store`, and the *content* asserted through `SalarySlipPdf::html()` — the test never parses PDF bytes and the code path never writes a file |
+| a slip is readable by its owner and by nobody without the slip grant | `salary_slips.view` is its own gate |
+| an employee asks for their own certificate and states what it is for | asking needs no second grant |
+| nobody signs off on their own certificate even when they hold the grant | `403` |
+| a request may only be filed about someone else by a decision maker | an employee cannot ask for a colleague's |
+| a certificate is decided once, issued once, and then frozen | second decision `403`; `generated_at` moves **once** |
+| a refused certificate cannot be issued | `rejected → generated` is refused |
+| a certificate is readable only by the employee it is about or a decision maker | row scoping |
+| the certificate prints the facts it certifies | `html()` asserted on **content**, not on PDF bytes |
+
+**Money is compared as text.** Every figure is asserted as a decimal string
+(`'28500.00'`), never as a float — a test that `assertEquals(28500.00, …)`
+would pass for the wrong number, which is the bug the schema is built to
+prevent.
 
 ### 3.8 Documents & Files
 
@@ -522,7 +566,7 @@ it cannot be pointed at development data by mistake.
 
 ## 5. Flutter Test Matrix
 
-### 5.1 Unit ✅ (Phases 3–7)
+### 5.1 Unit ✅ (Phases 3–8)
 
 | Target | Tests | File |
 |---|---|---|
@@ -540,6 +584,7 @@ it cannot be pointed at development data by mistake.
 | `LeaveRequest` / `LeaveCertificate` | certificate facts arrive ready-made rather than being re-derived on the phone: *required but not yet due* shows "Certificate due 2026-10-04" with a file action, *overdue* shows the server's flag and its chip, and a type that never asks for one draws **no certificate block at all** | `leave_detail_screen_test.dart` (group "the certificate") |
 | `SiteActivityReport` / `DailySiteReport` | the author is parsed only when the server sends it and **no `employee_id` is ever read**; `hasUsableGps` requires all three keys, so a half-sent fix is *not* a location; status labels; `displayTotalManpower` preferring the rows a reader can add up; `ManpowerRow.category` accepted as free text; `quantityLabel`; `SiteReportPhoto.pathFor` building the private path from ids and **nothing else**; `photosFrom` refusing a payload that is not a list; `reportPdfFilename` → `daily-site-report-1-28092026` | `test/features/site_reports/domain/site_report_models_test.dart` (10) |
 | The two report repositories | the `{items, meta}` envelope; submit carrying exactly three GPS keys; a create body with **no `employee_id`, no `status` and no derived total**; a payload that is not an object **refused rather than guessed at**; the multipart batch as `photos[0]`… with a client-minted name; a bad upload shape refused; `reportable-sites` asked at its own path; daily submit with **no body**; and the PDF request using a verb that bypasses envelope decoding | `test/features/site_reports/data/api_site_reports_test.dart` (10) |
+| `Money` / `safePdfFilename` (Phase 8) | `30000.00` → `INR 30,000.00`; the currency code read **from the row** rather than a constant; `null`/`''` rendering as zero instead of crashing; **half away from zero** matching PHP's `round()` so the app and the PDF agree on `0.125`; a negative stays negative; `plain()` and `delta()` for a column of one currency and a signed change; and the filename helpers refusing anything a path could be made of while leaving an ordinary generated name intact | `test/core/presentation/money_test.dart` (10) |
 
 **Two non-obvious guarantees worth keeping under test:**
 
@@ -550,7 +595,7 @@ it cannot be pointed at development data by mistake.
   interceptor and the controller can notice. The sign-in form's own message
   must survive.
 
-### 5.2 Widget ✅ (Phases 3–7)
+### 5.2 Widget ✅ (Phases 3–8)
 
 | Screen | States verified |
 |---|---|
@@ -572,6 +617,16 @@ it cannot be pointed at development data by mistake.
 | Daily report list (7) | the lock before any request; a 403 on the error surface; empty; one row per site-day with author and head count; *prepare* only with `daily_site_reports.create`; row navigation carrying the id; status filter sending and removing the key |
 | Daily report detail (15) | the lock before any request; a 403 left on screen; a 404 with a working retry; the official record — prepared-by, total, the three child cards, and `Not recorded` for what nobody filled; the total preferring the rows over a stale stored figure; *Edit* only with `…update` on a draft; **the PDF button absent without `daily_site_reports.pdf`** and asked for with the right id and filename; 403 → "You are not allowed to export this report." and **not retried**; 401 → sign-in-again wording; 422 → "check it is complete"; transport → "check your connection"; and **"Preparing…" with the button disabled** so the document is never requested twice |
 | Daily report form (12) | two permission gates (create, edit — the second never asking for the row); four field errors and `Row 1: category is needed.` after one save attempt, with **no error before it**; rows sent as child objects under `manpower`/`materials`/`equipment` with `total_manpower` their sum and no `employee_id`/`created_by`/`status`; removing the last row meaning **`manpower: []` rather than one blank row**; the duplicate-day refusal landing on the date rather than a banner; PUT for an edit with **no local draft written**; submit with no body; a refusal leaving it a draft; and the local draft written after a pause, restored with its rows, and start-over clearing it |
+| Payroll list (9) | **a session without `payroll.view` is drawn as a lock and `listCalls` stays 0**; the period it opens on, stated on screen; every figure through the one `MoneyText`; **a row with no salary showing `blocked_reason` and not `0.00`**; `year`/`month` sent and *dropped together* when "all periods" is chosen; the run button only for `payroll.process`; **a run reporting `41 calculated · 11 new · …` and never a rupee**; the summary card drawn for a role that may not see rows; and the slips door only for `salary_slips.view` |
+| Payroll detail (9) | no figure drawn without the grant; the slip itemised with the working (basic, allowances, LOP, loan, net) rather than a total alone; **exactly one ladder step offered, and only with its grant**; a step moving the row and saying what it became; lock needing grant *and* the server's own `can_lock`; a locked row offering nothing and explaining why; a `409` from the ladder shown as written; the payslip rendered on demand and handed to the OS opener; and that button belonging to `salary_slips.view` |
+| Salary slips (4) | `salary_slips.view` is a door of its own; the screen reads `/salary-slips` and **never `/payroll`**; it says out loud that no copy is kept; a tap renders and hands the bytes over |
+| Loan list (4) | the lock before any request; a row saying what was borrowed, from whom and what is left (status scoped to the row, not confused with the filter chip); *ask for a loan* only for `loans.create`; the status filter sending `status` and removing it when cleared |
+| Loan form (4) | **nobody is ever asked to look up their own employee id**; the advance kind sent as the model's own constant; a 422 landing on the field it names; and an edit offering the same form **without an employee field** |
+| Loan detail (8) | the lock before any request; principal / repaid / outstanding shown together; submit only on a draft and only for the borrower; **decide only with `loans.approve`**; reject refusing to send an empty reason and then sending what it was told; a server refusal shown as written; and edit offered **only while the row is still a draft** |
+| Certificate list (4) | the lock before any request; a row leading with `SAL-CERT-000001 · purpose` and saying whose it is; **asking needing no grant beyond reading**; the status filter sending and removing its key |
+| Certificate form (5) | reading and asking are the same grant; no grant means nothing to draw; **only `purpose` and `request_date` in the body — never an `employee_id`**; a blank date meaning today; and the 422 landing on `purpose` |
+| Certificate detail (9) | the lock before any request; the facts and the decision on them; an approved row offering **one button, not a search**; **`can_issue` read as the server's whole answer** rather than re-derived from `status`; deciding only with `.manage`; approve/reject moving through the repository; reject refusing an empty reason; a refusal shown as written; and a decided request **read-only** |
+| Home / routes (6) | four Phase 8 doors drawn under their own grants and absent without them; **a `payroll.summary.view`-only reader offered the summary door and not the ledger**; every one of the ten new paths resolving to its own screen; a session with no pay grant refused at each; and `new` never mistaken for a row id |
 
 > **Don't read `TextFormField.obscureText`** — it is not public. Read the
 > widget's own `TextField.obscureText` field instead.
@@ -670,6 +725,35 @@ timing out `pumpAndSettle` on something no test asked about.
 `flutter_secure_storage` talks to the platform keychain over a method channel,
 and `ApiAuthRepository` would need a live server; neither has anything useful
 to say inside a widget test.
+
+Phase 8 added `test/support/phase8.dart`: `ScriptedPayroll` (with its own
+`processCalls` / `lastProcessYear` / `lastProcessMonth` and a separate
+`slipRows` list, because the slips screen must prove it never reads the
+ledger), `ScriptedLoans` (whose transitions record `lastTransition` and
+`lastRemarks`), `ScriptedCertificates` (with `lastAction` and an explicit
+`canIssue` override — `can_issue` is the *server's* grant-plus-state answer,
+so a test that needs it refused says so rather than hoping the fixture
+guessed the caller's permissions), `RecordingPdfOpener`, `scopedPhase8(...)`,
+`phase8Router()`, the fixtures `payrollRow` / `payrollItem` / `loanRow` /
+`loanInstallment` / `certificateRow`, and re-exports of `expectQuery` and
+`pageOf`. It re-exports from `phase4` so a Phase 8 test needs one import.
+
+**Three things learned the hard way, now under test:**
+
+- *Creating a list provider schedules its first fetch.* `PagedListController.build()`
+  opens with `Future.microtask(reload)`, so a screen that only wants a
+  **totals** card and never draws rows would still have requested a ledger.
+  `currentPayrollQuery()` in `payroll_controller.dart` exists so the totals-only
+  path can be built without asking — and `payroll_list_screen_test` asserts
+  the request never happened.
+- *SnackBars queue.* A run shows "Running payroll…" first and the report
+  second, so the report is invisible until the first has served its four
+  seconds. `pumpAndSettle` will not get there — it stops the moment nothing is
+  animating — so the test pumps 55 × 100 ms and then asserts.
+- *A detail screen keeps its state when the same route is re-pumped with a
+  different id.* Nothing in the wild does that, but a test that looks at draft
+  #1 and then pending #2 in one `testWidgets` would still be holding draft #1.
+  The two assertions live in two tests, with a comment saying why.
 
 ---
 
@@ -804,6 +888,30 @@ A client bypasses Flutter entirely and POSTs /leave/{id}/certificate
   → a second upload replaces the first; the superseded file is deleted
 ```
 
+### Scenario J — A month is priced once, and taken once ✅ (Phase 8, tested)
+
+```
+POST /payroll/process {year: 2026, month: 9}          → 200, `created: 41`
+POST /payroll/process {year: 2026, month: 9} again    → 200, `updated: 0`
+                                    (rows already decided are NOT re-priced)
+   → an installment due in September is deducted ONCE, with `payroll_id`
+     recorded on it; a recalculation releases it first, then takes it
+     again inside the same transaction — never twice, never zero
+   → POST /payroll/{id}/lock, then any step at all     → 403 at the policy,
+                                     and the service refuses again (409)
+   → an employee with payroll.view reads the list      → only their own row
+   → Project Manager / Site Engineer / Site Supervisor → 403, not []
+   → payroll.summary.view without payroll.view         → totals with no
+     `employee_id` anywhere in the JSON
+   → HR Executive calls /payroll/process               → 403 (no payroll.process)
+   → a figure is asserted as the STRING '28500.00'     — never as a float
+   → GET /salary-slips/{id}/pdf                        → 200, no-store,
+     server-minted filename, and **no stored copy of the document** —
+     there is no row and no file to go stale or to leak
+   → POST /salary-certificate-requests/{id}/approve twice → 403 the second time
+   → an employee approves their own loan or certificate → 403 (self-approval)
+```
+
 ---
 
 ## 7. Running Tests
@@ -833,9 +941,11 @@ flutter test --coverage               # coverage report at coverage/lcov.info
 ```
 
 > There is no device or backend behind any of these. The suites run against
-> fakes in `test/support/fakes.dart`, `test/support/phase4.dart` and
-> `test/support/attendance.dart`, so they stay green while a server is
-> stopped — which is exactly when a regression shows up.
+> fakes in `test/support/fakes.dart`, `test/support/phase4.dart`,
+> `test/support/attendance.dart`, `test/support/phase6.dart`,
+> `test/support/site_reports.dart` and `test/support/phase8.dart`, so they
+> stay green while a server is stopped — which is exactly when a regression
+> shows up.
 
 ### Static analysis (run before every commit)
 ```bash
@@ -896,10 +1006,11 @@ A phase is complete only when:
 |---|---|
 | Test strategy (this document) | ✅ Written |
 | Development/testing database split (`hrms_laravel` vs `hrms_testing`) | ✅ Phase 2 safety cleanup |
-| Backend test suite | ✅ **425 passed (2370 assertions)** — 75 Phase 2 + 45 Phase 3 + 70 Phase 4 + 131 Phase 5 (incl. selfie hardening) + 62 Phase 6 (22 `LeaveRequestTest` · 11 `LeaveCertificateTest` · 13 `OvertimeTest` · 9 `TimesheetTest` · 7 `HolidayApiTest`) + **42 Phase 7** (19 `SiteActivityReportTest` · 15 `DailySiteReportTest` · 8 `DailySiteReportPdfTest`) |
-| Flutter test suite | ✅ **303 passed** — 89 Phases 3–4 + 87 Phase 5 + 39 Phase 6 + **88 Phase 7** |
+| Backend test suite | ✅ **458 passed (2761 assertions)** — 75 Phase 2 + 45 Phase 3 + 70 Phase 4 + 131 Phase 5 (incl. selfie hardening) + 62 Phase 6 (22 `LeaveRequestTest` · 11 `LeaveCertificateTest` · 13 `OvertimeTest` · 9 `TimesheetTest` · 7 `HolidayApiTest`) + **42 Phase 7** (19 `SiteActivityReportTest` · 15 `DailySiteReportTest` · 8 `DailySiteReportPdfTest`) + **33 Phase 8** (13 `PayrollTest` · 11 `LoanTest` · 9 `SalaryDocumentTest`) |
+| Flutter test suite | ✅ **377 passed** — 89 Phases 3–4 + 87 Phase 5 + 39 Phase 6 + 88 Phase 7 + **74 Phase 8** |
 | Phase 6 registration checks | ✅ `php artisan route:list` (86 route definitions at that point) · `php artisan schedule:list` shows `EnforceSickCertificateDeadlines` |
 | Phase 7 registration checks | ✅ `php artisan route:list` — **104 route definitions under `api/*`, 109 registered** (18 Phase 7) · `php artisan migrate:status` all `Ran` · `composer validate` valid · `vendor\bin\pint --test` clean |
+| Phase 8 registration checks | ✅ `php artisan route:list` — **140 route definitions under `api/*`, 145 registered** (36 Phase 8) · `php artisan migrate:status` all `Ran` (48 tables / 40 migrations) · `composer validate` valid · `vendor\bin\pint --test` clean · `dart format lib test` clean · `flutter analyze` clean |
 | `flutter analyze` / `pint --test` / `composer validate` clean | ✅ |
 | CI pipeline running tests on every commit | ⬜ |
 | Coverage measurement (needs xdebug/pcov) | ⬜ |

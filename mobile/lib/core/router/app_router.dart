@@ -21,12 +21,21 @@ import '../../features/leave/presentation/leave_balance_screen.dart';
 import '../../features/leave/presentation/leave_detail_screen.dart';
 import '../../features/leave/presentation/leave_form_screen.dart';
 import '../../features/leave/presentation/leave_list_screen.dart';
+import '../../features/loans/presentation/loan_detail_screen.dart';
+import '../../features/loans/presentation/loan_form_screen.dart';
+import '../../features/loans/presentation/loan_list_screen.dart';
 import '../../features/overtime/presentation/overtime_detail_screen.dart';
 import '../../features/overtime/presentation/overtime_form_screen.dart';
 import '../../features/overtime/presentation/overtime_list_screen.dart';
+import '../../features/payroll/presentation/payroll_detail_screen.dart';
+import '../../features/payroll/presentation/payroll_list_screen.dart';
+import '../../features/payroll/presentation/salary_slips_screen.dart';
 import '../../features/projects/presentation/project_detail_screen.dart';
 import '../../features/projects/presentation/project_form_screen.dart';
 import '../../features/projects/presentation/projects_list_screen.dart';
+import '../../features/salary_certificates/presentation/salary_certificate_detail_screen.dart';
+import '../../features/salary_certificates/presentation/salary_certificate_form_screen.dart';
+import '../../features/salary_certificates/presentation/salary_certificate_list_screen.dart';
 import '../../features/sites/presentation/site_detail_screen.dart';
 import '../../features/sites/presentation/site_form_screen.dart';
 import '../../features/sites/presentation/sites_list_screen.dart';
@@ -41,7 +50,7 @@ import '../../features/timesheet/presentation/timesheets_list_screen.dart';
 
 /// The app's routes, one redirect, and a guard driven entirely by auth state.
 ///
-/// Seven phases of work now sit behind it. Two rules shape how they are
+/// Eight phases of work now sit behind it. Two rules shape how they are
 /// laid out:
 ///
 ///  - **`new` before `:id`, and `:id` only matches digits.** A route
@@ -329,6 +338,72 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/daily-reports/:id/edit',
         builder: (context, state) =>
             DailySiteReportFormScreen(reportId: idOf(state)),
+      ),
+
+      /* ---------------------------------------------------- Phase 8: pay */
+
+      // Four first segments, and the same ordering rules again (`new`
+      // before `:id`, digits only). Three things are worth saying about
+      // this group specifically:
+      //
+      //  - **`/salary-slips` is its own tree, not `/payroll` with a flag.**
+      //    It sits behind `salary_slips.view` rather than `payroll.view`,
+      //    so a role can be handed its own documents without being handed
+      //    the ledger, and a screen built as a mode of the other one would
+      //    have to keep switching which permission it was drawn from.
+      //
+      //  - **`/loans/new` before `/loans/:id`, and `/loans/:id/edit`
+      //    after it** — the same brace-then-belt arrangement the employee
+      //    routes use, because `new` would otherwise be parsed as a row id.
+      //
+      //  - **No route guards any of these on a permission**, exactly as
+      //    above. Each screen asks `PermissionScope` what to draw and the
+      //    API refuses whatever it should not have been asked for; a
+      //    redirect hiding a URL would be a second authorisation system to
+      //    keep in step with the first.
+      GoRoute(
+        path: '/payroll',
+        builder: (context, state) => const PayrollListScreen(),
+      ),
+      GoRoute(
+        path: '/payroll/:id',
+        builder: (context, state) =>
+            PayrollDetailScreen(payrollId: idOf(state)),
+      ),
+      GoRoute(
+        path: '/salary-slips',
+        builder: (context, state) => const SalarySlipsScreen(),
+      ),
+
+      GoRoute(
+        path: '/loans',
+        builder: (context, state) => const LoanListScreen(),
+      ),
+      GoRoute(
+        path: '/loans/new',
+        builder: (context, state) => const LoanFormScreen(),
+      ),
+      GoRoute(
+        path: '/loans/:id',
+        builder: (context, state) => LoanDetailScreen(loanId: idOf(state)),
+      ),
+      GoRoute(
+        path: '/loans/:id/edit',
+        builder: (context, state) => LoanFormScreen(loanId: idOf(state)),
+      ),
+
+      GoRoute(
+        path: '/salary-certificates',
+        builder: (context, state) => const SalaryCertificateListScreen(),
+      ),
+      GoRoute(
+        path: '/salary-certificates/new',
+        builder: (context, state) => const SalaryCertificateFormScreen(),
+      ),
+      GoRoute(
+        path: '/salary-certificates/:id',
+        builder: (context, state) =>
+            SalaryCertificateDetailScreen(requestId: idOf(state)),
       ),
     ],
   );

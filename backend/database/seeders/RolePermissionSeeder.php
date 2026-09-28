@@ -38,7 +38,10 @@ class RolePermissionSeeder extends Seeder
             'holidays.manage',
             'timesheets.view', 'timesheets.manage',
             'overtime.view', 'overtime.create', 'overtime.approve', 'overtime.manage',
-            'payroll.view',
+            'payroll.view', 'payroll.manage', 'payroll.process', 'payroll.summary.view',
+            'salary_slips.view', 'salary_slips.manage',
+            'salary_certificates.view', 'salary_certificates.manage',
+            'loans.view', 'loans.create', 'loans.approve', 'loans.manage',
             'projects.view',
             'sites.view',
             'shifts.view', 'shifts.manage',
@@ -77,6 +80,15 @@ class RolePermissionSeeder extends Seeder
             'daily_site_reports.view', 'daily_site_reports.pdf',
             'documents.view', 'documents.manage',
             'settings.view',
+            // Own loans and own certificate requests only. Deliberately no
+            // `payroll.view`, `salary_slips.*` or `loans.approve`: this role
+            // runs the roster without seeing what anyone is paid, exactly as
+            // `employees.salary.view` has always been withheld from it. The
+            // certificate grant is `.view` and nothing else - enough to ask
+            // for a document about your own salary and read the decision on
+            // it, never enough to sign one off or to fetch somebody else's.
+            'loans.view', 'loans.create',
+            'salary_certificates.view',
         ],
 
         'Payroll Admin' => [
@@ -92,6 +104,13 @@ class RolePermissionSeeder extends Seeder
             'timesheets.view',
             'overtime.view', 'overtime.approve',
             'payroll.view', 'payroll.manage',
+            // The only role besides Super Admin that may lock a period, and
+            // the only one that may run one: processing pay is this role's
+            // job rather than HR's.
+            'payroll.process', 'payroll.lock', 'payroll.summary.view',
+            'salary_slips.view', 'salary_slips.manage',
+            'salary_certificates.view', 'salary_certificates.manage',
+            'loans.view', 'loans.create', 'loans.approve', 'loans.manage',
             'expenses.view', 'expenses.manage',
             'reports.view', 'reports.export',
             'documents.view',
@@ -117,6 +136,11 @@ class RolePermissionSeeder extends Seeder
             'daily_site_reports.manage', 'daily_site_reports.pdf',
             'documents.view',
             'expenses.view', 'expenses.approve',
+            // A loan is about *their own* pay, not anyone else's, so the
+            // self-service door opens here too. Nothing in `payroll.*` is
+            // granted - see the spec's "no payroll visibility by default"
+            // for project and site roles.
+            'loans.view', 'loans.create',
         ],
 
         'Site Engineer' => [
@@ -133,6 +157,7 @@ class RolePermissionSeeder extends Seeder
             'daily_site_reports.view', 'daily_site_reports.create', 'daily_site_reports.update',
             'daily_site_reports.pdf',
             'documents.view',
+            'loans.view', 'loans.create',
         ],
 
         'Site Supervisor' => [
@@ -157,6 +182,7 @@ class RolePermissionSeeder extends Seeder
             'daily_site_reports.view', 'daily_site_reports.create', 'daily_site_reports.update',
             'daily_site_reports.pdf',
             'documents.view',
+            'loans.view', 'loans.create',
         ],
 
         'Finance' => [
@@ -165,7 +191,17 @@ class RolePermissionSeeder extends Seeder
             'employees.salary.view',
             'payroll.view',
             // The payroll preparation view: how many days were lost to pay,
-            // and what overtime is waiting to be paid. No approval rights.
+            // and what overtime is waiting to be paid. No approval rights,
+            // and no right to run or lock a period.
+            'payroll.summary.view',
+            // Slips are read here because paying them is the reason Finance
+            // exists; `.manage` is what lets an analyst pull any employee's
+            // document rather than only their own.
+            'salary_slips.view', 'salary_slips.manage',
+            'loans.view',
+            // Read-only on leave, timesheets and overtime: this role is the
+            // *consumer* of approved overtime and LOP days, never their
+            // approver.
             'leave.view', 'leave.balance.view',
             'timesheets.view',
             'overtime.view',
@@ -186,6 +222,14 @@ class RolePermissionSeeder extends Seeder
             'timesheets.view',
             'overtime.view', 'overtime.approve',
             'payroll.view',
+            // Summary only. Management reads the company's payroll totals
+            // and its own row - `payroll.view` without `payroll.manage` or
+            // `employees.salary.view` narrows Visibility to the caller's own
+            // record, so this role is not accidentally handed every salary
+            // in the building. `payroll.summary.view` is the door to the
+            // aggregate, which deliberately returns no employee-level rows.
+            'payroll.summary.view',
+            'loans.view', 'loans.create',
             'reports.view', 'reports.export',
             'site_activity_reports.view',
             'daily_site_reports.view', 'daily_site_reports.pdf',
@@ -225,6 +269,17 @@ class RolePermissionSeeder extends Seeder
             'site_activity_reports.create',
             'site_activity_reports.update',
             'documents.view',
+            // Their own pay, their own loans, their own certificates - the
+            // three doors an employee needs to answer "what am I paid?" for
+            // themselves. `payroll.view` is granted for exactly the same
+            // reason `leave.view` is: without the coarse gate the endpoint
+            // is a 403 before any row-level rule can run, and Visibility
+            // then narrows it to their own rows because this role holds
+            // neither `payroll.manage` nor `employees.salary.view`.
+            'payroll.view',
+            'salary_slips.view',
+            'salary_certificates.view',
+            'loans.view', 'loans.create',
         ],
     ];
 

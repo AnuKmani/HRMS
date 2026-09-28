@@ -1,17 +1,18 @@
 # Database Design
 
-> **Status:** Phase 7 — core schema, GPS attendance and site movement, and now
-> the two report families. Laravel's base tables plus 10 Phase 2 migrations,
-> the Phase 3 `users.status` column, the two Phase 5 migrations, the nine
-> Phase 6 migrations and the seven Phase 7 migrations all exist:
-> `settings`, `departments`, `designations`, `shifts`, `projects`,
-> `employees`, `sites`, `employee_site_assignments`, `attendances`,
-> `site_visits`, the leave/timesheet/overtime/holiday tables and
-> **the seven site-report tables (§2.9)**, plus the
-> `spatie/laravel-permission` RBAC tables — **41 tables across 33
-> migrations**. Tables for later phases (`payrolls`, `employee_documents`,
-> …) are **design only** and have not been created. `hrms_testing` mirrors
-> this schema for the test suite.
+> **Status:** Phase 8 — core schema, GPS attendance and site movement, the two
+> report families, and now the payroll vertical slice. Laravel's base tables
+> plus 10 Phase 2 migrations, the Phase 3 `users.status` column, the two
+> Phase 5 migrations, the nine Phase 6 migrations, the seven Phase 7
+> migrations and the seven Phase 8 migrations all exist: `settings`,
+> `departments`, `designations`, `shifts`, `projects`, `employees`, `sites`,
+> `employee_site_assignments`, `attendances`, `site_visits`, the
+> leave/timesheet/overtime/holiday tables, **the seven site-report tables
+> (§2.9)** and **the seven payroll tables (§2.7)**, plus the
+> `spatie/laravel-permission` RBAC tables — **48 tables across 40
+> migrations**. Tables for later phases (`expenses`, `employee_documents`, …)
+> are **design only** and have not been created. `hrms_testing` mirrors this
+> schema for the test suite.
 
 **DBMS:** MariaDB 10.4.28 (XAMPP)
 **Charset:** `utf8mb4` / collation `utf8mb4_unicode_ci`
@@ -377,21 +378,34 @@ extend, skip or postpone a deadline.
 
 ---
 
-### 2.7 Payroll & Finance
+### 2.7 Payroll & Finance — Phase 8 ✅ (payroll only)
+
+Seven tables. The three that are not payroll-shaped — `expenses`,
+`expense_receipts` — are still design only, and there is **no `salary_slips`
+table at all**: a slip is a `payrolls` row rendered to PDF on demand, so
+there is no stored file to go stale and no path to leak.
 
 | Table | Purpose |
 |---|---|
-| `payrolls` | Monthly run per employee: basic, allowances, overtime, bonus, deductions, LOP, gross, net, status |
-| `payroll_items` | Line-item detail for each payroll record |
-| `salary_slips` | Generated PDF reference, period, access control |
-| `salary_certificate_requests` | Request date, status, approved_by, generated document |
-| `loans` | Loan/advance amount, installments, start date, outstanding balance, status |
-| `loan_installments` | Per-installment schedule and payment status |
-| `expenses` | Category, date, project, site, amount, description, status (workflow) |
-| `expense_receipts` | Receipt files (private storage) |
+| `payrolls` | One row per employee per month: basic, allowances, overtime, bonus, LOP, deductions, gross, net, `status`, `blocked_reason`. **UNIQUE `(employee_id, payroll_year, payroll_month)`** — the run is the primary key's business meaning |
+| `payroll_items` | The line items behind those totals: `type` is `earning` or `deduction`, `code` is one of `basic · allowance · overtime · bonus · adjustment` against `lop · leave_unpaid · loan · advance · other`, with an optional polymorphic `source_type`/`source_id` back to the allowance, adjustment or loan installment that produced it |
+| `allowances` | Recurring (`monthly`) or `one_time` pay elements, soft-deleted rather than destroyed |
+| `payroll_adjustments` | Bonuses and other deductions for one period; only `approved` rows are computed |
+| `loans` | Loan or salary advance: principal, installment amount and count, start date, outstanding balance, status |
+| `loan_installments` | The schedule minted at approval. **UNIQUE `(loan_id, sequence)`**, `payroll_id` records the run that deducted it |
+| `salary_certificate_requests` | Purpose, request date, decision, approver, and the one-time `generated_at` |
 
-**Payroll reads only approved data** — approved attendance, approved overtime, leave
-marked LOP, approved loans, approved expenses.
+**Every money column is `DECIMAL(12, 2)`** (rates `DECIMAL(10,4)`/
+`DECIMAL(12,4)`, `lop_divisor DECIMAL(8,4)`, quantities `DECIMAL(10,2)` or
+`DECIMAL(6,2)`): no `FLOAT`, no `DOUBLE`, anywhere in the schema — a rounding
+error in a salary is a payroll error. Status columns are `string(20)` with
+model constants, **not** MySQL `ENUM`: adding a status is a deploy, not an
+`ALTER`.
+
+**Payroll reads only approved data** — approved attendance, approved and
+`payroll_eligible` overtime, leave marked LOP, approved loan installments
+(taken inside the run's own transaction), and approved adjustments. It never
+writes back into `attendances`, `leave_requests` or `overtime_requests`.
 
 ---
 
@@ -554,14 +568,28 @@ pairs are created across two migrations (see §6) to avoid a circular dependency
 at schema-creation time. They are *not* an architectural loop — one side is a
 "current placement" pointer, the other is a staffed-role pointer.
 
-**Designed but not yet created (Phases 8–12):**
+**Built in Phase 8 (see §2.7):**
 
 ```
 employees ──*── payrolls *── payroll_items
-           ├──*── salary_slips
+           ├──*── allowances
+           ├──*── payroll_adjustments
            ├──*── salary_certificate_requests
-           ├──*── loans *── loan_installments
-           ├──*── expenses *── expense_receipts
+           └──*── loans *── loan_installments
+                        │
+                        └── loan_installments.payroll_id → payrolls   (provenance, nullable)
+```
+
+`payroll_items.source_type/source_id` points back at an allowance, an
+adjustment or an installment. It is deliberately **not** a foreign key: it is
+the answer to "where did this line come from?", not an ownership edge, and a
+polymorphic pair cannot carry one without a constraint the schema would never
+check.
+
+**Still designed but not yet created (Phases 9–12):**
+
+```
+employees ──*── expenses *── expense_receipts
            ├──*── employee_documents
            ├──*── employee_trainings *── trainings
            ├──*── asset_assignments *── assets
@@ -598,7 +626,9 @@ for the two to disagree.
 | Official report lookup | **UNIQUE** `dsr_site_date_unique` `(site_id, report_date)` + `dsr_project_date_idx` + `dsr_creator_date_idx` |
 | Report photographs in order | `sarp_…` / `dsrp_…` `(…_report_id, sort_order)` — and the same pair on the three child tables |
 | Document expiry | `(expiry_date)` |
-| Payroll period | `(period_month, employee_id)` |
+| Payroll period | **UNIQUE** `payrolls (employee_id, payroll_year, payroll_month)` + `(payroll_year, payroll_month, status)` |
+| Loan schedule | **UNIQUE** `loan_installments (loan_id, sequence)` + `(status, due_date)` |
+| Run / period lookups | `payrolls`, `allowances`, `payroll_adjustments` on their own period columns |
 
 **N+1 prevention:** all list endpoints eager-load their relations via `with()`, and are
 verified with `DB::enableQueryLog()` during testing.
@@ -613,9 +643,9 @@ All counts below are **live and verified** against `hrms_laravel` after
 | Seeded | Count | Seeder |
 |---|---|---|
 | Roles | 10 | `RoleSeeder` |
-| Permissions | **59** | `PermissionSeeder` |
-| Role → permission grants | **278** | `RolePermissionSeeder` |
-| Settings | **13** | `SettingSeeder` |
+| Permissions | **70** | `PermissionSeeder` |
+| Role → permission grants | **332** | `RolePermissionSeeder` |
+| Settings | **16** | `SettingSeeder` |
 | Approval workflows | 3 — `LEAVE-STD` (default for leave, 3 steps), `LEAVE-FAST` (1 step), `OT-STD` (default for overtime, 3 steps) | `ApprovalWorkflowSeeder` |
 | Approval workflow steps | 7 — reporting manager → role → role / permission | `ApprovalWorkflowSeeder` |
 | Leave types | 5 — `AL` Annual, `SL` Sick (certificate, 2-day deadline), `EL` Emergency, `UL` Unpaid (may go negative), `OTH` Other | `LeaveTypeSeeder` |
@@ -629,11 +659,34 @@ Permission counts by phase: Phase 2 seeded **40**; Phase 4 added
 `timesheets.view/manage`, `overtime.view/create/approve/manage`) → **51**, and
 retired `leave.request` in favour of `leave.create`; Phase 7 added
 8 (`site_activity_reports.{view,create,update}` and
-`daily_site_reports.{view,create,update,manage,pdf}`) → **59**. Phase 5 added
-no permission but granted the existing `attendance.view` to `Employee`.
-Grants grew 168 → 236 → **278**. `PermissionSeeder::flat()` is the single
-source of truth and `RbacTest` asserts the seeded count matches it exactly,
-so this number cannot drift silently.
+`daily_site_reports.{view,create,update,manage,pdf}`) → **59**; **Phase 8
+added 11 → 70** (`loans.{view,create,approve,manage}`,
+`salary_slips.{view,manage}`, `salary_certificates.{view,manage}` and the
+three payroll grants that were missing — `payroll.process`, `payroll.lock`,
+`payroll.summary.view`; `payroll.view` and `payroll.manage` already existed).
+Phase 5 added no permission but granted the existing `attendance.view` to
+`Employee`. Grants grew 168 → 236 → 278 → **332** (the number is rows in
+`role_has_permissions`, so Super Admin's `['*']` counts as all 70).
+`PermissionSeeder::flat()` is the single source of truth and `RbacTest`
+asserts the seeded count matches it exactly, so this number cannot drift
+silently.
+
+**Who holds the Phase 8 eleven.** `payroll.view` reaches Super Admin, HR
+Admin, Payroll Admin, Finance, Management **and Employee** — the last of
+those only ever sees their own rows, because `PayrollController` narrows to
+the caller rather than trusting the grant. `payroll.manage`/`payroll.process`
+are Super Admin, HR Admin and Payroll Admin; **`payroll.lock` is Payroll Admin
+alone**, so the one irreversible button has one owner.
+`payroll.summary.view` adds Finance and Management, who get totals and no
+rows. `salary_slips.*` is Employee, HR Admin, Payroll Admin and Finance —
+"a payslip please" and "show me the ledger" are different questions.
+`salary_certificates.*` is Employee (ask, read, cancel their own), HR Admin
+and Payroll Admin (decide). `loans.{view,create}` is the widest of the new
+family — every role that has an employee can ask for an advance — but
+**`loans.approve` and `loans.manage` are Super Admin, HR Admin and Payroll
+Admin only**, and nobody may approve their own. Project Manager, Site
+Engineer and Site Supervisor get loans and **no payroll at all**, as Phase 7
+left them.
 
 **Who holds the Phase 7 eight.** `site_activity_reports.view` includes
 `Employee` — recording your own day is the reason the module exists.
@@ -653,8 +706,13 @@ touching anything else — they are `firstOrCreate` / `syncPermissions` only.
 
 > The heading on an exported daily report comes from
 > `settings.reporting.company_name` (**`HRMS`** by default, group
-> `reporting`) and falls back to `config('app.name')`. It is the thirteenth
-> setting and the first one a deployment is likely to want to change.
+> `reporting`) and falls back to `config('app.name')` — one of the first
+> settings a deployment is likely to want to change.
+>
+> The three Phase 8 settings are `payroll.lop_divisor_mode` (**`fixed`**),
+> `payroll.lop_divisor` (**`30`**) and `payroll.overtime_rate_multiplier`
+> (**`1.5`**) — see `docs/SECURITY.md` on why the multiplier is a generic
+> engine parameter and not a statutory rate.
 
 > ⚠️ `DevelopmentDataSeeder` contains **sample structure only**. It creates no
 > employees, users, salaries or assignments. Every row it writes is labelled
@@ -725,8 +783,23 @@ touching anything else — they are `firstOrCreate` / `syncPermissions` only.
 | 27 | `2026_09_28_130006_create_daily_site_report_equipment_table` | `daily_site_report_equipment` | `operating_hours` is a nullable meter reading; **no asset tag, no maintenance** — this is not an asset register |
 | 28 | `2026_09_28_130007_create_daily_site_report_photos_table` | `daily_site_report_photos` | Separate from the activity photos rather than polymorphic, so "which report may this travel with?" is a foreign key, not a string comparison |
 
-**41 tables** total in `hrms_laravel`, across **33 migrations** (3 framework,
-1 Sanctum, 10 Phase 2, 1 Phase 3, 2 Phase 5, 9 Phase 6, 7 Phase 7).
+After Phase 7: **41 tables**, **33 migrations** (3 framework, 1 Sanctum,
+10 Phase 2, 1 Phase 3, 2 Phase 5, 9 Phase 6, 7 Phase 7).
+
+### Phase 8 migrations (all `Ran`)
+
+| # | Migration | Creates | Why it looks like this |
+|---|---|---|---|
+| 29 | `2026_09_29_140001_create_payrolls_table` | `payrolls` | **UNIQUE `(employee_id, payroll_year, payroll_month)`** — one run per person per month is a database rule, not a service's good intentions. Every figure is `DECIMAL(12,2)`; `lop_divisor DECIMAL(8,4)` is stamped onto the row so a slip can still explain itself after the setting changes. `blocked_reason` is what a `draft` row says instead of a zero |
+| 30 | `2026_09_29_140002_create_payroll_items_table` | `payroll_items` | The audit trail of one run. `source_type`/`source_id` point back at the allowance, adjustment or installment that produced the line, so "why is this 1,500?" is answerable without a comment field. **No FK on the polymorphic pair** — it is provenance, not ownership |
+| 31 | `2026_09_29_140003_create_allowances_table` | `allowances` | `softDeletes()`: an allowance last year's payroll already used may not vanish from history. `frequency` plus an optional `payroll_year/month` covers both the recurring and the one-off case in one table |
+| 32 | `2026_09_29_140004_create_payroll_adjustments_table` | `payroll_adjustments` | A bonus that nobody approved is not a bonus. `status` defaults to `pending` and only `approved` rows are ever read by the calculator; the approver and the three timestamps are columns because "who allowed this?" must survive the user who did it |
+| 33 | `2026_09_29_140005_create_loans_table` | `loans` | `installment_amount` is stored, not re-derived: the split agreed at approval is the split that is repaid. `outstanding_balance` is denormalised on purpose — the figure a borrower asks for must not be a SUM over rows a pay-run may be writing |
+| 34 | `2026_09_29_140006_create_loan_installments_table` | `loan_installments` | **UNIQUE `(loan_id, sequence)`** and a nullable `payroll_id`: together they are the "not twice" guarantee — the run that deducted a row is recorded on the row it deducted |
+| 35 | `2026_09_29_140007_create_salary_certificate_requests_table` | `salary_certificate_requests` | No document column. The PDF is rendered from this row on demand, so `generated_at` is the only trace and there is no file to expire or path to leak |
+
+**48 tables** total in `hrms_laravel`, across **40 migrations** (3 framework,
+1 Sanctum, 10 Phase 2, 1 Phase 3, 2 Phase 5, 9 Phase 6, 7 Phase 7, 7 Phase 8).
 
 ### Why two foreign keys are "deferred"
 
@@ -823,6 +896,16 @@ and retracting one is what `status` and a later approval step are for.
 | `site_activity_report_photos` | `(site_activity_report_id, sort_order)` — `sarp_report_order_idx` | Gallery order without a `ORDER BY id` coincidence |
 | `daily_site_report_photos` | `(daily_site_report_id, sort_order)` — `dsrp_report_order_idx` | Same |
 | `daily_site_report_manpower` / `_materials` / `_equipment` | `(…_report_id, sort_order)` | The three child sets, in the order they were entered |
+| `payrolls` | **UNIQUE** `(employee_id, payroll_year, payroll_month)` | One run per person per month — the same rule the service enforces, held by the database as well |
+| `payrolls` | `(payroll_year, payroll_month, status)` — `payroll_period_status_idx` | "September, everything not locked" — the list and the summary both ask this |
+| `payroll_items` | `(payroll_id, type)` — `pi_payroll_type_idx` | Splitting a slip into earnings and deductions without a `GROUP BY` sort |
+| `payroll_items` | `(source_type, source_id)` — `pi_source_idx` | Back from a line to the allowance or installment that produced it |
+| `allowances` | `(employee_id, status)` · `(payroll_year, payroll_month)` | "What does this person get this month?" |
+| `payroll_adjustments` | `(payroll_year, payroll_month, status)` | Which bonuses are approved for the run about to be processed |
+| `loans` | `(employee_id, status)` · `(status, start_date)` | A borrower's own debts, and the approved ones due to start |
+| `loan_installments` | **UNIQUE** `(loan_id, sequence)` — `li_loan_seq_uk` | A schedule cannot grow a second "payment 4" |
+| `loan_installments` | `(status, due_date)` · `(payroll_id)` | What is due next, and what each run has already taken |
+| `salary_certificate_requests` | `(employee_id, status)` | "My requests", and the pending queue a desk works through |
 
 Composite indexes were chosen for the two filters that appear together most
 often in HR reports: *department × status* and *site × start date*. The two
@@ -946,15 +1029,22 @@ assert the exact vocabulary:
 
 `audit_logs`, `notifications`, `notification_preferences`, `employee_documents`,
 `employee_onboarding`, `trainings`, `employee_trainings`, `assets`,
-`asset_assignments`, `payrolls`, `payroll_items`, `salary_slips`,
-`salary_certificate_requests`, `loans`, `loan_installments`, `expenses`,
-`expense_receipts`, `device_tokens`.
+`asset_assignments`, `expenses`, `expense_receipts`, `device_tokens`.
+
+**Phase 8 built seven of these** (`payrolls`, `payroll_items`, `allowances`,
+`payroll_adjustments`, `loans`, `loan_installments`,
+`salary_certificate_requests`) and deliberately did **not** build a
+`salary_slips` table: a slip is a `payrolls` row rendered to PDF on demand, so
+there is no stored document to expire, cache or leak. `expenses` and
+`expense_receipts` remain design only for Phase 9.
 
 > **Deliberately absent:** `leave_documents` — a medical certificate is a file
-> on the private disk with its metadata on `leave_requests` (§2.6). And
-> nothing payroll-shaped was created in Phase 6 beyond the two facts a future
-> run needs: `overtime_requests.payroll_eligible` and
-> `leave_requests.lop_days`.
+> on the private disk with its metadata on `leave_requests` (§2.6).
+>
+> Phase 6 added no payroll table either, only the two facts a run needs:
+> `overtime_requests.payroll_eligible` and `leave_requests.lop_days`. Phase 8
+> then read both and wrote nothing back — payroll is a **reader** of
+> attendance, overtime and leave, never a writer into them.
 >
 > Phase 7 added no inventory and no asset module either. What a site *used*
 > on a day lives in `daily_site_report_materials` and

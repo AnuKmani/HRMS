@@ -115,6 +115,43 @@ class HomeScreen extends ConsumerWidget {
           '/daily-reports',
           'The official record of a site-day',
         ),
+
+      // Phase 8. Four doors, and four permissions — `payroll.view`,
+      // `payroll.summary.view`, `salary_slips.view` and `loans.view` are
+      // separate grants on purpose. The summary-only door is what lets
+      // Management in at all (it gets totals and no rows), and the slips
+      // door is a different question from the ledger: "what is my pay" and
+      // "give me the document" are asked by different people for different
+      // reasons, and a role may hold one without the other.
+      if (scope.canViewPayroll || scope.canViewPayrollSummary)
+        _Module(
+          'Payroll',
+          Icons.account_balance_outlined,
+          '/payroll',
+          'Monthly runs, deductions and totals',
+        ),
+      if (scope.canViewSalarySlips)
+        _Module(
+          'Salary slips',
+          Icons.receipt_long_outlined,
+          '/salary-slips',
+          'Your payslips, rendered when you ask',
+        ),
+      if (scope.canViewLoans)
+        _Module(
+          'Loans',
+          Icons.account_balance_wallet_outlined,
+          '/loans',
+          'Advances and how they are being repaid',
+        ),
+      if (scope.canViewSalaryCertificates)
+        _Module(
+          'Salary certificates',
+          Icons.workspace_premium_outlined,
+          '/salary-certificates',
+          'Proof of salary for a bank or landlord',
+        ),
+
       _Module(
         'Holidays',
         Icons.calendar_month_outlined,

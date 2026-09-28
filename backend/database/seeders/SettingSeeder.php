@@ -109,6 +109,54 @@ class SettingSeeder extends Seeder
             'description' => 'Organisation-wide default schedule. Sites may point at a different working_hours row instead of copying these values.',
         ],
 
+        // --- payroll -----------------------------------------------------
+        // Phase 8. Nothing below is a number anybody hard-codes: the pay run
+        // reads all three through SettingsService, so retuning the divisor is
+        // an UPDATE and not a deploy. `rounding` is deliberately absent from
+        // this list - the precision money is stored at is a property of the
+        // schema (DECIMAL(12,2)) rather than a rule an operator could break
+        // by setting it to 7.
+        [
+            // `fixed` divides the month by `payroll.lop_divisor` (30 by
+            // default - the calendar-month convention). `working_days`
+            // divides it by the number of working days the period actually
+            // contains, counted by LeaveDayCalculator from
+            // `working_hours.default` plus the holiday calendar.
+            //
+            // Both are legitimate and which is correct is a contractual
+            // question, not an engineering one - which is exactly why it is
+            // data rather than a constant. See docs/API_DOCUMENTATION.md
+            // for the formulas each one produces.
+            'key' => 'payroll.lop_divisor_mode',
+            'value' => 'fixed',
+            'type' => 'string',
+            'group' => 'payroll',
+            'label' => 'LOP divisor mode',
+            'description' => 'How a month is divided to price one lost day: `fixed` (a constant) or `working_days` (the period\'s own working days).',
+        ],
+        [
+            'key' => 'payroll.lop_divisor',
+            'value' => '30',
+            'type' => 'decimal',
+            'group' => 'payroll',
+            'label' => 'Fixed LOP divisor',
+            'description' => 'Divisor used when the mode above is `fixed`. Also the base for the daily rate that prices overtime.',
+        ],
+        [
+            // A generic multiplier rather than a statutory one. The UAE labour
+            // rules (150% basic for overtime, 200% between 22:00 and 04:00)
+            // are *not* wired in here, because applying them silently to a
+            // company they do not govern would be worse than applying
+            // nothing: set 1.5 / 2.0 yourself once payroll configuration has
+            // been validated for the jurisdiction actually being paid under.
+            'key' => 'payroll.overtime_rate_multiplier',
+            'value' => '1.5',
+            'type' => 'decimal',
+            'group' => 'payroll',
+            'label' => 'Overtime rate multiplier',
+            'description' => 'Applied to the derived hourly rate for approved, payroll-eligible overtime minutes.',
+        ],
+
         // --- reporting --------------------------------------------------
         [
             // The heading printed on every server-generated document —

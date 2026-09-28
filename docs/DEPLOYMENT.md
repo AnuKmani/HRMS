@@ -3,7 +3,10 @@
 > **Status:** Nothing is deployed yet — this document defines the architecture and
 > runbook to deploy to. What is live is local: `php artisan serve` against
 > `hrms_laravel`, and a Flutter debug build pointed at it with
-> `--dart-define=API_BASE_URL`. Phase 4 added the environment variables in §3.1.
+> `--dart-define=API_BASE_URL`. Phase 4 added the environment variables in §3.1,
+> Phase 6 the certificate and scheduler ones, and Phase 8 added three
+> **`settings` rows** (LOP divisor and the overtime multiplier) that are
+> deliberately *not* env vars — see §3.1.
 
 ---
 
@@ -155,6 +158,29 @@ HRMS_SICK_OVERLAP_MINUTES=60
 # every use through SettingsService. There is no settings endpoint yet, so
 # it is changed with a row update rather than a config:clear. A leave type
 # with document_deadline_days > 0 wins over it.
+
+# --- Phase 8: payroll ----------------------------------------------------------
+# Deliberately NOT env vars either, and for the same reason — they are
+# operational figures an operator changes between runs, not secrets or
+# deployment mechanics, and config:cache would bake them into a file that has
+# to be rebuilt on every change. They are `settings` rows read through
+# SettingsService on every calculation:
+#
+#   payroll.lop_divisor_mode         fixed (the only mode today; `working_days`
+#                                    is reserved so a month can be priced from
+#                                    its own calendar instead)
+#   payroll.lop_divisor              30     one LOP day = salary / 30
+#   payroll.overtime_rate_multiplier 1.5    hourly rate x 1.5 per overtime hour
+#
+# The divisor does double duty: it is also how the *hourly* rate for overtime
+# is derived, so changing one number changes both, which is why the three
+# settings are read together inside a single run rather than per employee.
+#
+# BEFORE PRODUCTION: the overtime multiplier is a generic engine setting,
+# not a validated statutory rate. The UAE Labour Law (and any other
+# jurisdiction you deploy into) has its own rules for basic vs. basic+allowance
+# and for the 1.25/1.5/2x tiers — validate and set them yourself. Nothing here
+# is statutory compliance, and the schema will not stop you setting it wrong.
 ```
 
 **Critical:** `APP_DEBUG=false` in production. A debug page can leak env secrets.
@@ -174,8 +200,9 @@ php artisan migrate --force
 php artisan storage:link        # only if any public disk is used
 ```
 
-**When the permission catalogue grows** (it has twice — Phase 4 and Phase 6),
-re-run the idempotent seeders rather than the whole `DatabaseSeeder`:
+**When the permission catalogue grows** (it has four times — Phases 4, 6, 7
+and 8, and it now stands at **70 permissions / 332 grants**), re-run the
+idempotent seeders rather than the whole `DatabaseSeeder`:
 
 ```bash
 php artisan db:seed --class=PermissionSeeder --force      # creates + retires
@@ -291,11 +318,11 @@ Business rules that **must** run server-side — never depend on the mobile app 
 | Job | Purpose | Default schedule | Status |
 |---|---|---|---|
 | `EnforceSickCertificateDeadlines` | Convert leave past its certificate deadline to **LOP**, release the balance, dispatch `LeaveConvertedToLop` | **hourly at :17** — `hourlyAt(config('hrms.scheduling.tick_minute'))`, `HRMS_SICK_TICK_MINUTE` | ✅ Phase 6 |
-| Document expiry reminders | Passport / visa / Emirates ID / certificates | Daily | ⬜ Phase 9 |
-| Training certificate expiry | Notify employee + HR | Daily | ⬜ Phase 9 |
+| Document expiry reminders | Passport / visa / Emirates ID / certificates | Daily | ⬜ Phase 10 |
+| Training certificate expiry | Notify employee + HR | Daily | ⬜ Phase 10 |
 | Leave reminders | Pending approvals, upcoming leave | Daily | ⬜ with notifications |
 | Attendance reminders | Missing check-in / check-out | Daily | ⬜ with notifications |
-| Payroll processing | Monthly run | Monthly | ⬜ Phase 10 |
+| Payroll processing | Monthly run | — | ✅ Phase 8 built it, and **deliberately did not schedule it**: a run is an explicit `POST /payroll/process` behind `payroll.process`. Money should not move on a timer; the one-way ladder already makes an accidental second run cost `updated: 0` |
 | Notification dispatch | FCM delivery | Every minute | ⬜ Phase 11 |
 
 **Cron entry** (`crontab -e` for the deploy user):
@@ -396,14 +423,23 @@ backend/storage/app/private/
 ├── leave-certificates/{employeeId}/{uuid}.pdf   Phase 6, kept exactly as sent
 ├── site-report-photos/activity/{reportId}/{uuid}.jpg   Phase 7, re-encoded
 ├── site-report-photos/daily/{reportId}/{uuid}.jpg      Phase 7, re-encoded
-├── documents/employees/     passports, IDs, visas, contracts   ⬜ Phase 9
-└── documents/payroll/       salary slips, certificates         ⬜ Phase 10
+├── documents/employees/     passports, IDs, visas, contracts   ⬜ Phase 10
+└── (no payroll directory — see below)
 ```
 
 There is **no `reports/` directory and no stored PDF.** The daily site
 report's document is rendered on demand by `GET /daily-site-reports/{id}/pdf`
 and streamed, so nothing to back up, nothing to expire, and no path a
 response could leak.
+
+**Phase 8 created no directory at all.** A salary slip is the `payrolls` row
+rendered by `GET /salary-slips/{id}/pdf` and a certificate is
+`GET /salary-certificate-requests/{id}/pdf`; both stream and close. There is
+no `salary_slips` table, no `pdf_path` column and no file to restore — which
+means a **backup restore cannot resurrect somebody's payslip from an old
+copy of the disk**, and the restore procedure below has nothing extra to
+handle. The only place a Phase 8 PDF ever touches a file system is a
+*client's* private temp directory, deleted by the OS, on the phone.
 
 Never inside the web root. All three live directories are reachable only
 through an authenticated route that runs a policy — `GET /attendance/{id}/selfie`,
@@ -523,6 +559,15 @@ Keystore loss = inability to update the app. Back it up before first release.
 **Log:** API errors, sync failures, authentication failures, important backend failures.
 **Never log:** passwords, auth tokens, private document contents.
 
+**Never log a payroll figure either.** A `net_salary`, a loan principal or a
+per-employee line out of a run must never reach `laravel.log`, a debug dump
+or a query log line with its bindings shown. An aggregated log has a much
+longer retention than the HR system it came from and is often readable by
+people who hold no permission at all — a payroll run is identified in this
+codebase by *period and counts*, never by *who earned what*. This is a rule
+to keep, not a control that enforces itself: no payroll path calls `Log::info()`
+today, and adding one is a decision someone must make deliberately.
+
 ---
 
 ## 10. Deployment Runbook
@@ -582,6 +627,11 @@ php artisan queue:failed       # must be empty after a deploy
 | Phase 5 selfie env keys (`HRMS_SELFIE_MAX_KB`, `HRMS_SELFIE_MAX_PIXELS`, `HRMS_SELFIE_JPEG_QUALITY`) present in `.env.example` | ✅ Added in operational hardening — no secrets, defaults only |
 | Phase 6 certificate env keys documented in §3.1 | ✅ |
 | Phase 6 certificate env keys present in `.env.example` | ✅ Added in operational hardening |
+| Phase 8 payroll settings documented in §3.1 (three `settings` rows, **not** env vars) | ✅ |
+| Phase 8 adds **no** storage directory and stores **no** PDF (§7.1) | ✅ by design — nothing extra to back up, restore or expire |
+| "Never log a payroll figure" recorded as a rule (§9) | ✅ documented; no payroll path calls `Log::info()` today |
+| Permission catalogue documented at its current size (§3.2) | ✅ 70 permissions / 332 grants, four phases of growth |
+| Statutory (UAE / jurisdiction) overtime rate validated and configured | ⬜ **required before production** — the multiplier is a generic engine setting, not compliance |
 | `.env.example` contains no passwords, keys or credentials | ✅ placeholders only; `MAIL_PASSWORD`, `AWS_SECRET_ACCESS_KEY`, `DB_PASSWORD` remain blank or commented |
 | Scheduler registration documented with real `schedule:list` output (§5) | ✅ |
 | Production cron line documented (§5) | ✅ `* * * * * cd … && php artisan schedule:run` |

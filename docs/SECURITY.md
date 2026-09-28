@@ -1,17 +1,21 @@
 # Security
 
-> **Status:** Phase 7 — authentication, rate limiting, the password policy, a
-> **59-permission** catalogue, row-level policies (17 of them), GPS attendance
+> **Status:** Phase 8 — authentication, rate limiting, the password policy, a
+> **70-permission** catalogue, row-level policies (22 of them), GPS attendance
 > controls (server-authoritative geofence, private selfie storage, location and
 > camera permissions), server-side selfie sanitisation (§4.3), the approval and
 > leave controls (no self-approval, current-step-only decisions, private
-> medical-certificate storage, §4.4), and now the **site vertical slice**:
-> derived authorship and derived project on every report, private
-> re-encoded report photographs behind their own policy (§4.5), a
-> server-rendered PDF that is never stored (§4.6), and a submit-time GPS
-> reading the server validates rather than trusts. Transport hardening and
-> audit logging remain phased ahead (§5, §8). Individual controls are marked
-> with their phase below.
+> medical-certificate storage, §4.4), the **site vertical slice**: derived
+> authorship and derived project on every report, private re-encoded report
+> photographs behind their own policy (§4.5), a server-rendered PDF that is
+> never stored (§4.6), and a submit-time GPS reading the server validates
+> rather than trusts — and now the **payroll vertical slice**: a one-way money
+> ladder with `payroll.lock` held by one role, salary figures that are
+> `DECIMAL` and formatted in exactly one place, a loan schedule that can be
+> taken only once, and salary slips and certificates rendered on demand with
+> nothing stored and nothing to link to (§4.7). Transport hardening and audit
+> logging remain phased ahead (§5, §8). Individual controls are marked with
+> their phase below.
 
 ---
 
@@ -92,15 +96,19 @@ Two layers, both mandatory:
 
 ### 3.1 Permission layer (`spatie/laravel-permission`)
 
-**Implemented in Phase 2 ✅, extended in Phases 4–7** — `spatie/laravel-permission`
-**^6.25**, 10 roles, **59 permissions**, **278 grants**. Phase 4 added
+**Implemented in Phase 2 ✅, extended in Phases 4–8** — `spatie/laravel-permission`
+**^6.25**, 10 roles, **70 permissions**, **332 grants**. Phase 4 added
 `employees.salary.view`; Phase 5 granted the existing `attendance.view` to the
 `Employee` role so a person can read back the day they recorded; Phase 6 added 11
 (`approvals.view/manage`, `leave.balance.view/manage`, `holidays.manage`,
 `timesheets.view/manage`, `overtime.view/create/approve/manage`) and retired
 `leave.request` in favour of `leave.create`; Phase 7 added 8
 (`site_activity_reports.{view,create,update}` and
-`daily_site_reports.{view,create,update,manage,pdf}`).
+`daily_site_reports.{view,create,update,manage,pdf}`); **Phase 8 added 11**
+(`loans.{view,create,approve,manage}`, `salary_slips.{view,manage}`,
+`salary_certificates.{view,manage}`, and the three payroll verbs that
+`payroll.view`/`payroll.manage` could not express — `payroll.process`,
+`payroll.lock`, `payroll.summary.view`).
 
 > **Version pin matters:** v7/v8 of this package require PHP `^8.3`. This environment
 > runs **PHP 8.2.4**, so Composer correctly resolves to **6.25.0** (supports Laravel
@@ -121,7 +129,11 @@ leave.balance.view    leave.balance.manage
 holidays.manage
 timesheets.view       timesheets.manage
 overtime.view         overtime.create      overtime.approve     overtime.manage
-payroll.view          payroll.manage
+payroll.view          payroll.manage        payroll.process      payroll.lock
+payroll.summary.view
+salary_slips.view     salary_slips.manage
+salary_certificates.view   salary_certificates.manage
+loans.view            loans.create          loans.approve        loans.manage
 projects.view         projects.manage
 sites.view            sites.manage
 site_activity_reports.view   site_activity_reports.create   site_activity_reports.update
@@ -138,7 +150,7 @@ users.view            users.manage
 audit.view
 ```
 
-Two absences are deliberate:
+Four absences are deliberate:
 
 - **No `holidays.view`.** Reading the calendar is owed to every signed-in
   account — you cannot plan leave around days you are forbidden to see — so
@@ -154,6 +166,24 @@ Two absences are deliberate:
   Phase 7 deliberately does not offer. `.pdf` *is* its own permission rather
   than riding on `.view`, because being shown a list and being handed
   something you can forward are different acts.
+- **No `payroll.reverse`, no `payroll.delete`, no `loan.writeoff`.** Phase 8's
+  money ladder only climbs: `draft → calculated → reviewed → processed →
+  locked`, and a repayment schedule that has started may only be completed.
+  A permission that authorised a reversal would promise a capability the
+  services refuse, so the correction path is a new positive entry (a `+`
+  adjustment, a `skipped` installment) that leaves the original figure
+  standing — which is what an auditor needs to see anyway.
+
+**Who sees whose money (Phase 8).** Every payroll read is narrowed to the
+caller unless the caller holds `payroll.manage`, so `payroll.view` alone is
+"My payslip", not "the company's payroll". `payroll.summary.view` is the one
+read that returns aggregates with **no names and no rows** — it exists so
+Management can be given totals without being given the ledger.
+`salary_slips.view` is a separate family for the same reason: a role may be
+handed its own payslips while being kept out of everyone else's.
+`loans.view` has **no `employees.view` fallback** — a borrower's loan is
+visible to them because they are the borrower, not because they can browse
+the directory.
 
 | | |
 |---|---|
@@ -267,7 +297,7 @@ Three rules the Phase 6 policies encode:
 — you may file for a request you may already read, and only while it can
 still accept one. The upload itself is bounded by §4.2.
 
-**Status:** ✅ Permission layer live (Phase 2) · ✅ Permission-gated routes since Phase 3 · ✅ Policies for the Phase 4 modules (Phase 4) · ✅ Attendance + site-visit policies (Phase 5) · ✅ Leave / balance / leave-type / holiday / timesheet / overtime / approval-workflow policies (Phase 6) · ✅ **Site activity report + daily site report policies with `App\Support\Visibility` row scoping (Phase 7)** · ⬜ Payroll and document policies in their own phases
+**Status:** ✅ Permission layer live (Phase 2) · ✅ Permission-gated routes since Phase 3 · ✅ Policies for the Phase 4 modules (Phase 4) · ✅ Attendance + site-visit policies (Phase 5) · ✅ Leave / balance / leave-type / holiday / timesheet / overtime / approval-workflow policies (Phase 6) · ✅ **Site activity report + daily site report policies with `App\Support\Visibility` row scoping (Phase 7)** · ✅ **Payroll / allowance / payroll-adjustment / loan / salary-certificate policies (Phase 8)** · ⬜ Employee-document and expense policies in their own phases
 
 > **Scope note:** permissions are a *coarse gate*. Row scoping belongs to the
 > policy, and for the modules that exist today that split is wired: every Phase
@@ -450,6 +480,28 @@ referenced, so rendering the file never has to expose or write an image.
 **Audit logging is still not implemented** for reads of this document —
 §8/§13.
 
+### 4.7 Salary slips and salary certificates — ✅ Phase 8
+
+Two documents, one rule: **the money is read from the row at the moment it is
+asked for, and never written to disk.**
+
+| Layer | What it does | Why it exists |
+|---|---|---|
+| `GET /salary-slips/{payroll}/pdf` | Renders the `payrolls` row, streams `application/pdf`, `Cache-Control: no-store` | There is no `salary_slips` table, no stored file and no URL — the slip *is* the row, so it cannot go stale behind a recalculation or be found by guessing a path |
+| `GET /salary-certificate-requests/{id}/pdf` | Renders, streams, then calls `markGenerated()` **after** a successful write | A failed render leaves the row `approved` and answerable again rather than `generated` with nothing behind it; `generated_at` moves **once** |
+| `SalarySlipPdf` / `SalaryCertificatePdf` | Same dompdf instance as §4.6 — no second PDF package to secure or upgrade | One dependency, one set of headers, one place a document is built |
+| Gates | `salary_slips.view` + row scope; `salary_certificates.view` + `SalaryCertificateRequestPolicy` | Both are permission *and* policy: the grant says "may you read payslips", the policy says "may you read *this* one" |
+| Response headers | `no-store`, `Pragma: no-cache`, `nosniff`, `Content-Disposition` with a **server-minted** filename | The filename is `safePdfFilename()`-shaped on the client and generated on the server — a caller cannot set the name a browser saves under |
+
+**Nothing about salary appears anywhere it is not asked for.** `PayrollResource`
+is the only shape that carries `net_salary`; it is not reachable from an
+employee resource, from the summary endpoint (`payroll.summary.view` returns
+counts and totals with **no names**), or from a log line — Phase 8 added no
+`Log::info()` in any payroll path, because "which employee earned what" is
+the one line a log file should never contain.
+
+**Audit logging is still not implemented** for these reads — §8/§13.
+
 ---
 
 ## 5. Transport Security
@@ -494,6 +546,10 @@ endpoints each have their own Form Request (`StoreDepartmentRequest`,
 `SubmitDailySiteReportRequest` and `StoreReportPhotosRequest` — seven in all,
 backed by the shared `ValidatesReportSite` and `ValidatesReportGps`
 concerns)** ·
+✅ **Phase 8 writes (`ProcessPayrollRequest`, `Store/UpdateAllowanceRequest`,
+`Store/UpdatePayrollAdjustmentRequest`, `ActOnPayrollAdjustment`,
+`Store/UpdateLoanRequest`, `ActOnLoan`, `Store/ActOnSalaryCertificateRequest`
+— eleven in all)** ·
 ⬜ one per write endpoint as later modules land
 
 The Phase 7 set is worth naming for one habit it establishes: **the update
@@ -501,6 +557,17 @@ requests are not the store requests with everything made optional.**
 `UpdateSiteActivityReportRequest` relaxes only the keys that may legitimately
 change on an existing row and leaves the cross-field rules alone, so an edit
 cannot smuggle in a combination a create would have refused.
+
+Phase 8 applies the same habit to the one field that identifies a person.
+`StoreLoanRequest` **requires** `employee_id` (defaulting to the caller's own
+record in `prepareForValidation()` when absent, so an employee asking for an
+advance never has to know their id), and `UpdateLoanRequest` **prohibits**
+`employee_id` outright — a loan may be edited, but it may never be pointed at
+a different borrower. No request in the family accepts a *figure* to
+calculate with: amounts, statuses and balances arrive from the server, and
+`ProcessPayrollRequest` accepts only the `year` and `month` to run. A client
+that sent `net_salary` would have it ignored, which is the correct answer for
+a field nobody should be able to assert.
 
 `UpdateEmployeeSiteAssignmentRequest` is worth naming: it accepts **only**
 `status` ∈ `{ended, cancelled}` and `end_date`. Identity fields
@@ -542,6 +609,17 @@ resource a client can actually consume, and it is capped structurally: 6
 files per request, 12 per report, 5120 KB each, and a partial batch is
 unwound (§4.5). Adding a limiter later is a config line; making an
 over-eager one permanent is not.
+
+**Phase 8 added no limiter either — deliberately, and with one eye open.**
+None of the 36 payroll-family routes accepts a credential, a file or an
+unbounded body, and every one is behind `auth:sanctum` + a permission + a
+policy. The single expensive call is `POST /payroll/process`, which prices a
+month across every employee; it is bounded instead by *who may call it*
+(`payroll.process`: Super Admin, HR Admin, Payroll Admin — three roles, and
+none of them is a device in a field) and by the one-way ladder, which makes
+a repeat call cost `updated: 0` rather than a second recalculation. That is
+the shape the general API limiter should eventually take: a config line in
+`config/rate_limiting.php`, not a permanent refusal.
 
 On breach → `429` in the standard envelope with `Retry-After`, rendered by the
 exception handler rather than by a per-limiter `Limit::response()` callback, so
@@ -615,6 +693,20 @@ with what remark) and every LOP conversion records `lop_reason`,
 facts of *what happened* are durable and queryable; what is missing is the
 append-only *who-changed-it* log and the read trail, both of which stay in
 the dedicated audit/security phase rather than being faked here.
+
+**Phase 8 added a third, and refused to fake it.** "Payroll processing" is
+in the table above and no activity row is written for it — nor is any row
+fabricated out of `payroll_adjustments`-style columns to look like one. What
+Phase 8 *did* do is make the future log one call deep: every payroll
+mutation already runs inside a named service method
+(`PayrollService::process/review/finalize/lock`, `LoanService::approve`,
+`SalaryCertificateService::approve`), each of which knows the actor, the row
+and the transition, and each transition already stamps `reviewed_by`,
+`processed_by`, `locked_by`, `approved_by` with their timestamps. Those
+columns are *attribution*, not an audit trail — they tell you who last
+touched a row, not who changed what across time — and the distinction is
+recorded here rather than blurred by shipping a table that only half the
+writes visit.
 
 ---
 
@@ -723,9 +815,24 @@ only as long as the business/retention policy requires. The check-in selfie
 is the only image kept, at one per first check-in per day, and it leaves the
 phone as a compressed JPEG rather than the full camera frame.
 
+**Salary privacy ✅ Phase 8.** A salary is the second-most sensitive fact the
+system holds about a person, and Phase 8 treats it as one:
+
+- `net_salary` and every other figure appear **only** in `PayrollResource`,
+  reached through `/payroll`, `/payroll/{id}` and `/salary-slips` — never in
+  `EmployeeResource`, never in `/reports/*`, never in an error message
+- `/payroll/summary` returns counts and totals with **no names**, so
+  `payroll.summary.view` cannot become a de-anonymised payroll list
+- no payroll path writes a log line containing a figure or an employee id
+- the loan balance is visible to the borrower and to the roles that decided
+  it — there is no route that lists "who owes what" for curiosity's sake
+- a certificate names the employee because a certificate is *about* them;
+  it never contains a salary
+
 **Status:** ✅ Phase 5 — the location and camera parts of this section are now
 properties of shipped code, not a plan. **✅ Phase 7 — site activity reports
 now collect a reading too, at submit, with no background permission.**
+**✅ Phase 8 — salary minimisation above is shipped, not planned.**
 The remaining rows (retention jobs) belong to later phases.
 
 ---
@@ -767,9 +874,9 @@ Enforced by `Password::min(8)->letters()->numbers()` on both
 | 7 | **Site activity reports & the official daily report** — 18 routes each behind `permission:` **and** a policy; author (`employee_id` / `created_by`) and project derived server-side, never read from the payload; `project_id` must own the stated `site_id`; status only via `POST …/submit` with `409` on an edit to a filed report; `dsr_site_date_unique` plus request-level and service-level guards for one official report per site-day; report photographs re-encoded through the fail-closed `SelfieSanitizer`, private disk, no path and no URL in any response, 6 per request / 12 per report, mismatch → `404` and filed → `409`; the PDF rendered on demand, `no-store`, never stored, behind its own `daily_site_reports.pdf` permission — held by Super Admin,
 HR Admin, HR Executive, Project Manager, Site Engineer, Site Supervisor and
 Management, and by neither Payroll Admin, Finance nor `Employee`; 8 new permissions (59 total / 278 grants); submit-time GPS with a `(0,0)`/non-finite/accuracy-ceiling check; **deliberately no new rate limiter (§7)**. **Not delivered: report audit rows — still outstanding (§8)** |
-| 8 | Daily-report approval (`approved_at` is created and reserved), report audit rows — planned |
-| 9 | Document private storage, signed URLs, expiry jobs, onboarding/training/assets — planned |
-| 10 | Payroll, salary slips, loans, expenses — own-only salary access and payroll audit, planned |
+| 8 | **Payroll, loans & salary documents** — 36 routes, each behind `permission:` **and** a policy; a one-way money ladder (`draft → calculated → reviewed → processed → locked`) with no reverse and no delete, so no permission authorises a capability the services refuse; `payroll.lock` held by **Payroll Admin alone**, `payroll.process` by three roles, `payroll.summary.view` returning totals with **no names**; every figure `DECIMAL(12,2)` and printed by one formatter (§5 of ARCHITECTURE), no float column anywhere; salary-slip and certificate PDFs rendered on demand behind `no-store` with **no stored file, no path and no URL** (§4.7); loan schedule minted at approval with a `payroll_id` on every installment it takes, so a run cannot take a payment twice; `employee_id` required on create and prohibited on update; salary never present in an employee resource or a log line; 11 new permissions (**70 total / 332 grants**), 5 new policies (22 total), 3 new settings (16 total); **deliberately no new rate limiter (§7)**. **Not delivered: payroll and salary-document audit rows — still outstanding (§8), and the UAE/statutory overtime rate is a generic multiplier, not a validated statutory configuration** |
+| 9 | Expenses — workflow approval, receipt files on private storage, own-only salary access |
+| 10 | Employee documents, onboarding, training, assets; daily-report approval (`approved_at` is created and reserved) |
 | 11 | Notifications/FCM, dashboards, exports — planned |
 | 12 | Full security audit, penetration-style test pass, deployment hardening |
 

@@ -1,9 +1,6 @@
-import 'dart:io';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:open_filex/open_filex.dart';
-import 'package:path_provider/path_provider.dart';
 
+import '../../../core/presentation/pdf_opener.dart';
 import '../data/api_daily_site_report_repository.dart';
 import '../domain/daily_site_report_repository.dart';
 
@@ -37,48 +34,29 @@ final reportPdfOpenerProvider = Provider<ReportPdfOpener>((ref) {
 });
 
 /// The real one: bytes from the API, a private temp file, the OS's viewer.
+///
+/// The file handling itself now lives in one place —
+/// [DevicePdfOpener] — because a payslip and a site report need exactly the
+/// same three lines and disagreeing about where the temporary file goes
+/// would be a strange way to discover it.
 class DeviceReportPdfOpener implements ReportPdfOpener {
-  DeviceReportPdfOpener(this._repository);
+  DeviceReportPdfOpener(this._repository, {PdfOpener? opener})
+    : _opener = opener ?? const DevicePdfOpener();
 
   final DailySiteReportRepository _repository;
+
+  final PdfOpener _opener;
 
   @override
   Future<void> open(int id, {String? filename}) async {
     final bytes = await _repository.pdf(id);
 
-    final directory = await getTemporaryDirectory();
-
     // The name is only ever shown in the viewer's title bar, and it is
     // built here rather than trusted from a `Content-Disposition`: a
     // filename is user-visible text, and a server that has already been
     // asked to render the document is not the party this needs to defend
-    // against. What must *not* happen is the file landing somewhere shared
-    // — a temp directory inside the app's own sandbox is the private half
-    // of "no permanent public URL".
-    final safeName = _safeName(filename ?? 'report-$id.pdf');
-
-    final file = File('${directory.path}${Platform.pathSeparator}$safeName');
-    await file.writeAsBytes(bytes, flush: true);
-
-    final result = await OpenFilex.open(file.path);
-
-    if (result.type != ResultType.done) {
-      throw StateError(
-        'The PDF was downloaded but no app on this device could open it. '
-        'Try again from a device with a PDF reader installed.',
-      );
-    }
-  }
-
-  /// Strips anything a path could be made of. Defence in depth rather than
-  /// in response to an actual threat: the string never came from a user,
-  /// and one rule is cheaper than being sure of that forever.
-  static String _safeName(String name) {
-    final cleaned = name.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
-
-    return cleaned.isEmpty || cleaned == '.' || cleaned == '..'
-        ? 'report.pdf'
-        : cleaned;
+    // against. Sanitising happens downstream, once.
+    await _opener.openBytes(bytes, filename ?? 'report-$id.pdf');
   }
 }
 

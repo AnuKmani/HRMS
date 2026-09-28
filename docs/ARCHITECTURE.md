@@ -1,9 +1,10 @@
 # Architecture
 
-> **Status:** Phase 7 — RBAC, authentication, the business slices through
-> attendance and leave, and now the site vertical slice (activity reports,
-> the official daily report and its on-demand PDF) are implemented and
-> documented as built. Sections marked ⬜ are planned but not yet built.
+> **Status:** Phase 8 — RBAC, authentication, the business slices through
+> attendance and leave, the site vertical slice (activity reports, the
+> official daily report and its on-demand PDF) and now **the payroll vertical
+> slice** (ledger, calculation, loans and salary documents) are implemented
+> and documented as built. Sections marked ⬜ are planned but not yet built.
 
 ---
 
@@ -134,6 +135,23 @@ JSON Response
 Geofence validation, leave balance calculation, LOP conversion and payroll calculation are
 each several steps long and must be unit-testable **without HTTP**. Putting them in a
 Controller makes them untestable and un-reusable from a Job or a Scheduler command.
+
+**Implemented in Phase 8 ✅** — `app/Services/Payroll/` is the largest family yet and
+the reason the controller layer stayed thin:
+
+| Service | Owns |
+|---|---|
+| `PayrollCalculationService` | The whole derivation for one employee-month: basic → allowances → overtime → bonus → gross → LOP → unpaid leave → loan → net. **No HTTP object reaches it** and it writes nothing |
+| `PayrollService` | The transaction around a run: the unique-row insert, the one-way status ladder, the summary aggregation |
+| `PayrollAdjustmentService` · `LoanService` | Approval transitions and their side effects — minting the schedule, `activateDue()` inside a pay run |
+| `SalaryCertificateService` | Ask / decide / cancel, and `markGenerated()` running **after** the PDF renders |
+| `SalarySlipPdf` · `SalaryCertificatePdf` | dompdf rendering (`html()` separate from `response()` so content is testable) |
+| `PayrollCalculation` · `PayrollPeriod` | Immutable value objects — the result and the year/month window |
+
+The rule the whole family obeys: **a controller never does arithmetic.** It
+authorizes, calls one service method, and returns a resource — which is what
+lets the same calculation serve a run, a recalculation and a summary without
+any of the three disagreeing about a number.
 
 ### 3.4 Standard response envelope
 
@@ -390,13 +408,43 @@ timesheets and overtime — the same three roles that may see beyond their own
 attendance), so a Project Manager's queue contains their reports and nobody
 else's, in both the list query and the single-row check.
 
+**Implemented in Phase 8 ✅** — five more policies (`Payroll`,
+`PayrollAdjustment`, `Allowance`, `Loan`, `SalaryCertificateRequest`), 22 in
+total, and `Visibility` gained the four helpers the payroll family reads:
+
+| Route group | Gate |
+|---|---|
+| `GET /payroll`, `GET /payroll/{id}` | `permission:payroll.view` **then** `payrollsFor()` / `PayrollPolicy::view` |
+| `GET /payroll/summary` | `permission:payroll.summary.view` — aggregates only, no names |
+| `POST /payroll/process`, `POST /payroll/{id}/recalculate` | `permission:payroll.process` **then** policy |
+| `POST /payroll/{id}/review`, `.../finalize` | `permission:payroll.manage` **then** policy |
+| `POST /payroll/{id}/lock` | `permission:payroll.lock` **then** policy |
+| `GET /salary-slips`, `GET /salary-slips/{id}/pdf` | `permission:salary_slips.view` **then** the same row scope as `/payroll` |
+| `GET /allowances`, `GET /payroll-adjustments` | `permission:payroll.view` (own rows unless `payroll.manage`) |
+| all writes on allowances and adjustments | `permission:payroll.manage` **then** policy |
+| `GET /loans`, `GET /loans/{id}` | `permission:loans.view` **then** `loansFor()` — no `employees.view` fallback |
+| `POST /loans`, `POST /loans/{id}/submit` | `permission:loans.create` **then** `LoanPolicy` |
+| `POST /loans/{id}/approve`, `/reject` | `permission:loans.approve` **then** `LoanPolicy::approve` (self-approval is `403`) |
+| `POST /loans/{id}/cancel`, `PUT /loans/{id}` | `permission:loans.view` **then** policy (draft only) |
+| `GET/POST /salary-certificate-requests`, `GET .../{id}`, `.../pdf` | `permission:salary_certificates.view` **then** policy |
+| `POST .../{id}/approve`, `/reject` | `permission:salary_certificates.manage` **then** policy (second decision is `403`) |
+
+Two rules carry over and one is new. **"Who" and "state" stay apart** — a
+policy that finds `isPending()` false answers `403`, and the service refuses
+the same second decision with `409` as defence in depth, so the two layers
+never disagree about the caller. **A refusal to act is `409`; a refusal of a
+caller is `403`.** The new one: **nothing here recalculates a locked row** —
+`PayrollPolicy` answers `false` for any transition past `locked`, and the
+service refuses again, because a payroll number that moves after it has been
+handed out is worse than a wrong one that stays put.
+
 #### Roles and permissions
 
 | | |
 |---|---|
 | Roles | 10 — Super Admin, HR Admin, HR Executive, Payroll Admin, Project Manager, Site Engineer, Site Supervisor, Finance, Management, Employee |
-| Permissions | **59**, all named `resource.action` (lowercase) |
-| Grants | **278** rows in `role_has_permissions` |
+| Permissions | **70**, all named `resource.action` (lowercase) |
+| Grants | **332** rows in `role_has_permissions` |
 | Seeders | `RoleSeeder` → `PermissionSeeder` → `RolePermissionSeeder` (order matters) |
 
 Permission catalogue lives in one place — `PermissionSeeder::PERMISSIONS`, grouped by
@@ -413,7 +461,10 @@ leave        leave.view | .create | .approve | .manage | leave.balance.view | le
 holidays     holidays.manage
 timesheets   timesheets.view | .manage
 overtime     overtime.view | .create | .approve | .manage
-payroll      payroll.view | .manage
+payroll      payroll.view | .manage | .process | .lock | payroll.summary.view
+salary_slips salary_slips.view | .manage
+salary_certificates salary_certificates.view | .manage
+loans        loans.view | .create | .approve | .manage
 projects     projects.view | .manage
 sites        sites.view | .manage
 site_activity_reports site_activity_reports.view | .create | .update
@@ -453,11 +504,28 @@ own rather than a rider on `.view`: reading the numbers and being handed a
 document you can forward are different acts, so `DailySiteReportPolicy::pdf()`
 asks for both this and the row-level question.
 
+Phase 8 added eleven, three of them correcting an omission: `payroll.view`
+and `payroll.manage` already existed, but neither said *who may press which
+button*, so `payroll.process` (run and recalculate), `payroll.lock` (the
+irreversible one, **Payroll Admin alone**) and `payroll.summary.view` (totals
+and no rows — Management and Finance) split the difference. The rest follow
+the module shape: `salary_slips.{view,manage}`, `salary_certificates.{view,manage}`,
+`loans.{view,create,approve,manage}`. Two asymmetries are deliberate. First,
+**`salary_slips.view` is not `payroll.view`** — a role can be given its
+payslips without being given the ledger, and collapsing them would make one
+grant meaningless, which is why `salary-slips` is its own route family.
+Second, **asking is not a second grant**: `salary_certificates.view` is
+enough to file for yourself, because an employee requesting a certificate of
+their own employment is not an administrative act; deciding one is
+`.manage`. `loans.approve` is withheld from `Employee`, and
+`LoanPolicy::approve()` refuses a self-approval on top of the coarse gate —
+the two answers differ on purpose, `403` for *who* and `409` for *state*.
+
 **Super Admin** holds `['*']` — every permission, resolved from the catalogue at seed
 time rather than hard-coded, so a newly added permission is granted automatically.
 Every other role is an explicit allow-list: anything absent is **denied**. The mapping
 is `RolePermissionSeeder::MAP`, and `RbacTest` asserts both directions (Super Admin has
-all 59; `Employee` is denied `payroll.manage`, `employees.delete`, `attendance.manage`,
+all 70; `Employee` is denied `payroll.manage`, `payroll.process`, `payroll.lock`, `employees.delete`, `attendance.manage`,
 `leave.approve`, `audit.view`).
 
 `employees.salary.view` — added in Phase 4 — is the one permission that is *not*
@@ -553,6 +621,7 @@ lib/
 │   ├── documents/
 │   ├── expenses/
 │   ├── loans/
+│   ├── salary_certificates/
 │   ├── training/
 │   ├── assets/
 │   └── notifications/
@@ -580,6 +649,8 @@ mobile/lib/
 │   │   ├── remote_picker.dart          # debounced, searchable option sheet
 │   │   ├── status_chip.dart            # ← Phase 6, StatusTone for every module
 │   │   ├── no_permission.dart          # ← Phase 6, the gate a list draws
+│   │   ├── money.dart                  # ← Phase 8, the only formatter that prints money
+│   │   ├── pdf_opener.dart             # ← Phase 8, hand a generated PDF to the OS
 │   │   └── camera_capture_sheet.dart   # ← Phase 6, shared selfie/certificate flow
 │   ├── data/approval_step.dart         # ← Phase 6, one approval chain step
 │   ├── data/device_camera.dart         # ← Phase 6, front/back lens abstraction
@@ -599,9 +670,14 @@ mobile/lib/
 │   ├── timesheet/                      # ← Phase 6, three-layer
 │   ├── overtime/                       # ← Phase 6, three-layer
 │   ├── holidays/                       # ← Phase 6, three-layer
-│   └── site_reports/                   # ← Phase 7, three-layer: activity form,
-│                                       #    daily report, PDF download, GPS,
-│                                       #    repeatable rows, local drafts
+│   ├── site_reports/                   # ← Phase 7, three-layer: activity form,
+│   │                                   #    daily report, PDF download, GPS,
+│   │                                   #    repeatable rows, local drafts
+│   ├── payroll/                        # ← Phase 8, three-layer: ledger, run report,
+│   │                                   #    summary, and the salary-slip list
+│   ├── loans/                          # ← Phase 8, three-layer: schedule, progress,
+│   │                                   #    approve / reject with remarks
+│   └── salary_certificates/            # ← Phase 8, three-layer: ask, decide, PDF
 └── main.dart
 ```
 
@@ -978,6 +1054,40 @@ so generating it never has to write an image anywhere.
 
 ---
 
+### 5.13 Money is an integer of paise, never a double (Phase 8)
+
+A payroll figure that is wrong by a cent is wrong in a way a person will
+notice on their payslip, so Phase 8 refuses the type that produces that kind
+of wrongness at all:
+
+| | |
+|---|---|
+| Columns | `DECIMAL(12,2)` — never `FLOAT`, `DOUBLE`, or `REAL`, anywhere in the schema |
+| Wire | decimal **strings** (`"30000.00"`), so a JSON number cannot lose digits in transit |
+| Rounding | one helper, `App\Support\Money`, scale 2, PHP `round()` — half away from zero, no bcmath extension required |
+| Printing | one formatter, which emits `INR 30,000.00`; the currency code comes from the row, not a constant |
+| Client | `Money.format()` in `core/presentation/money.dart`, which parses the string into **minor units** and never holds a `double` |
+
+The client side is the part that usually goes wrong. Turning `"30000.00"`
+into a Dart `double` and printing it with `toStringAsFixed` would re-round a
+figure the server had already settled, and two screens would then disagree
+about one payslip by a cent. So the app parses to an integer of paise,
+formats *that*, and rounds the same way PHP does — `0.125 → 0.13` on both
+sides, which is what lets a test assert a literal like `INR 28,500.00`.
+
+Nothing in this module formats a figure by hand: `MoneyText` is the widget
+every list and detail screen uses, and a screen that writes `"₹ 30,000"`
+inline will be wrong the first time the organisation changes
+`system.currency`.
+
+**What is deliberately *not* enforced:** a negative `net_salary` is passed
+through as it stands. When a loan balance exceeds a month's pay, clamping to
+zero would make the slip lie about a debt the company still holds — the
+number is the truth, and the sentence around it is what needs writing, not
+the figure.
+
+---
+
 ## 6. Deployment Topology (cloud-ready)
 
 ```
@@ -1041,3 +1151,4 @@ The following are explicitly **out of scope** unless later requested:
 | Phase 6 | Leave, timesheets and overtime — 9 migrations (34 tables total), configurable leave types, transactional balances, `LeaveDayCalculator`, holiday calendar, materialised approval workflow engine, sick-certificate upload + hourly deadline job with LOP conversion, derived timesheets, overtime with `payroll_eligible`; 7 policies (with the `<Model>Policy>` naming rule), 11 permissions (51 total / 236 grants), 37 routes; Flutter `features/{leave,timesheet,overtime,holidays}` + shared `StatusChip` / `CameraCaptureSheet` / `NoPermission`, 215 tests |
 | Post-Phase 5 hardening | Server-side selfie sanitisation — `SelfieSanitizer` (GD decode → flatten → JPEG re-encode, EXIF/GPS stripped, original never stored) + `App\Rules\ImageContent` (header decode check + pixel budget); closes §4.3's "EXIF is stripped by the app, not by the server" gap; no new dependency; `AttendanceSelfieSanitizationTest` (13), backend 321 tests |
 | Phase 7 | Site activity reports and daily site reports — 7 migrations (**41 tables total**), `SiteActivityReportService` / `DailySiteReportService` (author and project derived, `draft → submitted` only, one official report per site-day), `StoresPrivateImages`/`ReportPhotoStore` on the fail-closed `SelfieSanitizer`, `DailySiteReportPdf` on demand with dompdf (**§5.12**), 2 policies + `Visibility` row scoping, 8 permissions (**59 total / 278 grants**), 18 routes (104 definitions / 109 registered); Flutter `features/site_reports/` with GPS, repeatable rows, camera photos and local drafts, **303 tests** |
+| Phase 8 | **Payroll, loans and salary documents** — 7 migrations (**48 tables total**), `App\Support\Money` (**§5.13**), `PayrollCalculationService` outside any controller (attendance → overtime → LOP → allowances → adjustments → loans, all reusing the Phase 5/6 calculators), a one-way `draft → calculated → reviewed → processed → locked` ladder with a `payroll_id` on every installment it takes, on-demand salary-slip and certificate PDFs with no stored file, 5 policies (22 total), 11 permissions (**70 total / 332 grants**), 3 `payroll.*` settings (16 total), 36 routes (**140 definitions / 145 registered**); Flutter `features/{payroll,loans,salary_certificates}` + `core/presentation/{money,pdf_opener}.dart`, **377 tests** |

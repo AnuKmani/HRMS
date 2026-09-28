@@ -81,7 +81,12 @@ class AuthenticationTest extends TestCase
         // Roles and permissions come back so the app can decide what to show.
         $permissions = $response->json('data.user.permissions');
         $this->assertContains('employees.view', $permissions);
-        $this->assertNotContains('payroll.manage', $permissions);
+        // Phase 8 widened HR Admin to *correct* payroll - and deliberately
+        // stopped one grant short of the irreversible button. `payroll.lock`
+        // belongs to Payroll Admin and Super Admin alone, which is the whole
+        // reason the two are separate permissions rather than one.
+        $this->assertContains('payroll.manage', $permissions);
+        $this->assertNotContains('payroll.lock', $permissions);
     }
 
     public function test_login_response_never_contains_a_password_hash(): void

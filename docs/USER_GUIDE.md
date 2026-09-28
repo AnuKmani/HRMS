@@ -1,8 +1,9 @@
 # User Guide
 
-> **Status:** Phase 7 — sign-in, the organisation screens, GPS attendance with
-> site visits, **leave, the holiday calendar, timesheets and overtime**, and now
-> **site activity reports and the official daily site report (with its PDF)**
+> **Status:** Phase 8 — sign-in, the organisation screens, GPS attendance with
+> site visits, **leave, the holiday calendar, timesheets and overtime**, the
+> **site activity reports and the official daily site report (with its PDF)**,
+> and now **payroll: the ledger, salary slips, loans and salary certificates**
 > exist and are usable. This guide describes the workflows each role will have
 > once the corresponding phase ships. Sections are marked with the phase that
 > delivers them; ✅ means it is in the app today.
@@ -53,16 +54,27 @@ your token immediately.
 
 After signing in you land on **Home**. It draws one tile per module your role may
 open — Employees, Departments, Designations, Projects, Sites (Phase 4),
-Attendance (Phase 5), Leave, Timesheets, Overtime and Holidays (Phase 6), and
-since **Phase 7** **Site activity** and **Daily site reports** — and nothing
-else. A role that cannot open a module is not shown a door it would be
-refused behind. **Holidays is the one tile drawn for everyone**: reading the
-calendar is not a privilege anyone grants you.
+Attendance (Phase 5), Leave, Timesheets, Overtime and Holidays (Phase 6),
+since **Phase 7** **Site activity** and **Daily site reports**, and since
+**Phase 8** **Payroll**, **Salary slips**, **Loans** and **Salary
+certificates** — and nothing else. A role that cannot open a module is not
+shown a door it would be refused behind. **Holidays is the one tile drawn
+for everyone**: reading the calendar is not a privilege anyone grants you.
 
 The two report tiles are gated separately on purpose: `Site activity` is
 drawn for anyone who may file their own, while `Daily site reports` is not
 drawn for an Employee at all — the official record about a site-day belongs
 to the people who run the site.
+
+The four money tiles are gated separately for the same reason, and they are
+**four different questions**:
+
+| Tile | Means |
+|---|---|
+| **Payroll** | "the ledger" — drawn for `payroll.view`, or for `payroll.summary.view` alone (Management and Finance see the totals and no rows) |
+| **Salary slips** | "give me my payslip" — drawn for `salary_slips.view`, which is a *separate* grant: a role may hold it without holding the payroll module |
+| **Loans** | "what I have borrowed, and what is left" — `loans.view`; asking for one needs `loans.create` |
+| **Salary certificates** | "ask for a letter about my employment" — `salary_certificates.view`, the same grant that reads them; *deciding* one is `.manage` |
 
 Every module follows the same three screens:
 
@@ -288,7 +300,7 @@ fill in:
 your own site is closed. Only HR can add or retire one — there is no delete,
 because a day the year's leave maths already used cannot be quietly erased.
 
-### 3.6 Expenses ⬜ Phase 10
+### 3.6 Expenses ⬜ Phase 9
 
 1. Open **Expenses** → **New**
 2. Choose date, project, site, category and amount
@@ -297,13 +309,35 @@ because a day the year's leave maths already used cannot be quietly erased.
 
 Track status: *Pending → Approved / Rejected*.
 
-### 3.7 Payslips & documents ⬜ Phase 10
+### 3.7 Payslips, loans & salary certificates ✅ Phase 8
 
-- View and download **your own** salary slips (PDF)
-- Request a **salary certificate** for bank/visa purposes
-- View your own documents (passport, visa, Emirates ID) and their expiry dates
+**Your salary slip.** Open **Salary slips** → tap a month. The list shows
+what is left and to whom; the slip itself is itemised — basic, allowances,
+overtime, LOP, unpaid leave, loan deduction, net — with the working it was
+computed from, not just a total. **Download** renders the PDF on the spot
+and hands it to your phone's viewer. Nothing is stored anywhere: there is no
+link to forward, only the app and the API route behind your own session.
 
-> You can only ever see your own salary information.
+**Ask for an advance.** Open **Loans** → **Ask for a loan**, pick the kind
+(salary advance or loan), the amount, the number of installments and the
+start date. You are never asked to look up your own employee id — the
+server knows who is asking. A submitted loan goes to whoever may approve it;
+you may withdraw it until they answer. Once approved, the schedule is fixed
+and each pay run takes one installment from it, marked against that run so
+the same payment can never be taken twice.
+
+**Ask for a certificate.** Open **Salary certificates** → **Request**, give
+the purpose and the date, and send. HR or Payroll Admin decides it; when it
+is issued you can open it and export the PDF. You can follow it through
+*Awaiting → Approved → Issued* and cancel it while it is still yours to
+cancel.
+
+> You can only ever see your own salary information. An Employee's `payroll`
+> tile opens **one row — yours**. Nobody's payslip is a URL: the document is
+> rendered for your session each time you ask.
+
+> **Your own documents** (passport, visa, Emirates ID, contracts) are still
+> ⬜ Phase 10 — that is a different module from payslips.
 
 ### 3.8 Dashboard ⬜ Phase 11
 
@@ -457,41 +491,71 @@ Everything an HR Executive can do, plus:
 
 ## 9. Payroll Admin
 
-> ⬜ Phase 10 (payroll) · ✅ Phase 6 (reads the inputs a run needs)
+> ✅ Phase 8 (the whole payroll family) · ✅ Phase 6 (reads the inputs a run needs)
 
-- Run **monthly payroll** using approved attendance, overtime, leave and loan data
-- Manage basic salary, allowances, bonus, deductions, LOP, advances
-- Generate **salary slips** (PDF)
-- Process **salary certificate** requests
-- Manage **loans and salary advances** with installment schedules
-- Protects payroll data behind permissions
+**The monthly run:**
 
-**Payroll only uses approved data** — unapproved overtime or leave never enters a run.
-The two facts a run will read already exist and are maintained by Phase 6:
+1. Open **Payroll**, choose the year and month (it opens on the current one)
+2. Press **Run payroll** and confirm. Every employee is priced from
+   approved attendance, approved **and** `payroll_eligible` overtime, LOP
+   days, approved allowances, approved adjustments and any loan installment
+   due this month
+3. Each row lands on **Calculated**. A row whose employee has no salary on
+   record stays a **Draft** and says so — it is never shown as a zero
+4. **Review** the rows that are right, **Process** them, and **Lock** the
+   ones you are finished with
+5. **Locking is final.** A locked month cannot be recalculated, edited or
+   reopened — that is the point of it, and it is a permission of its own
+   (`payroll.lock`) that only this role holds
+
+Running the same month twice is safe: rows already decided are left exactly
+as they are and the run reports how many it calculated, how many were new
+and how many it skipped. **Nothing here is ever deleted** — a correction is a
+new entry with its own sign, so the original figure still stands.
+
+**Also yours:** allowances and payroll adjustments (approve or reject them
+before a run reads them), the salary-slip list and its PDFs, salary
+certificate requests (approve, issue, cancel), and loans (approve, reject,
+manage).
+
+**Payroll only uses approved data** — unapproved overtime or leave never
+enters a run. The two facts a run reads are maintained by Phase 6:
 `overtime_requests.payroll_eligible` (true only when a claim completed its
-chain) and `leave_requests.lop_days`. Nothing in Phase 6 computes money from
-either; that arithmetic belongs to the payroll phase.
+chain) and `leave_requests.lop_days`; Phase 8 prices both into the slip and
+writes neither back.
+
+> **Before production:** the overtime rate is a configurable multiplier
+> (default ×1.5 on the hourly rate derived from the LOP divisor, 30 by
+> default). It is a **generic engine setting, not a statutory rate** — the
+> UAE Labour Law figures your deployment must use have not been wired in and
+> must be validated against your own jurisdiction first.
 
 ---
 
 ## 10. Finance
 
-> ⬜ Phase 10 (expenses, loans) · ✅ Phase 6 (payroll-preparation reads)
+> ✅ Phase 8 (payroll summary, salary slips, loans — read-only) · ⬜ Phase 9 (expenses) · ✅ Phase 6 (payroll-preparation reads)
 
-- Review and approve **expenses**
-- Verify receipts
-- View loan and advance deductions for processing
+- **Read the payroll summary** for any period — counts, gross, deductions,
+  net. The summary has **no names in it**: this role sees the shape of a
+  month, not the ledger behind it ✅ Phase 8
+- **Read and export salary slips** (`salary_slips.view` + `.manage`) ✅ Phase 8
+- **Read loans** — who owes what and what is left ✅ Phase 8
+- Review and approve **expenses** ⬜ Phase 9
+- Verify receipts ⬜ Phase 9
 - Access financial reports (payroll summary, expense report)
 - Read **leave balances, working days and approved overtime** without
   approving any of them — the view a payroll preparation needs ✅
 - No access to HR-only functions: this role holds no `leave.create`,
-  `leave.approve`, `holidays.manage` or `overtime.approve`
+  `leave.approve`, `holidays.manage`, `overtime.approve` — **and no
+  `payroll.process` or `payroll.lock`: Finance reads the month, it does not
+  run or freeze it**
 
 ---
 
 ## 11. Management
 
-> ⬜ Phase 11 (dashboards) · ✅ Phase 6 (leave and overtime approval)
+> ⬜ Phase 11 (dashboards) · ✅ Phase 6 (leave and overtime approval) · ✅ Phase 8 (payroll summary)
 
 **Dashboard:**
 - Total workforce
@@ -499,11 +563,15 @@ either; that arithmetic belongs to the payroll phase.
 - Attendance trends
 - Leave trends
 - Overtime totals
-- Payroll summary
+- Payroll summary ✅ Phase 8 — `GET /payroll/summary` gives counts and totals
+  for a month, and **deliberately no rows**: this role is offered the money
+  as a figure, never as a list of people
 - Project workforce breakdown
 
 Read-only — plus the ability to view any report, plus **approve leave and
 overtime** where a configured workflow names this role as the current step ✅.
+Management may open the **Payroll** door for the summary and is **not**
+offered the salary-slip or ledger views.
 
 ---
 
@@ -613,18 +681,15 @@ The menu you see is built from your role's permissions. For example:
 
 | Role | Sees |
 |---|---|
-| Employee | Own attendance, own leave requests and balances, own timesheets, own overtime claims, the holiday calendar, **and their own site activity reports**. The official daily report and its PDF are **not** in an Employee's app |
-| Site Supervisor | Plus their site's team, reports, the official daily report and its PDF for the sites they run, overtime approval (their step), leave approval (their step) |
-| Site Engineer | Plus site activity reports and the official daily report for their sites — prepare, edit, submit, export |
-| Project Manager | Plus projects, sites, workforce, overtime approvals, leave approvals, and every report on the projects they manage (`daily_site_reports.manage`) |
-| HR | Plus all employees, attendance, leave, balances, holiday calendar editing, workflow configuration |
-| Payroll Admin / Finance | Organisation-wide for their own modules; **no** official daily report — it is about a site-day, not about money |
-| Management | Read-only across the reports and the PDF export |
+| Employee | Own attendance, own leave requests and balances, own timesheets, own overtime claims, the holiday calendar, **their own site activity reports**, and from Phase 8 **their own payslip, their own loans and their own certificate requests**. The official daily report, anyone else's pay and the payroll ledger are **not** in an Employee's app |
+| Site Supervisor | Plus their site's team, reports, the official daily report and its PDF for the sites they run, overtime approval (their step), leave approval (their step), and loans they may ask for. **No payroll at all** — this role is not offered the Payroll or Salary slips door |
+| Site Engineer | Plus site activity reports and the official daily report for their sites — prepare, edit, submit, export; loans they may ask for; **no payroll** |
+| Project Manager | Plus projects, sites, workforce, overtime approvals, leave approvals, every report on the projects they manage (`daily_site_reports.manage`), and loans; **no payroll** |
+| HR | Plus all employees, attendance, leave, balances, holiday calendar editing, workflow configuration — and the whole payroll family except **locking**: HR Admin runs, reviews, finalises, approves loans and decides certificates |
+| Payroll Admin | **The payroll door**: run, review, finalise and **lock** the month, allowances, adjustments, salary slips, certificate decisions, loans |
+| Finance | The payroll **summary** (counts and totals, no names), salary slips and loans — read only; no run, no lock |
+| Management | The payroll **summary** through the Payroll door, and no rows behind it |
 | Super Admin | Everything |
-| Payroll | Plus payroll runs, payslips, loans — and every **approved** overtime claim |
-| Finance | Plus expenses, loan deductions |
-| Management | Dashboards and reports |
-| Super Admin | Everything including settings and audit logs |
 
 Four things worth knowing about the new modules:
 
@@ -636,6 +701,12 @@ Four things worth knowing about the new modules:
   manager, not even a Super Admin who happens to be the requester.
 - **Only the person the chain is currently waiting on may act.** An approver
   further down sees the request but cannot sign for the step before theirs.
+- **Money only moves forward.** Payroll goes *Draft → Calculated → Reviewed →
+  Processed → Locked* and never backwards; a loan's schedule is fixed when it
+  is approved. What you can do is add a correction, not remove one.
+- **Nobody decides their own money.** You cannot approve your own loan or
+  sign off your own salary certificate, whatever you are permitted to do for
+  other people's.
 
 If a function you expect is missing, it likely means your role does not have that
 permission — contact your administrator.
@@ -671,6 +742,16 @@ permission — contact your administrator.
 | "Preparing…" never finishes | The server is slow or unreachable. The button stays disabled while it works so a second tap cannot start a second document; leave the screen if it will not finish |
 | "You are not allowed to export this report." | Your role holds no `daily_site_reports.pdf`. Viewing the report and exporting it are separate permissions |
 | A draft labelled **Local draft** | It is on this phone only and has not been sent. **Save** sends it; **Start over** throws it away |
+| A payroll row says **No salary on record** | The employee has no salary configured, so the run could not price them. The row is a Draft and tells you so — it is never shown as `0.00` as though that were a salary |
+| "Only a payroll that has been calculated can be reviewed." (409) | You asked for a step that is not the next one. Open the row and take the step it offers — the ladder only climbs |
+| A month you expected to re-run did not change | It has already been decided. A second run reports *0 updated* rather than re-pricing rows somebody may already have been paid from |
+| The **Run** button is not there | Running needs `payroll.process`, which is not the same grant as being able to read payroll |
+| A payslip button that is not there | Viewing a payslip needs `salary_slips.view`, a grant of its own — ask your administrator; it is deliberately separate from payroll |
+| "You cannot approve your own loan." (403) | Nobody approves their own, whatever they are allowed to approve for others. Ask a colleague with `loans.approve` |
+| "Only a loan awaiting a decision can be approved." (409) | Somebody has already answered it — or you have already withdrawn it. Open it to see where it stands |
+| A loan installment already taken | Each installment is taken by exactly one pay run and recorded against it. If a run is recalculated the installment is released first, then taken again |
+| "Only an approved certificate can be issued." (409) | Approve it first; a refused certificate can never be issued |
+| The payroll door opens with no rows | You hold `payroll.summary.view` only. That is the summary — counts and totals, and deliberately no list of people |
 
 ---
 
@@ -690,6 +771,10 @@ permission — contact your administrator.
 | **Leave, balances & sick-cert → LOP** | **6** | ✅ |
 | **Timesheets & overtime** | **6** | ✅ |
 | **Holiday calendar** | **6** | ✅ |
-| Documents, training, assets | 9 | ⬜ |
-| Payroll, loans, expenses | 10 | ⬜ |
+| **Payroll ledger, run & lock** | **8** | ✅ |
+| **Salary slips (own, on demand)** | **8** | ✅ |
+| **Loans & salary advances** | **8** | ✅ |
+| **Salary certificate requests** | **8** | ✅ |
+| Expenses | 9 | ⬜ |
+| Documents, training, assets | 10 | ⬜ |
 | Notifications, dashboards, reports | 11 | ⬜ |

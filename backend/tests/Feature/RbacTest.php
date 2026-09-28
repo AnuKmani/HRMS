@@ -136,7 +136,13 @@ class RbacTest extends TestCase
 
         $this->assertTrue($first->all() === $second->all());
         $this->assertContains('employees.create', $second->all());
-        $this->assertNotContains('payroll.manage', $second->all());
+        // Phase 8 grants HR Admin the payroll *preparation* grants - see
+        // RolePermissionSeeder - and withholds exactly one: the lock, which
+        // is the only irreversible act in the module and is checked here
+        // rather than assumed from the absence of an unlock endpoint.
+        $this->assertContains('payroll.manage', $second->all());
+        $this->assertContains('payroll.process', $second->all());
+        $this->assertNotContains('payroll.lock', $second->all());
     }
 
     /* -------------------------------------------------- user-level gate */

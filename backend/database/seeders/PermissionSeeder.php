@@ -97,9 +97,79 @@ class PermissionSeeder extends Seeder
             'overtime.approve',
             'overtime.manage',
         ],
+        /*
+        | Payroll (Phase 8).
+        |
+        | Five rather than two, because payroll is where the coarse gate has
+        | to carry the most weight - a single `payroll.view` shared by an
+        | employee reading their own slip and an admin processing the whole
+        | company would leave every other distinction to the policies alone.
+        |
+        |   payroll.view          the module is open to you. Held by Employee
+        |                         too, so Visibility can narrow the rows to
+        |                         their own - the same arrangement leave.view
+        |                         has used since Phase 6.
+        |   payroll.manage        allowances, adjustments, reviews: the
+        |                         "may change what goes in" grant.
+        |   payroll.process       run and re-run the calculation. Separated
+        |                         from `manage` so a role may correct an
+        |                         allowance without being able to restate a
+        |                         month's pay.
+        |   payroll.lock          make it final. The narrowest grant in the
+        |                         system, and there is no unlock.
+        |   payroll.summary.view  company totals WITHOUT employee-level rows,
+        |                         so a role can be given the number and not
+        |                         the names. Three segments, the same
+        |                         sub-field convention `employees.salary.view`
+        |                         established.
+        */
         'payroll' => [
             'payroll.view',
             'payroll.manage',
+            'payroll.process',
+            'payroll.lock',
+            'payroll.summary.view',
+        ],
+        /*
+        | Salary slips (Phase 8).
+        |
+        | `.view` is held by every role that should see a payslip at all -
+        | including Employee, and including only their own rows, narrowed by
+        | Visibility exactly as `payroll.view` is. `.manage` is the override
+        | that lets a holder read *anybody's* slip, which is what separates
+        | "download mine" from "download the company's".
+        */
+        'salary_slips' => [
+            'salary_slips.view',
+            'salary_slips.manage',
+        ],
+        /*
+        | Salary certificates (Phase 8).
+        |
+        | `.view` doubles as the right to *ask* for one - an employee cannot
+        | hold a permission to request a document about themselves that they
+        | are then refused for asking. `.manage` is the decision: approve,
+        | reject, and issue the PDF.
+        */
+        'salary_certificates' => [
+            'salary_certificates.view',
+            'salary_certificates.manage',
+        ],
+        /*
+        | Loans and salary advances (Phase 8).
+        |
+        | Same four-verb shape as leave. `.view` + `.create` are the
+        | self-service door (own rows only - Visibility fails closed); the
+        | decision pair is `.approve` for the act and `.manage` for
+        | correction afterwards. Nobody may approve their own loan: the rule
+        | is checked in LoanPolicy as well as in LoanService, because it is a
+        | property of approval rather than of any one screen.
+        */
+        'loans' => [
+            'loans.view',
+            'loans.create',
+            'loans.approve',
+            'loans.manage',
         ],
         'projects' => [
             'projects.view',

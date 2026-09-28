@@ -149,7 +149,7 @@ HRMS/
 │   │   └── rate_limiting.php   # login, password-reset, attendance limits
 │   ├── database/migrations/
 │   ├── routes/api.php
-│   └── tests/               # Feature + Unit (308 tests)
+│   └── tests/               # Feature + Unit (458 tests, 2761 assertions)
 │
 ├── docs/                    # Project documentation
 │   ├── ARCHITECTURE.md
@@ -188,13 +188,18 @@ Access is controlled by **roles** *and* **granular permissions**. Hiding a butto
 
 Example permissions: `employees.view`, `employees.create`, `attendance.manage`, `leave.approve`, `payroll.manage`, `sites.manage`, `audit.view`.
 
-**Implemented:** **51 permissions**, all named `resource.action`, seeded by
-`RoleSeeder` + `PermissionSeeder` + `RolePermissionSeeder`. Super Admin holds every
-permission; each other role is an explicit allow-list, so anything absent is denied.
+**Implemented:** **70 permissions** (332 role grants), all named
+`resource.action`, seeded by `RoleSeeder` + `PermissionSeeder` +
+`RolePermissionSeeder`. Super Admin holds every permission; each other role
+is an explicit allow-list, so anything absent is denied.
 Phase 2 seeded the first 40; Phase 5 only *granted* an existing one
 (`attendance.view`); Phase 6 added `approvals.view/manage`, `leave.balance.view/manage`,
 `holidays.manage`, `timesheets.view/manage` and `overtime.view/create/approve/manage`,
-and retired `leave.request` in favour of `leave.create`.
+and retired `leave.request` in favour of `leave.create`; Phase 7 added the
+eight site-report permissions; **Phase 8 added eleven** —
+`loans.{view,create,approve,manage}`, `salary_slips.{view,manage}`,
+`salary_certificates.{view,manage}` and the three payroll verbs
+`payroll.process`, `payroll.lock`, `payroll.summary.view`.
 See [`docs/SECURITY.md`](docs/SECURITY.md) §3.1 for the full catalogue and the
 middleware used to enforce it server-side.
 
@@ -252,7 +257,7 @@ php artisan serve          # http://127.0.0.1:8000
 > database settings, not environment variables.
 
 ```bash
-php artisan test                  # 383 tests, 2017 assertions
+php artisan test                  # 458 tests, 2761 assertions
 ./vendor/bin/pint                 # code style
 ```
 
@@ -286,7 +291,7 @@ flutter run --dart-define=API_BASE_URL=http://192.168.1.20:8000/api/v1
 
 ```bash
 flutter analyze              # must report no issues
-flutter test                 # 215 tests, no device or server required
+flutter test                 # 377 tests, no device or server required
 ```
 
 > The base URL is compiled in with `--dart-define`. There is no config file to
@@ -333,7 +338,7 @@ flutter test                 # 215 tests, no device or server required
 | Deliverable | Status |
 |---|---|
 | `spatie/laravel-permission` **^6.25** (the release line compatible with PHP 8.2 + Laravel 12) | ✅ |
-| 10 roles · 51 permissions · 236 role-permission grants (the count grew as Phases 5–6 added permissions; `PermissionSeeder::flat()` is the single source of truth) | ✅ |
+| 10 roles · 70 permissions · 332 role-permission grants (the count grew as Phases 4–8 added permissions; `PermissionSeeder::PERMISSIONS` is the single source of truth) | ✅ |
 | Middleware aliases `permission` / `role` / `role_or_permission` registered | ✅ |
 | `settings` table + `SettingsService` — 12 seeded business rules | ✅ |
 | `departments`, `designations` | ✅ |
@@ -490,6 +495,73 @@ derived timesheets, and overtime claims.
 > logging. `payroll_eligible` and `lop_days` are recorded as *facts* for that
 > future phase — nothing computes money here.
 
+### ✅ Phase 7 — Site activity reports & daily site reports (COMPLETE)
+
+The reporting half of the field day: a supervisor's activity form with camera
+photographs, and the one official report for a site-day.
+
+| Deliverable | Status |
+|---|---|
+| **7 migrations · 33 total · 41 tables · all `Ran`** — `site_activity_reports`, `site_activity_report_photos`, `daily_site_reports` + the three child-row tables | ✅ |
+| `SiteActivityReportService` / `DailySiteReportService` — **author and project derived from the bearer token**, never read from the payload; `draft → submitted` only; one official report per site-day enforced by `dsr_site_date_unique` | ✅ |
+| `StoresPrivateImages` / `ReportPhotoStore` on the fail-closed `SelfieSanitizer` — re-encoded, EXIF discarded, a byte array that will not decode is refused rather than stored | ✅ |
+| `DailySiteReportPdf` **rendered on demand with dompdf** (Phase 7 added `barryvdh/laravel-dompdf:^3.1` — the one PDF package in the app), `html()` separate from `response()` so content is testable | ✅ |
+| 2 policies + `App\Support\Visibility` row scoping (`daily_site_reports.manage` reaches a PM's own projects) · **8 new permissions → 59 total, 278 grants** | ✅ |
+| Routes: `/site-activity-reports`, `/daily-site-reports`, `/reportable-sites`, `/…/photos`, `…/{id}/pdf` — **18 new · 104 definitions / 109 registered** | ✅ |
+| Flutter: `features/site_reports/` — GPS on submit, repeatable manpower/materials/equipment rows, camera photographs, local drafts, PDF download through `open_filex` | ✅ |
+| Tests: backend **42 passed** (19 + 15 + 8) · Flutter **303 passed** | ✅ |
+
+### ✅ Phase 8 — Payroll, loans & salary documents (COMPLETE)
+
+The money half, built as one vertical slice and deliberately narrow: a ledger
+for a month, the calculation that fills it, what a person owes, and two
+documents. **Nothing in it duplicates a calculation that already existed** —
+attendance, overtime, leave and LOP arithmetic are reused from Phases 5–6
+through `AttendanceStatusCalculator`, `WorkingTimeCalculator`,
+`LeaveDayCalculator` and `LeaveBalanceService`.
+
+**Backend**
+
+| Deliverable | Status |
+|---|---|
+| **7 migrations · 40 total · 48 tables · all `Ran`** — `payrolls` (UNIQUE `employee_id + payroll_year + payroll_month`), `payroll_items`, `allowances`, `payroll_adjustments`, `loans`, `loan_installments` (UNIQUE `loan_id + sequence`), `salary_certificate_requests`. **No `salary_slips` table** — a slip is the `payrolls` row rendered | ✅ |
+| `App\Support\Money` — scale 2, PHP `round()` half away from zero, **no bcmath required**; every money column `DECIMAL`, **no float/double anywhere**; one formatter, one rounding rule | ✅ |
+| `PayrollCalculationService` **outside any controller** — basic → allowances → overtime → bonus → gross → LOP → unpaid leave → loan → net, writing nothing and taking no HTTP object; `PayrollService` owns the transaction and the one-way ladder `draft → calculated → reviewed → processed → locked` | ✅ |
+| Backend-authoritative: a second run reports `updated: 0` and never rewrites a decided row; a recalculation **releases an installment before it takes it again**, so a payment is taken once; a negative `net_salary` passes through unclamped (the debt is real) | ✅ |
+| Configurable LOP divisor (`payroll.lop_divisor_mode` = `fixed`, `payroll.lop_divisor` = 30) and overtime multiplier (`payroll.overtime_rate_multiplier` = 1.5) — **generic engine settings, not validated statutory rates** | ⚠️ jurisdiction to validate before production |
+| Private, on-demand PDFs with Phase 7's dompdf (no second package): `SalarySlipPdf`, `SalaryCertificatePdf`, `Cache-Control: no-store`, nothing stored, no URL, filename minted server-side | ✅ |
+| Status flows: loans `draft → pending → approved → active → completed` (+ `rejected` / `cancelled`), installments `pending → deducted` (never twice), certificates `pending → approved → generated` (+ `rejected` / `cancelled`), adjustments `pending → approved` — **only `approved` enters payroll** | ✅ |
+| **5 policies** (`Payroll`, `PayrollAdjustment`, `Allowance`, `Loan`, `SalaryCertificateRequest`) → **22 total**; **11 new permissions → 70 total, 332 grants**; **3 new settings → 16 total**; 11 form requests | ✅ |
+| Routes: 36 new — payroll (index/show/summary/process/recalculate/review/finalize/lock), salary slips, allowances, payroll adjustments, loans, salary certificate requests — **140 definitions / 145 registered**, 117 permission-gated | ✅ |
+| Tests: backend **458 passed (2761 assertions)** — 13 `PayrollTest` + 11 `LoanTest` + 9 `SalaryDocumentTest` · `pint --test` clean · `composer validate` valid · `migrate:status` all `Ran` | ✅ |
+
+**Flutter**
+
+| Deliverable | Status |
+|---|---|
+| `features/payroll/` — ledger list (period picker, run report, summary card), detail with **exactly one** ladder step drawn from the server's `next_action`, and the salary-slip list | ✅ |
+| `features/loans/` — schedule, progress, form with **no employee-id field**, detail with submit / cancel / decide | ✅ |
+| `features/salary_certificates/` — ask, decide, export | ✅ |
+| `core/presentation/money.dart` (`Money` / `MoneyText`, decimal string → minor units, never a `double`, **no `intl`**) and `core/presentation/pdf_opener.dart` (`PdfOpener`, lifted out of the report feature) | ✅ |
+| Four home doors, each gated on its own permission; `payroll.summary.view` alone draws the totals card and **never builds the rows provider** | ✅ |
+| 10 routes → **33 total**; **377 tests** (+74) · `dart format` · `flutter analyze` clean | ✅ |
+
+> **Two caveats carried forward, both documented rather than hidden:**
+>
+> 1. **Filing a certificate for a colleague is API-only today.** The Flutter
+>    form submits `purpose` + `request_date` for *you*; the API accepts an
+>    `employee_id` so an HR desk can file on someone else's behalf, and that
+>    path is covered by backend tests only.
+> 2. **A loan balance can push `net_salary` below zero.** Nothing clamps it,
+>    because clamping would make the payslip lie about a debt the company
+>    still holds — the number is the truth, and the sentence around it is
+>    what a later phase should write.
+>
+> **Still deliberately not built:** expenses, employee documents, onboarding,
+> training, assets, FCM notifications and full audit logging — plus
+> statutory (UAE) overtime configuration, which must be validated before
+> production.
+
 ### Planned Phases
 
 | Phase | Scope | Status |
@@ -500,12 +572,17 @@ derived timesheets, and overtime claims.
 | **4** | Employees, Projects, Sites, Assignments (first vertical slice) | ✅ Done |
 | **5** | Attendance: geofence, selfie, check-in/out, site visits, movement timeline, offline queue | ✅ Done |
 | **6** | Leave: types, balances, requests, approval workflow, sick-cert → LOP, holiday calendar, timesheets, overtime | ✅ Done |
-| **7** | Site activity reports & daily reports (PDF) | ⬜ Next |
-| **8** | Shifts (API + screens) and background/automatic attendance sync | ⬜ |
-| **9** | Documents + expiry, onboarding, training, assets | ⬜ |
-| **10** | Payroll, salary slips, certificates, loans, expenses | ⬜ |
+| **7** | Site activity reports & daily site reports (PDF) | ✅ Done |
+| **8** | Payroll, salary slips, certificates, loans | ✅ Done |
+| **9** | Expenses: workflow approval + private receipts | ⬜ Next |
+| **10** | Documents + expiry, onboarding, training, assets | ⬜ |
 | **11** | FCM notifications, dashboards, reports & exports | ⬜ |
 | **12** | Testing, security audit, deployment, backups | ⬜ |
+
+> **Shifts (API + screens) and background/automatic attendance sync are
+> unscheduled.** The `shifts` table (Phase 2) and the shift resolution used
+> at check-in already exist; what is missing is the CRUD and the automatic
+> sync, and neither has a phase number yet.
 
 ---
 
@@ -523,6 +600,14 @@ database passwords / API keys / private certificates
 ```
 
 All of the above are blocked by the root `.gitignore`. See [`docs/SECURITY.md`](docs/SECURITY.md).
+
+**Never commit payroll output either.** No `.pdf` salary slip, no salary
+certificate, no exported list of who earns what. The app renders both
+documents on demand behind an authenticated route and stores nothing — there
+is no file in this repository to leak, and a run report belongs in the app,
+not in a screenshot pasted into a ticket. `net_salary` never appears in an
+employee resource, in `/payroll/summary` (counts and totals, no names) or in
+a log line. See [`docs/SECURITY.md`](docs/SECURITY.md) §4.7 and §11.
 
 ---
 
