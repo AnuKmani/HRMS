@@ -19,8 +19,9 @@ Artisan::command('inspire', function () {
 | app. A phone that is switched off, offline or uninstalled does not get to
 | decide whether an absence is paid — the server's clock does.
 |
-| `hourlyAt(17)` rather than `daily()`: a deadline that expires at 02:00 and
-| is not looked at until the next 02:00 is a day and a half late for
+| `hourlyAt(tick_minute)` rather than `daily()` — default 17, from
+| `config('hrms.scheduling.tick_minute')` — because a deadline that expires at
+| 02:00 and is not looked at until the next 02:00 is a day and a half late for
 | everybody in a later timezone, and sick leave is the one place where
 | "checked once a day" is visibly wrong to the person affected.
 |
@@ -34,8 +35,12 @@ Artisan::command('inspire', function () {
 | schedule that fires twice — or a cron that fires twice because two entries
 | were added — converts nothing a second time.
 |
+| The minute and the overlap window are config/hrms.php: they are deployment
+| mechanics, and a deployment that wants the tick off the hour changes .env
+| rather than this file. The deadline they enforce is a database setting.
+|
 */
 Schedule::job(new EnforceSickCertificateDeadlines)
-    ->hourlyAt(17)
-    ->withoutOverlapping(60)
+    ->hourlyAt((int) config('hrms.scheduling.tick_minute'))
+    ->withoutOverlapping((int) config('hrms.scheduling.overlap_minutes'))
     ->onOneServer();

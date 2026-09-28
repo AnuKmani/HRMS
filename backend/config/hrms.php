@@ -180,4 +180,42 @@ return [
         'certificate_max_kilobytes' => (int) env('HRMS_CERTIFICATE_MAX_KB', 5120),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Scheduled enforcement
+    |--------------------------------------------------------------------------
+    |
+    | Exactly one thing in this application is scheduled: the hourly
+    | conversion of overdue, certificate-less sick leave into Loss of Pay.
+    | These two values tune *when and how often* that runs — both are
+    | deployment mechanics, which is why they are here rather than in a
+    | route file.
+    |
+    | What is deliberately NOT here: the deadline itself. Two days is a
+    | business rule about people, so it lives in the `settings` table as
+    | `leave.sick_certificate_deadline_days` and is changed by whoever runs
+    | the company, not by whoever deploys the code. Likewise `tries` and
+    | `uniqueFor` on the job — see EnforceSickCertificateDeadlines for why
+    | each is a class-level decision rather than a knob.
+    |
+    */
+
+    'scheduling' => [
+
+        /*
+        | Minute of the hour to run, 0-59. Clamped rather than validated so
+        | a typo in .env cannot make the scheduler throw at load time and
+        | silently stop every scheduled task; it lands on a sane minute
+        | instead of taking the rest of the application down with it.
+        */
+        'tick_minute' => max(0, min(59, (int) env('HRMS_SICK_TICK_MINUTE', 17))),
+
+        // How long a running pass must take before the overlap mutex gives
+        // up and lets another one start. Longer than any plausible pass —
+        // the job selects a bounded set of rows and each is its own
+        // transaction — because a mutex that expires mid-run is worse than
+        // no mutex: it converts one run into two.
+        'overlap_minutes' => max(1, (int) env('HRMS_SICK_OVERLAP_MINUTES', 60)),
+    ],
+
 ];

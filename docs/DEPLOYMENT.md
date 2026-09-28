@@ -115,12 +115,39 @@ GEOFENCE_MAX_RADIUS_METRES=10000
 # file, and both the list queries and the policies read the same two arrays, so
 # narrowing a role narrows the collection and the single-record check together.
 
-# --- Phase 6: leave certificates --------------------------------------------
+# --- Phase 5: attendance -----------------------------------------------------
+# Limits on what a device may claim, not secrets. They bound a GPS fix and the
+# number of check-in writes per minute; every one reads through config/hrms.php
+# or config/rate_limiting.php, so this is the only place an operator changes it.
+ATTENDANCE_MAX_GPS_ACCURACY_METRES=100
+ATTENDANCE_VALIDATE_CHECKOUT_GEOFENCE=true
+ATTENDANCE_RATE_LIMIT_MAX_ATTEMPTS=30
+ATTENDANCE_RATE_LIMIT_DECAY_MINUTES=1
+
+# --- Phase 5: selfie storage -------------------------------------------------
+# Re-encoded on the way in — that re-encoding is what discards the EXIF block
+# (GPS fix, camera model, software string) along with any client filename.
+# MAX_PIXELS bounds width x height, not per edge, so a crafted gigapixel file
+# is refused before anything tries to decode it.
+HRMS_SELFIE_DIRECTORY=attendance-selfies
+HRMS_SELFIE_MAX_KB=5120
+HRMS_SELFIE_MAX_PIXELS=16777216
+HRMS_SELFIE_JPEG_QUALITY=85
+
+# --- Phase 6: leave certificates ---------------------------------------------
 # Private storage for medical certificates. Both live on the `local` disk
 # (storage/app/private) and are reachable only through
 # GET /api/v1/leave/{id}/certificate behind a policy — never a public path.
-# HRMS_CERTIFICATE_DIRECTORY=leave-certificates
-# HRMS_CERTIFICATE_MAX_KB=5120
+# Unlike a selfie these are stored exactly as sent: a doctor's note is a
+# document and must not be re-encoded.
+HRMS_CERTIFICATE_DIRECTORY=leave-certificates
+HRMS_CERTIFICATE_MAX_KB=5120
+
+# --- Phase 6: scheduler mechanics ---------------------------------------------
+# Minute of each hour the deadline job is dispatched, and how long a running
+# pass may hold the overlap mutex. Both are deployment mechanics; see §5.
+HRMS_SICK_TICK_MINUTE=17
+HRMS_SICK_OVERLAP_MINUTES=60
 
 # How long a sick leave may go without a medical document before the scheduler
 # converts it to LOP. This one is deliberately NOT an env var: it is the
@@ -182,7 +209,15 @@ being written asserts one — re-seeding cannot quietly strip the default away.
 
 ## 4. Queue Worker
 
-Queue handles notifications, PDF generation and report exports.
+The queue carries whatever a controller cannot afford to finish inside a
+request — today that means `EnforceSickCertificateDeadlines`, and later PDF
+report generation and notification dispatch.
+
+**No connection argument on purpose:** `queue:work` reads `QUEUE_CONNECTION`
+from `.env`, so the same unit works whether a deployment uses `database` or
+`redis`. Hard-coding `queue:work redis` in a unit file while `.env` says
+`database` is a silent failure — the worker starts, reports no jobs, and
+nobody notices until a deadline slips.
 
 **systemd unit** `/etc/systemd/system/hrms-worker.service`:
 
@@ -194,7 +229,7 @@ After=network.target
 [Service]
 User=www-data
 WorkingDirectory=/var/www/hrms/backend
-ExecStart=/usr/bin/php artisan queue:work redis --sleep=3 --tries=3 --max-time=3600
+ExecStart=/usr/bin/php artisan queue:work --sleep=3 --tries=3 --max-time=3600
 Restart=always
 RestartSec=5
 
@@ -209,6 +244,34 @@ sudo systemctl restart hrms-worker
 
 > Workers are restarted regularly (`--max-time`) to avoid memory leaks in long-running
 > PHP processes.
+
+**Supervisor alternative** `/etc/supervisor/conf.d/hrms-worker.conf` — the
+common choice on Debian/Ubuntu, and what most Laravel deployments use:
+
+```ini
+[program:hrms-worker]
+process_name=%(program_name)s_%(process_num)02d
+command=php /var/www/hrms/backend/artisan queue:work --sleep=3 --tries=3 --max-time=3600
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+user=www-data
+numprocs=2
+redirect_stderr=true
+stdout_logfile=/var/www/hrms/backend/storage/logs/worker.log
+stopwaitsecs=3600
+```
+
+```bash
+sudo supervisorctl reread && sudo supervisorctl update
+sudo supervisorctl status hrms-worker:*
+```
+
+Whichever one is used, the requirement is the same: **an always-on process,
+not a shell somebody has to remember to leave open.** A worker started by
+hand dies with the terminal, and the next person to log in has no idea one
+was needed.
 
 **Phase 6 made the worker load-bearing.** `EnforceSickCertificateDeadlines`
 implements `ShouldQueue`, so the scheduler only *dispatches* it — with no
@@ -227,7 +290,7 @@ Business rules that **must** run server-side — never depend on the mobile app 
 
 | Job | Purpose | Default schedule | Status |
 |---|---|---|---|
-| `EnforceSickCertificateDeadlines` | Convert leave past its certificate deadline to **LOP**, release the balance, dispatch `LeaveConvertedToLop` | **hourly at :17** (`hourlyAt(17)`) | ✅ Phase 6 |
+| `EnforceSickCertificateDeadlines` | Convert leave past its certificate deadline to **LOP**, release the balance, dispatch `LeaveConvertedToLop` | **hourly at :17** — `hourlyAt(config('hrms.scheduling.tick_minute'))`, `HRMS_SICK_TICK_MINUTE` | ✅ Phase 6 |
 | Document expiry reminders | Passport / visa / Emirates ID / certificates | Daily | ⬜ Phase 9 |
 | Training certificate expiry | Notify employee + HR | Daily | ⬜ Phase 9 |
 | Leave reminders | Pending approvals, upcoming leave | Daily | ⬜ with notifications |
@@ -243,7 +306,7 @@ Business rules that **must** run server-side — never depend on the mobile app 
 
 The entry must run **every minute** — `schedule:run` is the dispatcher, and
 Laravel's scheduler does the rest. Scheduling it daily instead would mean a
-job registered as `hourlyAt(17)` still fires, but only when the daily run
+job registered as `hourlyAt(17)` (the default tick) still fires, but only when the daily run
 happens to land in the right hour; on a VPS whose cron is the only clock, that
 is the difference between "converted at 17:17" and "converted whenever".
 
@@ -259,8 +322,8 @@ Two guards are set in `routes/console.php` and are **not** visible in
 
 ```php
 Schedule::job(new EnforceSickCertificateDeadlines)
-    ->hourlyAt(17)
-    ->withoutOverlapping(60)
+    ->hourlyAt((int) config('hrms.scheduling.tick_minute'))        // HRMS_SICK_TICK_MINUTE, clamped to 0-59
+    ->withoutOverlapping((int) config('hrms.scheduling.overlap_minutes')) // HRMS_SICK_OVERLAP_MINUTES, default 60
     ->onOneServer();
 ```
 
@@ -269,6 +332,11 @@ its previous minute; `onOneServer()` protects against two hosts sharing a
 database. A third guard lives in the job itself (`$uniqueFor = 3600`), and a
 *fourth* in the data (`certificate_checked_at`), so even all the locks being
 defeated converts nothing twice.
+
+The tick minute and overlap window are env-tunable because they are
+deployment mechanics; the **deadline** they enforce is not, because it is a
+business rule about people — `leave.sick_certificate_deadline_days` in the
+`settings` table, default 2 days.
 
 **The schedule needs a queue worker too** — see §4.
 
@@ -433,8 +501,10 @@ Keystore loss = inability to update the app. Back it up before first release.
 | Signal | Tool |
 |---|---|
 | Application errors | Laravel log → aggregated (Sentry / CloudWatch / etc.) |
-| Queue failures | `failed_jobs` table + alert |
+| Queue failures | `php artisan queue:failed` (`failed_jobs` table) + alert |
+| Queue backlog | row count in the `jobs` table — a growing count with an idle worker is the LOP deadline quietly not being enforced |
 | Scheduler missed runs | `schedule:run` heartbeat monitoring |
+| Worker alive | `systemctl status hrms-worker` / `supervisorctl status hrms-worker:*` |
 | Disk / CPU / memory | Server agent |
 | Uptime | HTTP check on `/api/v1/health` |
 | Slow queries | MariaDB slow log + Laravel query logging in debug |
@@ -467,12 +537,14 @@ php artisan view:cache
 # 5. database
 php artisan migrate --force
 
-# 6. restart workers
+# 6. restart workers (systemd — use `supervisorctl restart hrms-worker:*` instead if Supervisor)
 sudo systemctl restart hrms-worker
 
 # 7. verify
 php artisan about
 curl -s https://api.example.com/api/v1/health
+php artisan schedule:list      # the deadline job must be listed
+php artisan queue:failed       # must be empty after a deploy
 ```
 
 ---
@@ -498,11 +570,14 @@ curl -s https://api.example.com/api/v1/health
 | This document (target architecture + runbook) | ✅ Written |
 | Phase 3 auth environment variables documented in §3.1 | ✅ |
 | Phase 4 geofence + visibility config documented in §3.1 | ✅ |
-| Phase 5 selfie env keys (`HRMS_SELFIE_MAX_KB`, `HRMS_SELFIE_MAX_PIXELS`, `HRMS_SELFIE_JPEG_QUALITY`) | ⚠️ **documented but deliberately absent from `.env.example`** — the defaults in `config/hrms.php` are the answer until an operator needs to change them |
+| Phase 5 selfie env keys (`HRMS_SELFIE_MAX_KB`, `HRMS_SELFIE_MAX_PIXELS`, `HRMS_SELFIE_JPEG_QUALITY`) present in `.env.example` | ✅ Added in operational hardening — no secrets, defaults only |
 | Phase 6 certificate env keys documented in §3.1 | ✅ |
+| Phase 6 certificate env keys present in `.env.example` | ✅ Added in operational hardening |
+| `.env.example` contains no passwords, keys or credentials | ✅ placeholders only; `MAIL_PASSWORD`, `AWS_SECRET_ACCESS_KEY`, `DB_PASSWORD` remain blank or commented |
 | Scheduler registration documented with real `schedule:list` output (§5) | ✅ |
 | Production cron line documented (§5) | ✅ `* * * * * cd … && php artisan schedule:run` |
 | Queue worker identified as required by the Phase 6 deadline job (§4) | ✅ |
+| Queue worker documented under **both** systemd and Supervisor (§4) | ✅ |
 | Server provisioning | ⬜ |
 | CI/CD pipeline | ⬜ |
 | SSL certificate | ⬜ |

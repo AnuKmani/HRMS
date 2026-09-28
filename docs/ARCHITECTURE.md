@@ -892,12 +892,26 @@ Laravel REST API      ← behind nginx/Apache, TLS terminated
 Private File Storage  ← encrypted at rest, versioned backups
 
 Side processes:
-  • Queue worker      (notifications, PDF generation, exports)
-  • Laravel Scheduler (document expiry, LOP conversion, reminders)
+  • Queue worker      (LOP conversion today; PDF generation, exports later)
+  • Laravel Scheduler (LOP conversion now; document expiry, reminders later)
   • FCM               (push delivery)
   • Backup job
   • Monitoring / logging
 ```
+
+**Both side processes are mandatory, not optional** — the scheduler only
+*dispatches* `EnforceSickCertificateDeadlines`, the worker is what runs it.
+One without the other means overdue sick leave stays `pending` forever while
+everything else looks healthy. See docs/DEPLOYMENT.md §4–§5 for the systemd
+and Supervisor units and the cron entry.
+
+What each layer owns:
+
+| Value | Where it lives | Why |
+|---|---|---|
+| Rate limits, geofence bounds, GPS ceiling, upload sizes, scheduler tick | `config/hrms.php`, `config/rate_limiting.php` (env-backed) | deployment mechanics — tuned per environment without a code change |
+| Role visibility narrowing | `config/hrms.php` `visibility` | code, not env: policies *and* list queries read the same arrays, so a typo in `.env` could not silently widen them |
+| Certificate deadline, grace period, working hours | `settings` table | business rules — changed by whoever runs the company, not by whoever deploys |
 
 Designed to run on AWS, Azure, GCP, DigitalOcean or any Linux VPS — **no cloud-vendor
 lock-in**. Only standard requirements: PHP-FPM, MariaDB, a queue worker and a cron entry.

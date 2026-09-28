@@ -452,6 +452,49 @@ concurrent run with both locks defeated converts nothing.
 Use `Queue::fake()` / `Notification::fake()` / `Event::fake()` and
 `Carbon::setTestNow()`.
 
+### 4.1 Operational verification (what PHPUnit cannot cover)
+
+Every row above runs the job **in-process with `QUEUE_CONNECTION=sync`**.
+That proves the *conversion rule*; it does not prove that the scheduler
+dispatches, that a row lands in the `jobs` table, or that a separate
+`queue:work` process is what eventually runs it. Those three are exactly the
+things that break silently in production, so they are checked by hand against
+`hrms_testing` — never `hrms_laravel`, and never as part of `php artisan test`.
+
+```bash
+cd backend
+$env:DB_DATABASE='hrms_testing'; $env:QUEUE_CONNECTION='database'
+
+# 1. fixture: an overdue, certificate-less sick request + its reserved balance
+php ../scripts/verify-lop-pipeline.php setup
+
+# 2. scheduler dispatches → a row appears in `jobs`
+php artisan schedule:test --name="App\Jobs\EnforceSickCertificateDeadlines"
+
+# 3. worker consumes it → status becomes lop, balance released, chain closed
+php artisan queue:work --stop-when-empty
+
+# 4. idempotency: repeat 2 and 3, then hammer the handler directly
+php ../scripts/verify-lop-pipeline.php handle     # converted_first=0 converted_second=0
+php artisan queue:failed                          # must stay empty
+```
+
+What each step proves:
+
+| Step | Assertion |
+|---|---|
+| `schedule:test` → `jobs = 1` | the scheduler really dispatches; the job is `ShouldQueue`, not run inline |
+| two dispatches back to back → `jobs = 1` | `ShouldBeUnique` swallows the overlap |
+| `queue:work --stop-when-empty` → `DONE` | a real worker process is what executes it |
+| after run 1 | `pending → lop`, `lop_days = 1`, `certificate_checked_at` + `lop_applied_at` stamped, balance `pending 1.0 → 0.0`, approval `waiting 1 → 0`, `jobs = 0`, `failed_jobs = 0` |
+| after runs 2 and 3 | **byte-identical state** — timestamps still the first run's, one `lop` row, no second balance movement, no extra `approval_records` |
+| `handle()` called twice in one process | `converted_first=0 converted_second=0` — the query, not the lock, is the real guard |
+| `schedule:run` outside the tick minute | `No scheduled commands are ready to run` and `jobs` stays 0 — no spurious dispatch |
+
+`scripts/verify-lop-pipeline.php` refuses to run unless
+`config('database.connections.mysql.database')` is exactly `hrms_testing`, so
+it cannot be pointed at development data by mistake.
+
 ---
 
 ## 5. Flutter Test Matrix

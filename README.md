@@ -228,6 +228,29 @@ php artisan migrate --seed        # 26 migrations, 34 tables + RBAC/settings see
 php artisan serve          # http://127.0.0.1:8000
 ```
 
+> **Two background processes are required — `serve` alone is not the app.**
+>
+> ```bash
+> # Terminal 2: the queue worker. Without it, EnforceSickCertificateDeadlines
+> # is dispatched and then sits in the `jobs` table forever.
+> php artisan queue:work --stop-when-empty
+>
+> # Terminal 3 (or a cron line) — dispatches scheduled work:
+> php artisan schedule:run
+> ```
+>
+> Neither starts itself, and neither failure is visible from the app: an idle
+> queue and a missing cron both look identical to a healthy install until
+> somebody's sick leave stays `pending` past its deadline. In production both
+> run under **Supervisor or systemd** plus a `* * * * * … schedule:run` cron
+> entry — see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) §4–§5.
+>
+> `.env.example` now carries every HRMS key an operator may want to tune
+> (selfie and certificate limits, geofence bounds, rate limits, scheduler
+> tick). All of them are **non-secret** — limits and directory names, never
+> credentials. Business rules such as the 2-day certificate deadline are
+> database settings, not environment variables.
+
 ```bash
 php artisan test                  # 383 tests, 2017 assertions
 ./vendor/bin/pint                 # code style
@@ -443,7 +466,7 @@ derived timesheets, and overtime claims.
 | **Approval workflow engine** — `approval_workflows` + `approval_workflow_steps` (a `sequence`, no status column) + a materialised `approval_records` chain frozen at submit; approvers resolve as `reporting_manager` / `role` / `permission`, unresolvable steps are skipped with a remark and never deleted | ✅ |
 | **Authorization**: own draft edit, **no self-approve**, approver only at the *current* step; coarse `permission:leave.approve` / `permission:overtime.approve` on the transition routes, everything else row-level in policies | ✅ |
 | Sick **certificate upload** — private disk, `mimes`+`mimetypes`+config size, byte-level `CertificateContent` rule, server-minted filename, never a path in JSON | ✅ |
-| Deadline defaults to **2 days** → converts to `lop` server-side with `lop_days`/`lop_reason`/`lop_applied_at`, the paid reservation released, and `LeaveConvertedToLop` dispatched after commit; `Schedule::job(EnforceSickCertificateDeadlines)->hourlyAt(17)` with a queued, idempotent job (`$uniqueFor`). **No audit row and no notification — neither exists (SECURITY §8)** | ✅ |
+| Deadline defaults to **2 days** → converts to `lop` server-side with `lop_days`/`lop_reason`/`lop_applied_at`, the paid reservation released, and `LeaveConvertedToLop` dispatched after commit; `Schedule::job(EnforceSickCertificateDeadlines)->hourlyAt(config('hrms.scheduling.tick_minute'))` (default :17) with a queued, idempotent job (`$uniqueFor`). **No audit row and no notification — neither exists (SECURITY §8)** | ✅ |
 | **Timesheets** as derived snapshots regenerated from attendance (`status = open / complete / incomplete`), own + manager-scoped lists, no approval endpoints | ✅ |
 | **Overtime** through the same workflow engine; `payroll_eligible` set only on approval, no payroll arithmetic anywhere | ✅ |
 | **7 policies** (`LeaveRequest`, `LeaveBalance`, `LeaveType`, `Holiday`, `Timesheet`, `OvertimeRequest`, `ApprovalWorkflow`) + 15 form requests + 9 API resources | ✅ |

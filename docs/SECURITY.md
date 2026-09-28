@@ -557,10 +557,19 @@ All blocked by the root `.gitignore`.
 - Production uses environment variables, never committed config
 - Firebase Admin SDK credentials live on the **server**, never inside the mobile app
 - The mobile app contains only the public Firebase config (safe to ship in the APK)
+- **Nothing in `.env.example` is a secret.** Every HRMS key added by the
+  operational hardening pass is a limit or a directory name — GPS accuracy
+  ceiling, rate-limit counts, byte and pixel budgets, JPEG quality, storage
+  sub-directory names, scheduler tick minute. `DB_PASSWORD`, `MAIL_PASSWORD`,
+  `AWS_SECRET_ACCESS_KEY` and `REDIS_PASSWORD` stay empty, commented or `null`
+  exactly as they were. Adding a key there is safe only while that stays true.
 
 **Status:** ✅ `.gitignore` in place · ✅ `.env.example` with placeholders only —
 including the Phase 3 keys (`PASSWORD_RESET_ENABLED`, `LOGIN_RATE_LIMIT_*`,
-`PASSWORD_RESET_RATE_LIMIT_*`, `BCRYPT_ROUNDS`)
+`PASSWORD_RESET_RATE_LIMIT_*`, `BCRYPT_ROUNDS`), the Phase 5/6 storage keys
+(`HRMS_SELFIE_*`, `HRMS_CERTIFICATE_*`, `GEOFENCE_*_METRES`,
+`ATTENDANCE_*`) and the scheduler mechanics (`HRMS_SICK_TICK_MINUTE`,
+`HRMS_SICK_OVERLAP_MINUTES`) — none of which carry credentials
 
 ---
 
