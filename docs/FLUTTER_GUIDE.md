@@ -6,7 +6,7 @@
 > report and its ladder, salary slips handed to the OS viewer, a loan
 > schedule, and a certificate that is asked for, decided and exported), all
 > in the same `data / domain / presentation` shape. `dart format .` clean,
-> `flutter analyze` clean, `flutter test` **377 passed**. This guide explains
+> `flutter analyze` clean, `flutter test` **378 passed**. This guide explains
 > the concepts and patterns the app uses, written for someone who knows
 > PHP/Laravel but is new to Flutter/Dart. Sections that were written as a plan
 > in earlier phases — the offline queue, the location and camera permission
@@ -1042,6 +1042,6 @@ flutter build appbundle         # build an AAB for Play Store
 | Router: **33 routes** (Phase 8 added 10 — `/payroll`, `/payroll/:id`, `/salary-slips`, four loan paths, three certificate paths) · no edit or delete path exists for a payroll row | ✅ Phase 8 |
 | `dart format .` | ✅ clean (8 files reflowed in Phase 7) |
 | `flutter analyze` | ✅ clean |
-| `flutter test` | ✅ **377 passed** (303 before Phase 8, +74 in `test/features/{payroll,loans,salary_certificates}/` + `money_test` + the route and home tests) |
+| `flutter test` | ✅ **378 passed** (303 before Phase 8, +74 in `test/features/{payroll,loans,salary_certificates}/` + `money_test` + the route and home tests, +1 for a partly deducted installment) |
 | Local database (Drift) + relational offline cache | ⬜ Not started — Phase 5 proved the queue does not need it (§10); revisit when a module is genuinely relational |
 | Shared widgets under `core/widgets/` | ⬜ The list and form widgets live in `core/presentation/` today; the split is worth it once a second, differently-shaped widget set appears |

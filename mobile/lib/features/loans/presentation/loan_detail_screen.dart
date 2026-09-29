@@ -335,7 +335,11 @@ class _LoanDetailScreenState extends ConsumerState<LoanDetailScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: Text(
-                  'Next payment: ${loan.nextInstallment!.amount} on '
+                  // `remaining_amount`, not the schedule's figure: a payment
+                  // a floor-capped run only partly took is still the next
+                  // thing to come out of this salary, and it comes out at
+                  // what is *left* of it.
+                  'Next payment: ${loan.nextInstallment!.remainingAmount} on '
                   '${loan.nextInstallment!.dueDate ?? 'the next payroll run'}.',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSecondaryContainer,
@@ -437,9 +441,25 @@ class _LoanDetailScreenState extends ConsumerState<LoanDetailScreen> {
             ),
           ),
           Expanded(
-            child: Text(
-              installment.dueDate ?? 'On the next run',
-              style: theme.textTheme.bodyMedium,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  installment.dueDate ?? 'On the next run',
+                  style: theme.textTheme.bodyMedium,
+                ),
+
+                // Scheduled, taken and left are three different figures, so
+                // a payment the run could only partly take says so in the
+                // row rather than showing the schedule's amount as though
+                // the whole of it had moved.
+                if (installment.isPartial)
+                  MoneyText(
+                    installment.remainingAmount,
+                    currency: currency,
+                    style: theme.textTheme.bodySmall,
+                  ),
+              ],
             ),
           ),
           StatusChip(

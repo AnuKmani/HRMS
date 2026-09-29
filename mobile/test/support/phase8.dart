@@ -487,10 +487,17 @@ Payroll payrollRow({
 });
 
 /// One payment of a repayment schedule.
+///
+/// The defaults describe a payment nothing has touched yet: 1,000.00
+/// scheduled, 0.00 taken, 1,000.00 still to come. A payment the pay run
+/// could only partly take says so with `deductedAmount` and a
+/// `statusPartiallyDeducted`, which is what the floor rule produces.
 LoanInstallment loanInstallment({
   required int sequence,
   String dueDate = '2026-10-31',
   String amount = '1000.00',
+  String deductedAmount = '0.00',
+  String? remainingAmount,
   String status = LoanInstallment.statusPending,
   int? payrollId,
   String? skippedReason,
@@ -498,6 +505,8 @@ LoanInstallment loanInstallment({
   'sequence': sequence,
   'due_date': dueDate,
   'amount': amount,
+  'deducted_amount': deductedAmount,
+  'remaining_amount': remainingAmount ?? amount,
   'status': status,
   'payroll_id': payrollId,
   'deducted_at': payrollId == null ? null : '2026-09-30T12:00:00Z',
@@ -540,6 +549,8 @@ Loan loanRow({
           'sequence': 1,
           'due_date': nextDue,
           'amount': each,
+          'deducted_amount': '0.00',
+          'remaining_amount': each,
           'status': LoanInstallment.statusPending,
         },
   'remarks': remarks,
@@ -549,6 +560,8 @@ Loan loanRow({
           'sequence': installment.sequence,
           'due_date': installment.dueDate,
           'amount': installment.amount,
+          'deducted_amount': installment.deductedAmount,
+          'remaining_amount': installment.remainingAmount,
           'status': installment.status,
           'payroll_id': installment.payrollId,
           'deducted_at': installment.deductedAt,

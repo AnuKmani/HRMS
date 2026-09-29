@@ -28,6 +28,8 @@ class SettingsTest extends TestCase
             'leave.sick_certificate_deadline_days',
             'notification.reminder_offset_minutes',
             'working_hours.default',
+            'payroll.lop_divisor_mode',
+            'payroll.minimum_net_salary',
         ];
 
         foreach ($expected as $key) {

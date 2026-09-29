@@ -5,6 +5,7 @@ namespace App\Services\Payroll;
 use App\Models\Loan;
 use App\Models\LoanInstallment;
 use App\Models\Payroll;
+use App\Models\PayrollItem;
 use App\Models\User;
 use App\Support\Money;
 use Illuminate\Support\Facades\DB;
@@ -23,11 +24,17 @@ use Illuminate\Validation\ValidationException;
  *    4 due?".
  *
  *  - **the balance has exactly one pair of mutators.** `claimInstallment()`
- *    subtracts and `releaseInstallments()` adds back. PayrollService calls
- *    them rather than touching `outstanding_balance`, so a recalculation
- *    that releases a claim and a second run that re-claims it cannot end up
- *    with a balance that was decremented twice and incremented once - the
- *    bug that makes a loan look half-repaid forever.
+ *    subtracts what was actually taken and `releaseInstallments()` adds
+ *    back what this particular run took. PayrollService calls them rather
+ *    than touching `outstanding_balance`, so a recalculation that releases
+ *    a claim and a second run that re-claims it cannot end up with a
+ *    balance that was decremented twice and incremented once - the bug
+ *    that makes a loan look half-repaid forever.
+ *
+ * Partial repayment is why both take an amount rather than assuming the
+ * schedule's figure: a run may only take what leaves net salary at or
+ * above `payroll.minimum_net_salary`, and the remainder stays on the
+ * installment for the next run. See `LoanInstallment::deducted_amount`.
  *
  * Approval is a single decision recorded on the row rather than the Phase 6
  * materialised chain - see the migration's note on why a chain would add
@@ -248,25 +255,47 @@ final class LoanService
     }
 
     /**
-     * Take one installment out of a payroll run.
+     * Take a share of one installment out of a payroll run.
      *
-     * The row is re-read under `lockForUpdate()` and its status checked
-     * *inside* the lock, so two concurrent runs cannot both observe
-     * `pending` and both take it. The status change, the payroll pointer and
-     * the balance decrement are one write.
+     * The row is re-read under `lockForUpdate()` and what is still owed on
+     * it is re-checked *inside* the lock, so two concurrent runs cannot
+     * both observe room and both take it: the amount is clamped to what is
+     * still outstanding, and the running total, the status and the balance
+     * move in one write.
+     *
+     * `$amount` is not the scheduled figure - it is whatever the
+     * calculation found fit above `payroll.minimum_net_salary`, which makes
+     * a partial deduction a first-class outcome rather than an error. The
+     * rest of the row stays outstanding and is offered to the next run.
+     * Locking is what stops the same remainder being taken twice by two
+     * runs racing each other.
      */
-    public function claimInstallment(LoanInstallment $installment, Payroll $payroll): void
+    public function claimInstallment(LoanInstallment $installment, Payroll $payroll, float $amount): void
     {
+        $amount = Money::round($amount);
+
+        if ($amount <= 0.0) {
+            return;
+        }
+
         $fresh = LoanInstallment::query()
             ->whereKey($installment->getKey())
             ->lockForUpdate()
             ->first();
 
-        if ($fresh === null || $fresh->status !== LoanInstallment::STATUS_PENDING) {
+        if ($fresh === null || ! in_array($fresh->status, LoanInstallment::CLAIMABLE, true)) {
             return;
         }
 
-        $fresh->status = LoanInstallment::STATUS_DEDUCTED;
+        $owed = Money::round((float) $fresh->amount - (float) $fresh->deducted_amount);
+        $taken = Money::round(min($owed, $amount));
+
+        if ($taken <= 0.0) {
+            return;
+        }
+
+        $fresh->deducted_amount = Money::round((float) $fresh->deducted_amount + $taken);
+        $fresh->status = $fresh->statusAfter((float) $fresh->deducted_amount);
         $fresh->payroll_id = $payroll->getKey();
         $fresh->deducted_at = now();
         $fresh->save();
@@ -274,7 +303,11 @@ final class LoanService
         $loan = $fresh->loan()->lockForUpdate()->first();
 
         if ($loan !== null) {
-            $balance = Money::round((float) $loan->outstanding_balance - (float) $fresh->amount);
+            // The balance moves by what was *taken*, not by what the
+            // schedule asked for - the difference is the carry-forward,
+            // and a loan balance that assumed otherwise would show a debt
+            // as repaid before the money had been collected.
+            $balance = Money::round((float) $loan->outstanding_balance - $taken);
             $loan->outstanding_balance = max(0.0, $balance);
             $loan->status = $loan->outstanding_balance <= 0.0
                 ? Loan::STATUS_COMPLETED
@@ -284,26 +317,57 @@ final class LoanService
     }
 
     /**
-     * Give a payroll row's installments back before it is recalculated.
+     * Give a payroll row's share of its installments back before it is
+     * recalculated.
      *
-     * Without this a second run would find nothing `pending` for the period
-     * and would silently pay the loan deduction as zero - a recalculation
-     * that *removes* money is worse than one that fails.
+     * The amount this run took is read from the run's own deduction lines
+     * (`payroll_items`) rather than from a column on the installment,
+     * because one installment can be shared: September may have taken
+     * 600.00 of a 1,000.00 payment and October the other 400.00, and
+     * releasing September must hand back exactly its 600.00 and leave
+     * October's share standing. `payroll_id` is one column and cannot say
+     * that; the payslip line always could.
      *
-     * @return int rows released
+     * Without this a second run would find nothing outstanding for the
+     * period and would silently pay the loan deduction as zero - a
+     * recalculation that *removes* money is worse than one that fails.
+     *
+     * @return int deduction lines given back
      */
     public function releaseInstallments(Payroll $payroll): int
     {
-        $claimed = LoanInstallment::query()
+        $claims = PayrollItem::query()
             ->where('payroll_id', $payroll->getKey())
-            ->where('status', LoanInstallment::STATUS_DEDUCTED)
+            ->where('type', PayrollItem::TYPE_DEDUCTION)
+            ->where('source_type', 'loan_installment')
+            ->whereIn('code', [PayrollItem::CODE_LOAN, PayrollItem::CODE_ADVANCE])
+            ->where('amount', '>', 0)
+            ->orderBy('id')
             ->lockForUpdate()
             ->get();
 
-        foreach ($claimed as $installment) {
-            $installment->status = LoanInstallment::STATUS_PENDING;
-            $installment->payroll_id = null;
-            $installment->deducted_at = null;
+        foreach ($claims as $claim) {
+            $installment = LoanInstallment::query()
+                ->whereKey($claim->source_id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($installment === null) {
+                continue;
+            }
+
+            $released = Money::round(min((float) $claim->amount, (float) $installment->deducted_amount));
+
+            if ($released <= 0.0) {
+                continue;
+            }
+
+            $installment->deducted_amount = Money::round((float) $installment->deducted_amount - $released);
+            $installment->status = $installment->statusAfter((float) $installment->deducted_amount);
+            $installment->payroll_id = $this->holderOtherThan($installment, $payroll);
+            $installment->deducted_at = (float) $installment->deducted_amount > 0.0
+                ? $installment->deducted_at
+                : null;
             $installment->save();
 
             $loan = $installment->loan()->lockForUpdate()->first();
@@ -313,7 +377,7 @@ final class LoanService
             }
 
             $loan->outstanding_balance = Money::round(
-                (float) $loan->outstanding_balance + (float) $installment->amount,
+                (float) $loan->outstanding_balance + $released,
             );
 
             // A loan that was completed by this run and is now being
@@ -326,7 +390,30 @@ final class LoanService
             $loan->save();
         }
 
-        return $claimed->count();
+        return $claims->count();
+    }
+
+    /**
+     * Which payroll still holds a claim on this installment, if any.
+     *
+     * `payroll_id` names the run that took money most recently - with
+     * partial repayment it cannot name them all, and the full history is
+     * on `payroll_items`. After a release it is recomputed from the
+     * deduction lines that remain rather than cleared, so "taken by
+     * October's run" never ends up pointing at a run that has just handed
+     * its money back.
+     */
+    private function holderOtherThan(LoanInstallment $installment, Payroll $payroll): ?int
+    {
+        $holder = PayrollItem::query()
+            ->where('source_type', 'loan_installment')
+            ->where('source_id', $installment->getKey())
+            ->where('type', PayrollItem::TYPE_DEDUCTION)
+            ->whereNotNull('payroll_id')
+            ->where('payroll_id', '!=', $payroll->getKey())
+            ->max('payroll_id');
+
+        return $holder === null ? null : (int) $holder;
     }
 
     /**

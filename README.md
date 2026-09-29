@@ -149,7 +149,7 @@ HRMS/
 │   │   └── rate_limiting.php   # login, password-reset, attendance limits
 │   ├── database/migrations/
 │   ├── routes/api.php
-│   └── tests/               # Feature + Unit (458 tests, 2761 assertions)
+│   └── tests/               # Feature + Unit (469 tests, 2915 assertions)
 │
 ├── docs/                    # Project documentation
 │   ├── ARCHITECTURE.md
@@ -257,7 +257,7 @@ php artisan serve          # http://127.0.0.1:8000
 > database settings, not environment variables.
 
 ```bash
-php artisan test                  # 458 tests, 2761 assertions
+php artisan test                  # 469 tests, 2915 assertions
 ./vendor/bin/pint                 # code style
 ```
 
@@ -291,7 +291,7 @@ flutter run --dart-define=API_BASE_URL=http://192.168.1.20:8000/api/v1
 
 ```bash
 flutter analyze              # must report no issues
-flutter test                 # 377 tests, no device or server required
+flutter test                 # 378 tests, no device or server required
 ```
 
 > The base URL is compiled in with `--dart-define`. There is no config file to
@@ -527,13 +527,13 @@ through `AttendanceStatusCalculator`, `WorkingTimeCalculator`,
 | **7 migrations · 40 total · 48 tables · all `Ran`** — `payrolls` (UNIQUE `employee_id + payroll_year + payroll_month`), `payroll_items`, `allowances`, `payroll_adjustments`, `loans`, `loan_installments` (UNIQUE `loan_id + sequence`), `salary_certificate_requests`. **No `salary_slips` table** — a slip is the `payrolls` row rendered | ✅ |
 | `App\Support\Money` — scale 2, PHP `round()` half away from zero, **no bcmath required**; every money column `DECIMAL`, **no float/double anywhere**; one formatter, one rounding rule | ✅ |
 | `PayrollCalculationService` **outside any controller** — basic → allowances → overtime → bonus → gross → LOP → unpaid leave → loan → net, writing nothing and taking no HTTP object; `PayrollService` owns the transaction and the one-way ladder `draft → calculated → reviewed → processed → locked` | ✅ |
-| Backend-authoritative: a second run reports `updated: 0` and never rewrites a decided row; a recalculation **releases an installment before it takes it again**, so a payment is taken once; a negative `net_salary` passes through unclamped (the debt is real) | ✅ |
+| Backend-authoritative: a second run reports `updated: 0` and never rewrites a decided row; a recalculation **releases an installment before it takes it again**, so a payment is taken once | ✅ |
 | Configurable LOP divisor (`payroll.lop_divisor_mode` = `fixed`, `payroll.lop_divisor` = 30) and overtime multiplier (`payroll.overtime_rate_multiplier` = 1.5) — **generic engine settings, not validated statutory rates** | ⚠️ jurisdiction to validate before production |
 | Private, on-demand PDFs with Phase 7's dompdf (no second package): `SalarySlipPdf`, `SalaryCertificatePdf`, `Cache-Control: no-store`, nothing stored, no URL, filename minted server-side | ✅ |
-| Status flows: loans `draft → pending → approved → active → completed` (+ `rejected` / `cancelled`), installments `pending → deducted` (never twice), certificates `pending → approved → generated` (+ `rejected` / `cancelled`), adjustments `pending → approved` — **only `approved` enters payroll** | ✅ |
-| **5 policies** (`Payroll`, `PayrollAdjustment`, `Allowance`, `Loan`, `SalaryCertificateRequest`) → **22 total**; **11 new permissions → 70 total, 332 grants**; **3 new settings → 16 total**; 11 form requests | ✅ |
+| Status flows: loans `draft → pending → approved → active → completed` (+ `rejected` / `cancelled`), installments `pending → partially_deducted → deducted` (never twice, see below), certificates `pending → approved → generated` (+ `rejected` / `cancelled`), adjustments `pending → approved` — **only `approved` enters payroll** | ✅ |
+| **5 policies** (`Payroll`, `PayrollAdjustment`, `Allowance`, `Loan`, `SalaryCertificateRequest`) → **22 total**; **11 new permissions → 70 total, 332 grants**; **3 new settings → 16 total** (17 after the hardening pass below); 11 form requests | ✅ |
 | Routes: 36 new — payroll (index/show/summary/process/recalculate/review/finalize/lock), salary slips, allowances, payroll adjustments, loans, salary certificate requests — **140 definitions / 145 registered**, 117 permission-gated | ✅ |
-| Tests: backend **458 passed (2761 assertions)** — 13 `PayrollTest` + 11 `LoanTest` + 9 `SalaryDocumentTest` · `pint --test` clean · `composer validate` valid · `migrate:status` all `Ran` | ✅ |
+| Tests: backend **469 passed (2915 assertions)** — 13 `PayrollTest` + 11 `LoanTest` + 9 `SalaryDocumentTest` + **11 `PayrollRepaymentTest`** · `pint --test` clean · `composer validate` valid · `migrate:status` all `Ran` | ✅ |
 
 **Flutter**
 
@@ -544,7 +544,7 @@ through `AttendanceStatusCalculator`, `WorkingTimeCalculator`,
 | `features/salary_certificates/` — ask, decide, export | ✅ |
 | `core/presentation/money.dart` (`Money` / `MoneyText`, decimal string → minor units, never a `double`, **no `intl`**) and `core/presentation/pdf_opener.dart` (`PdfOpener`, lifted out of the report feature) | ✅ |
 | Four home doors, each gated on its own permission; `payroll.summary.view` alone draws the totals card and **never builds the rows provider** | ✅ |
-| 10 routes → **33 total**; **377 tests** (+74) · `dart format` · `flutter analyze` clean | ✅ |
+| 10 routes → **33 total**; **378 tests** (+75) · `dart format` · `flutter analyze` clean | ✅ |
 
 > **Two caveats carried forward, both documented rather than hidden:**
 >
@@ -552,15 +552,52 @@ through `AttendanceStatusCalculator`, `WorkingTimeCalculator`,
 >    form submits `purpose` + `request_date` for *you*; the API accepts an
 >    `employee_id` so an HR desk can file on someone else's behalf, and that
 >    path is covered by backend tests only.
-> 2. **A loan balance can push `net_salary` below zero.** Nothing clamps it,
->    because clamping would make the payslip lie about a debt the company
->    still holds — the number is the truth, and the sentence around it is
->    what a later phase should write.
+> 2. **A loan balance larger than the month's pay no longer produces a
+>    negative `net_salary`** — repayments are sized against
+>    `payroll.minimum_net_salary` and only the part that fits is taken (the
+>    remainder carries forward). Loss of pay and approved adjustments still
+>    can, and are passed through unclamped on purpose: they describe work
+>    that was or was not done.
 >
 > **Still deliberately not built:** expenses, employee documents, onboarding,
 > training, assets, FCM notifications and full audit logging — plus
-> statutory (UAE) overtime configuration, which must be validated before
-> production.
+> statutory (UAE) overtime configuration **and any statutory reading of the
+> net-salary floor**, which must be validated before production.
+
+### ✅ Post-Phase 8 hardening — payroll financial safety (COMPLETE)
+
+Two things a payroll must not do — pay a negative net because of a
+repayment, and drop a payment it could not take — closed without adding a
+route, a permission or a policy.
+
+**Backend**
+
+| Deliverable | Status |
+|---|---|
+| **`payroll.minimum_net_salary`** (4th payroll setting → **17 total**, default `0`, group `payroll`) read through `SettingsService` and clamped to `≥ 0` inside `PayrollCalculationService` — a *settings* row, not a constant, and not reachable by any grant | ✅ |
+| Room formula: `room = gross − (LOP + approved adjustments) − floor`; each due installment takes `min(remaining, room)`, **oldest due date first**. Attendance and approved adjustments are never rewritten, so `gross − deductions = net` still holds | ✅ |
+| **Partial installments** — 1 migration (`2026_09_29_140008`, the only schema change): `loan_installments.deducted_amount DECIMAL(12,2) DEFAULT 0`, backfilled on rows already `deducted`, plus a `partially_deducted` status; the remainder stays outstanding and is offered to the next run together with anything overdue | ✅ |
+| Four figures kept apart: `amount` (scheduled) · `deducted_amount` (taken across runs) · `remaining_amount` (left on this row) · `loans.outstanding_balance` (left on the loan, moved only by what was **taken**) — all four in `LoanInstallmentResource` / `LoanResource`, and on the payslip line's `metadata` | ✅ |
+| `RepaymentAllocation` value object carries scheduled / before / now / left from the calculation to both writers, so a payslip line and a loan balance cannot disagree | ✅ |
+| Take-once under concurrency: `claimInstallment()` re-reads with `lockForUpdate()` and clamps to what is still outstanding; `releaseInstallments()` gives back **one run's share** from that run's own `payroll_items` lines, then `payroll_id` is recomputed via `holderOtherThan()` | ✅ |
+| Recalculation from `draft`/`calculated` may re-cut a deduction; `reviewed` / `processed` / `locked` may not (409, or `skipped` on a re-run) — retuning the floor never re-runs a signed-off month | ✅ |
+| `dueInstallments()` = `status ∈ {pending, partially_deducted} AND due_date ≤ period end` — overdue carries forward; a zero-actual installment writes **no** payslip line, stays `pending` and is retried | ✅ |
+| Tests: **`PayrollRepaymentTest` 11 passed (148 assertions)** on `hrms_testing` — full take, floor-capped partial, LOP never rewritten, carry-forward, retry-not-skip, run-twice, release-then-reclaim, locked untouched, advance consistency, four-figure reporting; `SettingsTest` seeds the new key | ✅ |
+| Validation: `php artisan test` **469 passed (2915 assertions)** · `migrate:status` all `Ran` (48 tables / **41 migrations**) · `composer validate` valid · `pint --test` clean | ✅ |
+
+**Flutter**
+
+| Deliverable | Status |
+|---|---|
+| `LoanInstallment` gains `deductedAmount` / `remainingAmount` (falls back to `amount` when a server predates the field), `statusPartially_deducted` → **"Partly deducted"**, `isPartial` | ✅ |
+| Loan detail shows the remainder under the due date for a partial row, and **Next payment** uses `remainingAmount` rather than the schedule's figure | ✅ |
+| `LoanResource.installments` wrapped in `LoanInstallmentResource::collection` (a nested model serialized to raw attributes was dropping every computed key) | ✅ |
+| Tests: **378 passed** (+1 partial-installment widget test) · `dart format .` 0 changed · `flutter analyze` clean | ✅ |
+
+> **Not delivered by this pass:** UAE statutory deduction rules and any
+> statutory minimum-wage reading of the floor (both need validation before
+> production), and audit logging — every payroll/loan mutation already runs
+> through a service method, which is where that log will attach.
 
 ### Planned Phases
 
@@ -574,6 +611,7 @@ through `AttendanceStatusCalculator`, `WorkingTimeCalculator`,
 | **6** | Leave: types, balances, requests, approval workflow, sick-cert → LOP, holiday calendar, timesheets, overtime | ✅ Done |
 | **7** | Site activity reports & daily site reports (PDF) | ✅ Done |
 | **8** | Payroll, salary slips, certificates, loans | ✅ Done |
+| **8h** | Payroll financial-safety hardening — net-salary floor, partial/carry-forward repayments | ✅ Done |
 | **9** | Expenses: workflow approval + private receipts | ⬜ Next |
 | **10** | Documents + expiry, onboarding, training, assets | ⬜ |
 | **11** | FCM notifications, dashboards, reports & exports | ⬜ |

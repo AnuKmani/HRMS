@@ -172,11 +172,19 @@ class Loan extends Model
 
     /**
      * How many installments are still to be taken from pay.
+     *
+     * A `partially_deducted` row counts as still to come: part of it has
+     * been taken, and the remainder is money the schedule has not finished
+     * collecting.
      */
     public function remainingInstallments(): int
     {
         return (int) $this->installments()
-            ->whereIn('status', [LoanInstallment::STATUS_PENDING, LoanInstallment::STATUS_DEDUCTED])
+            ->whereIn('status', [
+                LoanInstallment::STATUS_PENDING,
+                LoanInstallment::STATUS_PARTIALLY_DEDUCTED,
+                LoanInstallment::STATUS_DEDUCTED,
+            ])
             ->count();
     }
 }

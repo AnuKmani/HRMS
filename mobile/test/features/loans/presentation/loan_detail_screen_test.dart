@@ -186,6 +186,47 @@ void main() {
     );
   });
 
+  // A payment the pay run could only partly take is the shape the
+  // net-salary floor produces, so the schedule has to say which part of it
+  // is still owed rather than printing the scheduled figure as though the
+  // whole of it had moved.
+  testWidgets('a payment the run only partly took says what is left', (
+    tester,
+  ) async {
+    script = ScriptedLoans(
+      idOf: (item) => item.id,
+      items: [
+        loanRow(
+          id: 4,
+          status: Loan.statusActive,
+          principal: '6000.00',
+          outstanding: '5000.00',
+          repaid: '1000.00',
+          count: 6,
+          each: '1000.00',
+          installments: [
+            loanInstallment(
+              sequence: 1,
+              status: LoanInstallment.statusPartiallyDeducted,
+              deductedAmount: '400.00',
+              remainingAmount: '600.00',
+            ),
+            loanInstallment(sequence: 2),
+          ],
+        ),
+      ],
+    );
+
+    await pumpDetail(tester, id: 4);
+
+    expect(find.byKey(const ValueKey('installment-1')), findsOneWidget);
+    expect(find.text('Partly deducted'), findsOneWidget);
+
+    // 600.00 is what is left of a 1,000.00 payment 400.00 of which has
+    // already been taken - the figure the next run is offered first.
+    expect(find.text('INR 600.00'), findsOneWidget);
+  });
+
   // Two tests rather than one: `LoanDetailScreen` keeps its state when the
   // same route is re-pumped with a different id, so a single test that
   // looked at the draft first and then at the pending row would still be

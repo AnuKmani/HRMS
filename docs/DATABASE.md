@@ -4,12 +4,14 @@
 > report families, and now the payroll vertical slice. Laravel's base tables
 > plus 10 Phase 2 migrations, the Phase 3 `users.status` column, the two
 > Phase 5 migrations, the nine Phase 6 migrations, the seven Phase 7
-> migrations and the seven Phase 8 migrations all exist: `settings`,
+> migrations, the seven Phase 8 migrations and the repayment-floor
+> migration that adds `loan_installments.deducted_amount` all exist:
+> `settings`,
 > `departments`, `designations`, `shifts`, `projects`, `employees`, `sites`,
 > `employee_site_assignments`, `attendances`, `site_visits`, the
 > leave/timesheet/overtime/holiday tables, **the seven site-report tables
 > (§2.9)** and **the seven payroll tables (§2.7)**, plus the
-> `spatie/laravel-permission` RBAC tables — **48 tables across 40
+> `spatie/laravel-permission` RBAC tables — **48 tables across 41
 > migrations**. Tables for later phases (`expenses`, `employee_documents`, …)
 > are **design only** and have not been created. `hrms_testing` mirrors this
 > schema for the test suite.
@@ -392,7 +394,7 @@ there is no stored file to go stale and no path to leak.
 | `allowances` | Recurring (`monthly`) or `one_time` pay elements, soft-deleted rather than destroyed |
 | `payroll_adjustments` | Bonuses and other deductions for one period; only `approved` rows are computed |
 | `loans` | Loan or salary advance: principal, installment amount and count, start date, outstanding balance, status |
-| `loan_installments` | The schedule minted at approval. **UNIQUE `(loan_id, sequence)`**, `payroll_id` records the run that deducted it |
+| `loan_installments` | The schedule minted at approval. **UNIQUE `(loan_id, sequence)`**; `amount` is what the schedule asks for, `deducted_amount` is what runs have actually taken of it, and `status` is `pending · partially_deducted · deducted · skipped · adjusted`. `payroll_id` names the run that took money from it most recently |
 | `salary_certificate_requests` | Purpose, request date, decision, approver, and the one-time `generated_at` |
 
 **Every money column is `DECIMAL(12, 2)`** (rates `DECIMAL(10,4)`/
@@ -406,6 +408,42 @@ model constants, **not** MySQL `ENUM`: adding a status is a deploy, not an
 `payroll_eligible` overtime, leave marked LOP, approved loan installments
 (taken inside the run's own transaction), and approved adjustments. It never
 writes back into `attendances`, `leave_requests` or `overtime_requests`.
+
+**Repayments are capped, not cancelled.** `payroll.minimum_net_salary` (a
+`settings` row, `0` by default) is the floor a run may not pay below:
+
+```
+room = gross - (LOP + approved adjustments) - payroll.minimum_net_salary
+```
+
+Installments are offered to the run oldest-first, and each takes
+`min(amount - deducted_amount, room)`. What fits is written to
+`payrolls.loan_deduction` / `advance_deduction` **and** to a `payroll_items`
+line; what does not fit stays on the installment — `partially_deducted` when
+part of it was taken, still `pending` when nothing was — and is offered to
+the next run, together with any older installment whose due date has passed.
+Attendance and approved deductions are never rewritten to protect the floor:
+they are facts, and if they alone put the row below it the figure is
+reported honestly rather than massaged.
+
+Four figures are kept apart, and none is derived from another in a client:
+
+| Figure | Home |
+|---|---|
+| scheduled installment amount | `loan_installments.amount` |
+| actual deducted amount (all runs) | `loan_installments.deducted_amount` |
+| remaining on this installment | `amount - deducted_amount` (API: `remaining_amount`) |
+| loan outstanding balance | `loans.outstanding_balance` — moves by what was **taken**, never by what was merely due |
+
+Per-run provenance is `payroll_items` (`source_type = loan_installment`),
+which is what lets a recalculation give back one month's share of a shared
+installment without disturbing another's.
+
+**Locked rows are untouched.** `reviewed`, `processed` and `locked` payroll
+rows refuse recalculation outright (409) and are counted as `skipped` by a
+second run, so a deduction somebody has already signed off cannot be re-cut
+by retuning the floor afterwards. Only `draft` and `calculated` rows release
+their claims and take them again.
 
 ---
 
@@ -627,7 +665,7 @@ for the two to disagree.
 | Report photographs in order | `sarp_…` / `dsrp_…` `(…_report_id, sort_order)` — and the same pair on the three child tables |
 | Document expiry | `(expiry_date)` |
 | Payroll period | **UNIQUE** `payrolls (employee_id, payroll_year, payroll_month)` + `(payroll_year, payroll_month, status)` |
-| Loan schedule | **UNIQUE** `loan_installments (loan_id, sequence)` + `(status, due_date)` |
+| Loan schedule | **UNIQUE** `loan_installments (loan_id, sequence)` + `(status, due_date)` — the second one answers "what still owes?" now that a row can be `pending` with an overdue due date or `partially_deducted` with a remainder |
 | Run / period lookups | `payrolls`, `allowances`, `payroll_adjustments` on their own period columns |
 
 **N+1 prevention:** all list endpoints eager-load their relations via `with()`, and are
@@ -645,7 +683,7 @@ All counts below are **live and verified** against `hrms_laravel` after
 | Roles | 10 | `RoleSeeder` |
 | Permissions | **70** | `PermissionSeeder` |
 | Role → permission grants | **332** | `RolePermissionSeeder` |
-| Settings | **16** | `SettingSeeder` |
+| Settings | **17** | `SettingSeeder` |
 | Approval workflows | 3 — `LEAVE-STD` (default for leave, 3 steps), `LEAVE-FAST` (1 step), `OT-STD` (default for overtime, 3 steps) | `ApprovalWorkflowSeeder` |
 | Approval workflow steps | 7 — reporting manager → role → role / permission | `ApprovalWorkflowSeeder` |
 | Leave types | 5 — `AL` Annual, `SL` Sick (certificate, 2-day deadline), `EL` Emergency, `UL` Unpaid (may go negative), `OTH` Other | `LeaveTypeSeeder` |
@@ -709,10 +747,12 @@ touching anything else — they are `firstOrCreate` / `syncPermissions` only.
 > `reporting`) and falls back to `config('app.name')` — one of the first
 > settings a deployment is likely to want to change.
 >
-> The three Phase 8 settings are `payroll.lop_divisor_mode` (**`fixed`**),
-> `payroll.lop_divisor` (**`30`**) and `payroll.overtime_rate_multiplier`
-> (**`1.5`**) — see `docs/SECURITY.md` on why the multiplier is a generic
-> engine parameter and not a statutory rate.
+> The four payroll settings are `payroll.lop_divisor_mode` (**`fixed`**),
+> `payroll.lop_divisor` (**`30`**), `payroll.overtime_rate_multiplier`
+> (**`1.5`**) and `payroll.minimum_net_salary` (**`0`**) — see
+> `docs/SECURITY.md` on why the multiplier is a generic engine parameter and
+> not a statutory rate, and why the floor is a setting rather than a 0 in
+> the calculation.
 
 > ⚠️ `DevelopmentDataSeeder` contains **sample structure only**. It creates no
 > employees, users, salaries or assignments. Every row it writes is labelled
@@ -797,9 +837,11 @@ After Phase 7: **41 tables**, **33 migrations** (3 framework, 1 Sanctum,
 | 33 | `2026_09_29_140005_create_loans_table` | `loans` | `installment_amount` is stored, not re-derived: the split agreed at approval is the split that is repaid. `outstanding_balance` is denormalised on purpose — the figure a borrower asks for must not be a SUM over rows a pay-run may be writing |
 | 34 | `2026_09_29_140006_create_loan_installments_table` | `loan_installments` | **UNIQUE `(loan_id, sequence)`** and a nullable `payroll_id`: together they are the "not twice" guarantee — the run that deducted a row is recorded on the row it deducted |
 | 35 | `2026_09_29_140007_create_salary_certificate_requests_table` | `salary_certificate_requests` | No document column. The PDF is rendered from this row on demand, so `generated_at` is the only trace and there is no file to expire or path to leak |
+| 36 | `2026_09_29_140008_add_deducted_amount_to_loan_installments_table` | *(adds a column)* | `loan_installments.deducted_amount DECIMAL(12,2) DEFAULT 0` — how much of a scheduled installment pay has actually taken. A repayment that would push net salary below `payroll.minimum_net_salary` takes only the part that fits and leaves the rest outstanding, which a schema with one all-or-nothing status could not say. The backfill sets `deducted_amount = amount` on every row already `deducted`, so a pre-existing full repayment cannot look untouched and be collected twice |
 
-**48 tables** total in `hrms_laravel`, across **40 migrations** (3 framework,
-1 Sanctum, 10 Phase 2, 1 Phase 3, 2 Phase 5, 9 Phase 6, 7 Phase 7, 7 Phase 8).
+**48 tables** total in `hrms_laravel`, across **41 migrations** (3 framework,
+1 Sanctum, 10 Phase 2, 1 Phase 3, 2 Phase 5, 9 Phase 6, 7 Phase 7, 7 Phase 8,
+1 repayment floor).
 
 ### Why two foreign keys are "deferred"
 

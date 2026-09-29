@@ -120,8 +120,11 @@ final class PayrollService
                 $payroll = $this->persist($employee, $year, $month, $bounds, $calculation, $existing);
                 $this->replaceItems($payroll, $calculation->items);
 
-                foreach ($calculation->installments as $installment) {
-                    $this->loans->claimInstallment($installment, $payroll);
+                // A claim of 0.00 is a no-op by design: the installment did
+                // not fit above the floor, so it is left outstanding for the
+                // next run rather than claimed and released.
+                foreach ($calculation->claims as $claim) {
+                    $this->loans->claimInstallment($claim->installment, $payroll, $claim->actual);
                 }
 
                 if ($existing !== null) {
@@ -184,8 +187,8 @@ final class PayrollService
 
             $this->replaceItems($payroll, $calculation->items);
 
-            foreach ($calculation->installments as $installment) {
-                $this->loans->claimInstallment($installment, $payroll);
+            foreach ($calculation->claims as $claim) {
+                $this->loans->claimInstallment($claim->installment, $payroll, $claim->actual);
             }
 
             return $payroll->load('items');

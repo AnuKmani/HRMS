@@ -2,7 +2,6 @@
 
 namespace App\Services\Payroll;
 
-use App\Models\LoanInstallment;
 use App\Support\Money;
 use Illuminate\Support\Collection;
 
@@ -19,6 +18,12 @@ use Illuminate\Support\Collection;
  * this class never touches the database and can be unit-tested against a
  * fixture with no connection at all.
  *
+ * `claims` is the repayment half of the same answer: for each installment
+ * this run looked at, how much of it the run is taking
+ * ({@see RepaymentAllocation}). The item lines and the claims are written
+ * from the one calculation, so a deduction line of 600.00 and a loan
+ * balance moved by 600.00 cannot come apart.
+ *
  * `blockedReason` is non-null only when there was nothing to calculate - an
  * employee with no `salary`. Everything else is zero, and the caller stores
  * the row as `draft` so the gap is visible in the list instead of the
@@ -28,7 +33,7 @@ final class PayrollCalculation
 {
     /**
      * @param  array<int, array<string, mixed>>  $items
-     * @param  Collection<int, LoanInstallment>  $installments  the rows this calculation wants to claim
+     * @param  Collection<int, RepaymentAllocation>  $claims  what this run takes from each due installment
      */
     public function __construct(
         public readonly float $basicSalary,
@@ -46,15 +51,15 @@ final class PayrollCalculation
         public readonly float $totalDeductions,
         public readonly float $netSalary,
         public readonly array $items,
-        public readonly Collection $installments,
+        public readonly Collection $claims,
         public readonly ?string $blockedReason = null,
     ) {}
 
     /**
      * @param  array<int, array<string, mixed>>  $items
-     * @param  Collection<int, LoanInstallment>  $installments
+     * @param  Collection<int, RepaymentAllocation>|null  $claims
      */
-    public static function blocked(float $divisor, array $items = [], ?Collection $installments = null): self
+    public static function blocked(float $divisor, array $items = [], ?Collection $claims = null): self
     {
         return new self(
             basicSalary: 0.0,
@@ -72,7 +77,7 @@ final class PayrollCalculation
             totalDeductions: 0.0,
             netSalary: 0.0,
             items: $items,
-            installments: $installments ?? collect(),
+            claims: $claims ?? collect(),
             blockedReason: 'This employee has no salary on record, so there is nothing to calculate.',
         );
     }

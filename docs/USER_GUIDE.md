@@ -323,8 +323,20 @@ link to forward, only the app and the API route behind your own session.
 start date. You are never asked to look up your own employee id — the
 server knows who is asking. A submitted loan goes to whoever may approve it;
 you may withdraw it until they answer. Once approved, the schedule is fixed
-and each pay run takes one installment from it, marked against that run so
-the same payment can never be taken twice.
+and each pay run takes what it can of the next payment due, marked against
+that run so the same payment can never be taken twice.
+
+**When a month cannot take all of it.** Payroll never lets a repayment take
+your net salary below the **minimum net salary** rule (`0` by default —
+"never pay a negative salary"). If the installment due is larger than what
+is left above that floor, the run takes only the part that fits and the
+loan screen keeps three figures apart: **Amount** (what the schedule says
+is due), **Taken** (what runs have actually taken of it) and what is still
+owed on it — shown as **Partly deducted**. Nothing is written off. The
+remainder is the first thing the next run takes, together with anything an
+earlier month had to leave behind, oldest payment first, and your **balance
+only ever falls by what was really deducted** — never by what was merely
+scheduled.
 
 **Ask for a certificate.** Open **Salary certificates** → **Request**, give
 the purpose and the date, and send. HR or Payroll Admin decides it; when it
@@ -498,15 +510,18 @@ Everything an HR Executive can do, plus:
 1. Open **Payroll**, choose the year and month (it opens on the current one)
 2. Press **Run payroll** and confirm. Every employee is priced from
    approved attendance, approved **and** `payroll_eligible` overtime, LOP
-   days, approved allowances, approved adjustments and any loan installment
-   due this month
+   days, approved allowances, approved adjustments and the part of each
+   loan or salary-advance installment due — including anything an earlier
+   run had to leave behind — that fits above the minimum net salary floor
 3. Each row lands on **Calculated**. A row whose employee has no salary on
    record stays a **Draft** and says so — it is never shown as a zero
 4. **Review** the rows that are right, **Process** them, and **Lock** the
    ones you are finished with
 5. **Locking is final.** A locked month cannot be recalculated, edited or
    reopened — that is the point of it, and it is a permission of its own
-   (`payroll.lock`) that only this role holds
+   (`payroll.lock`) that only this role holds. Its loan deductions are
+   frozen with it: changing the minimum-net-salary setting afterwards
+   cannot re-cut a figure somebody has already been paid from
 
 Running the same month twice is safe: rows already decided are left exactly
 as they are and the run reports how many it calculated, how many were new
@@ -529,6 +544,13 @@ writes neither back.
 > default). It is a **generic engine setting, not a statutory rate** — the
 > UAE Labour Law figures your deployment must use have not been wired in and
 > must be validated against your own jurisdiction first.
+
+> **The net-salary floor is a setting too.** `payroll.minimum_net_salary`
+> (default `0`) is the lowest net a run will pay. It caps **repayments
+> only** — loss of pay and approved adjustments are facts about the month
+> and are never rewritten to protect it. Any statutory floor your
+> jurisdiction imposes (the UAE's Wage Protection System, for one) must be
+> entered deliberately after validation; none is assumed for you here.
 
 ---
 
@@ -749,7 +771,10 @@ permission — contact your administrator.
 | A payslip button that is not there | Viewing a payslip needs `salary_slips.view`, a grant of its own — ask your administrator; it is deliberately separate from payroll |
 | "You cannot approve your own loan." (403) | Nobody approves their own, whatever they are allowed to approve for others. Ask a colleague with `loans.approve` |
 | "Only a loan awaiting a decision can be approved." (409) | Somebody has already answered it — or you have already withdrawn it. Open it to see where it stands |
-| A loan installment already taken | Each installment is taken by exactly one pay run and recorded against it. If a run is recalculated the installment is released first, then taken again |
+| A loan installment already taken | Each installment is taken by exactly one pay run and recorded against it. If a run is recalculated the installment is released first, then taken again — and only the share *that* run took is given back |
+| An installment shows **Partly deducted** | The month could only take part of it without pushing net pay below the minimum net salary rule. The rest is carried forward automatically and is the first thing the next run takes; it is delayed, not cancelled, and the loan balance falls only by what was actually taken |
+| A payment that fell due last month is only being taken now | The earlier run had no room above the floor, so the payment stayed outstanding rather than being skipped. Older payments are always collected before newer ones |
+| Recalculating a month answers **409** | The row is already reviewed, processed or locked. Locked is the end of the road — the figures somebody may already have been paid from do not move |
 | "Only an approved certificate can be issued." (409) | Approve it first; a refused certificate can never be issued |
 | The payroll door opens with no rows | You hold `payroll.summary.view` only. That is the summary — counts and totals, and deliberately no list of people |
 

@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use App\Models\Loan;
 use App\Services\SettingsService;
+use App\Support\Money;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -18,8 +19,12 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * LoanService.
  *
  * `next_installment` is computed here rather than in a screen for the same
- * reason: it depends on which rows are `pending`, and "pending" is
- * LoanService's word, not a filter a widget should be re-deciding.
+ * reason: it depends on which rows still owe money, and "still owes" is
+ * LoanService's word (`pending` or a `partially_deducted` remainder), not a
+ * filter a widget should be re-deciding. `amount` on that object is the
+ * schedule's figure and `remaining_amount` is what a run may actually take
+ * next, which are the same number until a floor-capped run leaves a
+ * remainder behind.
  */
 class LoanResource extends JsonResource
 {
@@ -35,11 +40,18 @@ class LoanResource extends JsonResource
         // schedule is emitted only when a caller asked for it (the list does
         // not), and asking for it from a model would be a fatal error rather
         // than the deliberate omission the omission is meant to be.
-        $installments = $this->whenLoaded('installments');
+        //
+        // The rows go through their own resource rather than being returned
+        // as models: the schedule carries a figure no column holds -
+        // `remaining_amount` - and a nested model serialises to its raw
+        // attributes, which would quietly drop it.
+        $installments = $this->whenLoaded(
+            'installments',
+            fn () => LoanInstallmentResource::collection($resource->installments),
+        );
 
         $next = $resource->relationLoaded('installments')
-            ? $resource->installments
-                ->first(fn ($installment) => $installment->status === 'pending')
+            ? $resource->installments->first(fn ($installment) => $installment->isOutstanding())
             : null;
 
         return [
@@ -78,6 +90,8 @@ class LoanResource extends JsonResource
                     'sequence' => $next->sequence,
                     'due_date' => $next->due_date?->toDateString(),
                     'amount' => $next->amount,
+                    'status' => $next->status,
+                    'remaining_amount' => Money::decimal($next->remainingAmount()),
                 ],
 
             'remarks' => $resource->remarks,

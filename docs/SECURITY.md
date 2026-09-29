@@ -12,8 +12,10 @@
 > rather than trusts — and now the **payroll vertical slice**: a one-way money
 > ladder with `payroll.lock` held by one role, salary figures that are
 > `DECIMAL` and formatted in exactly one place, a loan schedule that can be
-> taken only once, and salary slips and certificates rendered on demand with
-> nothing stored and nothing to link to (§4.7). Transport hardening and audit
+> taken only once and never below the configurable **net-salary floor**,
+> carry-forward of any repayment that would not fit, and salary slips and
+> certificates rendered on demand with nothing stored and nothing to link to
+> (§4.7). Transport hardening and audit
 > logging remain phased ahead (§5, §8). Individual controls are marked with
 > their phase below.
 
@@ -173,6 +175,18 @@ Four absences are deliberate:
   services refuse, so the correction path is a new positive entry (a `+`
   adjustment, a `skipped` installment) that leaves the original figure
   standing — which is what an auditor needs to see anyway.
+- **Nothing authorises a negative net salary.** The floor
+  (`payroll.minimum_net_salary`, `0` by default) is enforced *inside* the
+  calculation, not behind a grant: a run may take a loan or advance
+  installment only up to what leaves `net_salary` at or above it, and the
+  remainder stays outstanding for the next run. Because it is a `settings`
+  row rather than a permission, no role — Super Admin included — can switch
+  it off by calling an endpoint; it changes through an audited settings
+  write, and a change afterwards **cannot re-cut a deduction already signed
+  off** (`recalculate` on `reviewed`/`processed`/`locked` → 409, a re-run
+  reports `skipped`). Loss of pay and approved adjustments are never
+  rewritten to protect the floor, so it cannot be used to make a payslip
+  prettier than the month was.
 
 **Who sees whose money (Phase 8).** Every payroll read is narrowed to the
 caller unless the caller holds `payroll.manage`, so `payroll.view` alone is
@@ -700,6 +714,7 @@ fabricated out of `payroll_adjustments`-style columns to look like one. What
 Phase 8 *did* do is make the future log one call deep: every payroll
 mutation already runs inside a named service method
 (`PayrollService::process/review/finalize/lock`, `LoanService::approve`,
+`LoanService::claimInstallment`/`releaseInstallments`,
 `SalaryCertificateService::approve`), each of which knows the actor, the row
 and the transition, and each transition already stamps `reviewed_by`,
 `processed_by`, `locked_by`, `approved_by` with their timestamps. Those
@@ -898,6 +913,44 @@ stripped by the app, not by the server" gap §4.3 used to record:
 
 **Not delivered by this pass, unchanged:** facial recognition (deliberately
 never), audit logging (scheduled for the dedicated audit/security phase).
+
+### Payroll financial-safety hardening pass (after Phase 8)
+
+Two things a payslip must never do — pay a negative net because of a
+repayment, and silently drop a payment it could not take — fixed without
+adding a single permission:
+
+- `payroll.minimum_net_salary` (a **fourth** payroll setting, **17
+  settings total**), default `0`, read through `SettingsService`. The floor
+  is enforced inside `PayrollCalculationService`, where no route, payload or
+  grant can reach it, and it is deliberately *not* grant-shaped: no role can
+  switch it off by asking
+- a run may take a loan or advance installment only up to
+  `room = gross − (LOP + approved adjustments) − floor`, oldest due date
+  first. Attendance and approved adjustments are never rewritten, so the
+  floor cannot be used to cosmetically improve a slip
+- `loan_installments.deducted_amount` plus a `partially_deducted` status
+  record a partial claim; the per-run half lives on that run's own
+  `payroll_items` lines (`source_type = loan_installment`), so releasing one
+  month's recalculation gives back **that month's share** and cannot touch
+  another's
+- both balance mutators stay in `LoanService`, behind `lockForUpdate()`,
+  clamped to what is still outstanding — the "never twice" guarantee now
+  covers a *remainder* as well as a whole installment
+- what did not fit stays outstanding and is offered to the next run together
+  with anything overdue; the balance moves by what was **taken**, never by
+  what was due
+- locked rows cannot have a deduction re-cut: `recalculate` → 409, a re-run
+  reports `skipped`, and retuning the floor afterwards changes nothing
+  already signed off
+- 1 migration (48 tables / 41 migrations), no new route, permission or
+  policy, `PayrollRepaymentTest` (11 tests)
+
+**Not delivered by this pass, unchanged:** UAE statutory deduction rules and
+any statutory minimum-wage reading of the floor — both are settings a
+deployment must validate for its own jurisdiction before production — and
+audit logging (§8), which will attach to the same service methods this pass
+kept all mutations behind.
 
 ---
 

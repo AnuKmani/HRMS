@@ -35,8 +35,8 @@ use Illuminate\Support\Collection;
  * + approved, payroll-eligible overtime
  * + approved bonuses and adjustments
  * - unpaid days (LOP + approved leave on an unpaid type)
- * - due loan installments
- * - due salary-advance installments
+ * - the part of each due loan / salary-advance installment that fits
+ *   above `payroll.minimum_net_salary` (the rest carries forward)
  * - approved other deductions and negative adjustments
  * = net salary
  * ```
@@ -58,10 +58,22 @@ use Illuminate\Support\Collection;
  * two systems disagree about the same day, which is the failure mode the
  * whole "one place decides" principle exists to prevent.
  *
- * **No clamping.** If deductions exceed earnings the net is negative and
- * stays negative. Clamping to zero would break `gross - deductions = net`,
- * the one identity a payslip may never violate, and would hide an over-
- * deduction instead of putting it in front of the person who can fix it.
+ * **No clamping, one floor.** If deductions exceed earnings the net is
+ * negative and stays negative: clamping it to zero would break
+ * `gross - deductions = net`, the one identity a payslip may never
+ * violate, and would hide an over-deduction instead of putting it in front
+ * of the person who can fix it.
+ *
+ * What this class *does* prevent is a **postponable** deduction forcing
+ * net salary through `payroll.minimum_net_salary` (0 by default). Loans
+ * and salary advances are owed to the company and can wait a month, so
+ * their installments are sized against what is left after everything else
+ * and only the part that fits is taken - the remainder stays outstanding
+ * on the installment and is offered to the next run. Attendance, unpaid
+ * leave and approved adjustments are not postponable: they are facts about
+ * work done or not done, and rewriting them to protect a floor would
+ * falsify the payslip. If those alone take the row below the floor, the
+ * figure is reported honestly rather than quietly massaged.
  */
 final class PayrollCalculationService
 {
@@ -176,19 +188,54 @@ final class PayrollCalculationService
         ));
 
         /* ------------------------------------------ loans and advances */
-        $installments = $this->dueInstallments($employee, $periodStart, $periodEnd);
+        $installments = $this->dueInstallments($employee, $periodEnd);
+
+        // Everything else in this month is already spent or already owed,
+        // so what is left over is the most a repayment may take:
+        //
+        //     room = gross - (LOP + approved adjustments) - floor
+        //
+        // The floor is a setting rather than a 0 in this file - see
+        // `minimumNetSalary()`. It is applied here, once, before any
+        // installment is sized, so no caller and no later step can decide
+        // for itself how far into a salary a repayment is allowed to reach.
+        $floor = $this->minimumNetSalary();
+        $room = max(
+            0.0,
+            Money::round($gross - Money::sum([$lopAmount, $otherDeduction]) - $floor),
+        );
 
         $loanDeduction = 0.0;
         $advanceDeduction = 0.0;
+        $claims = collect();
 
+        // Oldest first, always: when there is not enough room for every
+        // installment due, the debt that has been waiting longest is the
+        // one that gets paid.
         foreach ($installments as $installment) {
-            $amount = Money::round($installment->amount);
+            $scheduled = Money::round($installment->amount);
+            $before = max(0.0, Money::round((float) $installment->deducted_amount));
+            $owed = max(0.0, Money::round($scheduled - $before));
+            $actual = Money::round(min($owed, $room));
+            $room = Money::round($room - $actual);
+
+            $claim = new RepaymentAllocation($installment, $scheduled, $before, $actual);
+            $claims->push($claim);
+
+            if ($claim->isDeferred()) {
+                // Nothing fits. No deduction line is written, because a
+                // line on a payslip is proof that money moved - and no
+                // claim is made, so the row is still outstanding and the
+                // next run is offered it again.
+                continue;
+            }
+
             $loan = $installment->loan;
 
             if ($loan !== null && $loan->isSalaryAdvance()) {
-                $advanceDeduction = Money::round($advanceDeduction + $amount);
+                $advanceDeduction = Money::round($advanceDeduction + $actual);
             } else {
-                $loanDeduction = Money::round($loanDeduction + $amount);
+                $loanDeduction = Money::round($loanDeduction + $actual);
             }
 
             $items[] = $this->item(
@@ -203,10 +250,21 @@ final class PayrollCalculationService
                     (int) ($loan?->number_of_installments ?? 0),
                     $loan?->reference ? ' ('.$loan->reference.')' : '',
                 ),
-                $amount,
+                $actual,
                 'loan_installment',
                 $installment->getKey(),
-                ['loan_id' => $installment->loan_id, 'sequence' => $installment->sequence],
+                [
+                    'loan_id' => $installment->loan_id,
+                    'sequence' => $installment->sequence,
+
+                    // The four numbers the API and the loan screen keep
+                    // apart, recorded on the line that proves this run's
+                    // share of them: what the schedule says, what is being
+                    // taken now, and what is left afterwards.
+                    'scheduled_amount' => Money::decimal($scheduled),
+                    'deducted_amount' => Money::decimal($actual),
+                    'remaining_amount' => Money::decimal($claim->remaining()),
+                ],
             );
         }
 
@@ -237,8 +295,27 @@ final class PayrollCalculationService
             totalDeductions: $totalDeductions,
             netSalary: $net,
             items: $items,
-            installments: $installments,
+            claims: $claims,
         );
+    }
+
+    /**
+     * The net salary a run may never fall below.
+     *
+     * A setting rather than a constant for the same reason the LOP divisor
+     * is: "0, never pay a negative salary" and "nobody takes home less than
+     * 1,000.00" are two legitimate answers to a question about a company's
+     * payroll policy, and which one is correct is not an engineering
+     * decision. Read through SettingsService, so changing it is an UPDATE
+     * rather than a deploy.
+     *
+     * Never negative: a configured floor below zero would be a way of
+     * re-introducing the exact bug this rule exists to stop, so anything
+     * under 0 is read as 0.
+     */
+    public function minimumNetSalary(): float
+    {
+        return max(0.0, Money::round($this->settings->float('payroll.minimum_net_salary', 0.0)));
     }
 
     /**
@@ -607,26 +684,37 @@ final class PayrollCalculationService
     }
 
     /**
-     * Installments falling due inside the period, on a loan that is
-     * actually being repaid.
+     * Installments this run may still take from: still owing, and due on or
+     * before the end of the period.
      *
-     * `status = pending` is the whole double-deduction guard from the read
-     * side: an installment already claimed by an earlier run of this same
-     * payroll has been released back to `pending` by the caller first (or
-     * was never claimed), and one a human marked `skipped` or `adjusted` is
-     * never taken. The transaction around the caller is what makes the read
-     * and the claim atomic.
+     * Two changes from a plain "due this month" query, both load-bearing:
+     *
+     *  - **`due_date <= period_end`, with no lower bound.** The schedule's
+     *    due date says when a repayment was *supposed* to be taken, not
+     *    when it actually was. An installment the previous run had to
+     *    leave behind - because it would have pushed net salary through
+     *    the floor - is still owed, and a query that only looked inside the
+     *    current month would never find it again: the money would quietly
+     *    stop being collected. Overdue rows are picked up by the first run
+     *    with room for them, in due-date order.
+     *
+     *  - **`status in CLAIMABLE`**, i.e. `pending` or `partially_deducted`.**
+     *    The partial remainder of an installment is outstanding by
+     *    definition, and a row a human marked `skipped` or `adjusted` is
+     *    never taken at all. An installment already claimed by an earlier
+     *    run of this same payroll has been released back to `pending` by
+     *    the caller first (or was never claimed), and the transaction
+     *    around the caller is what makes this read and the claim atomic.
      *
      * @return Collection<int, LoanInstallment>
      */
     private function dueInstallments(
         Employee $employee,
-        string $periodStart,
         string $periodEnd,
     ): Collection {
         return LoanInstallment::query()
-            ->where('status', LoanInstallment::STATUS_PENDING)
-            ->whereBetween('due_date', [$periodStart, $periodEnd])
+            ->whereIn('status', LoanInstallment::CLAIMABLE)
+            ->where('due_date', '<=', $periodEnd)
             ->whereHas('loan', function ($query) use ($employee) {
                 $query->where('employee_id', $employee->getKey())
                     ->whereIn('status', Loan::REPAYING);
@@ -634,6 +722,7 @@ final class PayrollCalculationService
             ->with('loan')
             ->orderBy('due_date')
             ->orderBy('loan_id')
+            ->orderBy('sequence')
             ->get()
             ->values();
     }

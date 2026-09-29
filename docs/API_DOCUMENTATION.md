@@ -909,9 +909,17 @@ behind the totals.
 
 A row with no salary on record comes back with `status: draft`,
 `net_salary: "0.00"` **and** `blocked_reason`; the reason, not the zero, is
-what the UI is expected to show. Negative `net_salary` is passed through as
-it stands: a loan balance larger than the month's pay is a real figure, and
-clamping it would make the slip lie.
+what the UI is expected to show.
+
+`net_salary` below zero is still possible, but **never because of a
+repayment**: loan and salary-advance installments are sized against
+`payroll.minimum_net_salary` (default `0`), so the most a run will take is
+what leaves the net on or above that floor — the installment then reports
+`status: partially_deducted` with the part that did not fit carried forward.
+Loss of pay and approved adjustments are *not* rewritten to protect the
+floor; if they alone push the row under it, the figure is passed through as
+it stands, because clamping it would make the slip lie about work that was
+or was not done.
 
 #### The calculation
 
@@ -925,11 +933,14 @@ printed.
 | `payroll.lop_divisor_mode` | `fixed` | `fixed`, or `working_days` (the period's own working days) |
 | `payroll.lop_divisor` | `30` | Also the divisor that derives the daily rate, and therefore the hourly one (`basic / divisor / daily_hours`, default 8) |
 | `payroll.overtime_rate_multiplier` | `1.5` | Applied to the derived hourly rate |
+| `payroll.minimum_net_salary` | `0` | The floor a run may not pay below. `room = gross − (LOP + approved adjustments) − floor`, and loan/advance installments may take no more than `room` |
 
 Overtime is priced only for entries that are **`approved` *and*
 `payroll_eligible`**. The multiplier is a generic engine parameter — the
 UAE/statutory rates a production deployment must use have **not** been wired
-in and must be validated before go-live. `lop_days` from Phase 6 is priced
+in and must be validated before go-live; so must any statutory reading of
+the floor, which is why both are settings and neither is an assumed legal
+value. `lop_days` from Phase 6 is priced
 into a `lop` line here; leave taken unpaid appears as `leave_unpaid`.
 
 #### Allowances & adjustments
@@ -979,11 +990,44 @@ installment carries whatever the even split leaves over. `employee_id` is
 `required` on POST and `prohibited` on PUT — the identity of the borrower is
 not an editable field.
 
-Installments are `pending → deducted | skipped | adjusted` and can be taken
-**once**: the row is locked with `SELECT … FOR UPDATE` and carries the
-`payroll_id` that took it, so a concurrent run cannot deduct it twice. The
-balance may exceed the month's pay; the resulting negative `net_salary`
-reaches the slip unclamped.
+Installments are `pending → partially_deducted → deducted` (or `skipped` /
+`adjusted` by a human), and every figure the schedule reports is a separate
+question with its own key:
+
+| Key | Meaning |
+|---|---|
+| `amount` | what the schedule says is due (unchanged, never re-split) |
+| `deducted_amount` | what pay runs have taken of it so far |
+| `remaining_amount` | `amount − deducted_amount` — what is still owed **on this installment** |
+| `status` | `pending` (nothing taken) · `partially_deducted` (some taken, rest carries forward) · `deducted` (nothing left to ask for) |
+
+The loan's own `outstanding_balance` is the fourth figure — what is left of
+the **loan** — and it moves by what was actually taken, never by what was
+merely due.
+
+A run may take a share of an installment rather than the whole of it: the
+amount is `min(remaining, room)`, where `room` is what is left above
+`payroll.minimum_net_salary` (default `0`), and installments are offered
+oldest-first. The remainder stays outstanding and is offered to the next
+run — along with any older installment that is now overdue, so a payment
+the floor blocked last month is collected this month rather than lost.
+Every claim re-reads the row with `SELECT … FOR UPDATE`, clamps itself to
+what is still outstanding, and records its own share on the payroll's
+`payroll_items` lines (`metadata.scheduled_amount` /
+`deducted_amount` / `remaining_amount`), which is what makes a
+recalculation give back *one month's* share of a shared installment without
+touching another's. A `deducted` row therefore cannot be taken twice by two
+concurrent runs, and `payroll_id` names the run that took it most recently.
+
+`next_installment` is the oldest installment that still owes something —
+a partial remainder included — and carries `amount` **and**
+`remaining_amount`, so a screen can say what the next deduction actually
+will be.
+
+**A locked row's deduction is fixed.** `recalculate` on `reviewed`,
+`processed` or `locked` is a 409, and a second run counts such rows as
+`skipped`, so retuning `payroll.minimum_net_salary` afterwards can never
+re-cut a deduction somebody has already been paid from.
 
 #### Salary certificate requests
 
@@ -1359,10 +1403,10 @@ Syncing is manual ("Sync now"), oldest first, and stops at the first 0 or
 | §4.4 Salary documents (rendered, never uploaded) | ✅ **Phase 8** |
 | §4 File upload rules (employee documents) | ⬜ Phase 10 |
 
-Backend proof: `php artisan test` → **458 passed (2761 assertions)**; **140
+Backend proof: `php artisan test` → **469 passed (2915 assertions)**; **140
 route definitions** under `api/*` (145 registered) — Phase 6 added 37,
 Phase 7 added 18, **Phase 8 added 36**. Flutter proof: `dart format .` clean,
-`flutter analyze` clean, `flutter test` → **377 passed**.
+`flutter analyze` clean, `flutter test` → **378 passed**.
 
 > To explore a running API later, use Laravel's generated OpenAPI/Swagger UI or
 > a tool such as Postman.

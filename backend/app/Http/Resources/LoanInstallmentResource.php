@@ -3,17 +3,30 @@
 namespace App\Http\Resources;
 
 use App\Models\LoanInstallment;
+use App\Support\Money;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * One due repayment.
+ * One scheduled repayment, with what has actually been taken of it.
  *
  * `payroll_id` and `deducted_at` travel together and mean the same thing:
  * an installment is only ever deducted *by* a payroll row, and the pointer
- * is what a recalculation uses to give it back. Emitting both lets a screen
- * say "taken by March's run on the 31st" without a second lookup, and lets a
- * test assert the pairing the schema cannot enforce.
+ * is the most recent one that did. Emitting both lets a screen say "taken
+ * by March's run on the 31st" without a second lookup, and lets a test
+ * assert the pairing the schema cannot enforce.
+ *
+ * The three money figures are deliberately all present rather than two of
+ * them being derivable client-side, because they answer different
+ * questions and none of them is a function of the others without knowing
+ * what `loans.outstanding_balance` is:
+ *
+ *   `amount`           what the schedule says is due
+ *   `deducted_amount`  what runs have actually taken of it, so far
+ *   `remaining_amount` what is still owed on this installment
+ *
+ * With a partial deduction, `status` is `partially_deducted` and
+ * `remaining_amount` is what the next run will be offered first.
  */
 class LoanInstallmentResource extends JsonResource
 {
@@ -32,6 +45,9 @@ class LoanInstallmentResource extends JsonResource
             'sequence' => $resource->sequence,
             'due_date' => $resource->due_date?->toDateString(),
             'amount' => $resource->amount,
+
+            'deducted_amount' => $resource->deducted_amount,
+            'remaining_amount' => Money::decimal($resource->remainingAmount()),
 
             'status' => $resource->status,
             'payroll_id' => $resource->payroll_id,

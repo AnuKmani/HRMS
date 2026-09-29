@@ -141,12 +141,12 @@ the reason the controller layer stayed thin:
 
 | Service | Owns |
 |---|---|
-| `PayrollCalculationService` | The whole derivation for one employee-month: basic → allowances → overtime → bonus → gross → LOP → unpaid leave → loan → net. **No HTTP object reaches it** and it writes nothing |
-| `PayrollService` | The transaction around a run: the unique-row insert, the one-way status ladder, the summary aggregation |
-| `PayrollAdjustmentService` · `LoanService` | Approval transitions and their side effects — minting the schedule, `activateDue()` inside a pay run |
+| `PayrollCalculationService` | The whole derivation for one employee-month: basic → allowances → overtime → bonus → gross → LOP → unpaid leave → loan → net, including sizing each due installment against `payroll.minimum_net_salary` (**§5.14**). **No HTTP object reaches it** and it writes nothing |
+| `PayrollService` | The transaction around a run: the unique-row insert, the one-way status ladder, the summary aggregation, and the **release → calculate → claim** order that makes a re-run give an installment back before it looks for one |
+| `PayrollAdjustmentService` · `LoanService` | Approval transitions and their side effects — minting the schedule, `activateDue()` inside a pay run — plus the **only two mutators of `outstanding_balance`**: `claimInstallment(installment, payroll, amount)` and `releaseInstallments(payroll)`, both locked, both partial-capable |
 | `SalaryCertificateService` | Ask / decide / cancel, and `markGenerated()` running **after** the PDF renders |
 | `SalarySlipPdf` · `SalaryCertificatePdf` | dompdf rendering (`html()` separate from `response()` so content is testable) |
-| `PayrollCalculation` · `PayrollPeriod` | Immutable value objects — the result and the year/month window |
+| `PayrollCalculation` · `PayrollPeriod` · `RepaymentAllocation` | Immutable value objects — the result, the year/month window, and one installment claim (scheduled / taken before / taken now / left) |
 
 The rule the whole family obeys: **a controller never does arithmetic.** It
 authorizes, calls one service method, and returns a resource — which is what
@@ -837,10 +837,13 @@ source of truth — `SettingSeeder` owns the shipped values.
 | `is_editable` | Distinguishes operator-tunable rules from system-owned values |
 | Caching | `Cache::rememberForever`, flushed by `saved`/`deleted` model events |
 
-Seeded rules (12 rows): grace period, overtime threshold, default geofence radius,
-late-arrival escalation, sick-certificate deadline, certificate-required threshold,
-notification reminder offset, daily digest time, document expiry warning, default
-working hours (JSON), date format, currency.
+Seeded rules (Phase 2: 12 rows — grace period, overtime threshold, default
+geofence radius, late-arrival escalation, sick-certificate deadline,
+certificate-required threshold, notification reminder offset, daily digest
+time, document expiry warning, default working hours (JSON), date format,
+currency). Later phases added the leave, reporting and payroll rules — **17
+rows today**, four of them `payroll.*`, the fourth being the net-salary floor
+in §5.14.
 
 > **Rule — all settings writes go through the model.** Cache invalidation hangs off
 > Eloquent `saved`/`deleted` events registered in `AppServiceProvider`, so every write
@@ -1080,11 +1083,56 @@ every list and detail screen uses, and a screen that writes `"₹ 30,000"`
 inline will be wrong the first time the organisation changes
 `system.currency`.
 
-**What is deliberately *not* enforced:** a negative `net_salary` is passed
-through as it stands. When a loan balance exceeds a month's pay, clamping to
-zero would make the slip lie about a debt the company still holds — the
-number is the truth, and the sentence around it is what needs writing, not
-the figure.
+**What is deliberately *not* enforced:** a negative `net_salary` produced by
+**attendance or an approved adjustment** is passed through as it stands.
+When unpaid days exceed a month's pay, clamping to zero would make the slip
+lie about work that was not done — the number is the truth, and the sentence
+around it is what needs writing, not the figure. The one deduction the
+company *can* postpone is held to the floor instead; see §5.14.
+
+---
+
+### 5.14 A repayment may not pay a salary below the floor (Phase 8 hardening)
+
+`gross − deductions = net` is the identity a payslip may never break, and
+the original answer to "what if deductions exceed earnings?" was to report
+the negative rather than clamp it. That answer remains right for loss of pay
+and approved adjustments, and it is wrong for the one deduction that is owed
+to the company, is priced by the company, and can simply wait a month.
+
+| | |
+|---|---|
+| Rule | `room = gross − (LOP + approved adjustments) − payroll.minimum_net_salary` — a `settings` row, **`0`** by default ("never pay a negative salary"), never a constant in the calculation |
+| Each installment takes | `min(amount − deducted_amount, room)`, offered **oldest due date first** |
+| The answer travels as | `App\Services\Payroll\RepaymentAllocation` — scheduled, taken before, taken now, left — handed to both writers so the payslip line and the loan balance cannot disagree |
+| What does not fit | stays on the installment: `partially_deducted` when part was taken, still `pending` when nothing was. Either way it is offered to the next run, together with any older installment whose due date has passed — a payment the floor blocked is *delayed*, never skipped |
+| The balance moves by | what was **taken**, so `loans.outstanding_balance` never claims a repayment that was not collected |
+| Never rewritten | LOP, unpaid leave and approved adjustments — capping those would falsify the payslip rather than protect it. If they alone put the row under the floor, the figure is reported honestly |
+| Locked rows | `reviewed` / `processed` / `locked` refuse recalculation (409) and are counted `skipped` by a second run, so retuning the floor afterwards cannot re-cut a deduction somebody has already been paid from |
+
+**Why a column, not a second table.** One installment can be shared by two
+runs — September took 400.00 of a 1,000.00 payment and October takes the
+rest — and `loan_installments.payroll_id` is one column that can only name
+the most recent claimant. The per-run half of that fact already exists, on
+the month's own `payroll_items` lines (`source_type = loan_installment`,
+carrying `scheduled_amount` / `deducted_amount` / `remaining_amount` in
+`metadata`), so `LoanService::releaseInstallments()` reads *those* to give
+back exactly one month's share and leave another's standing. A
+`loan_installment_claims` table would add a join to every read of the
+schedule in order to answer a question one existing column already answers.
+
+Both mutators stay inside `LoanService`, behind `lockForUpdate()`, and clamp
+the amount to what is still outstanding before writing — which is what stops
+two concurrent runs taking the same remainder, and what lets the same
+installment be released and re-claimed by a recalculation exactly once.
+
+**Deliberately not decided here:** whether a statutory minimum applies (the
+UAE's Wage Protection System, for instance) is a jurisdictional question,
+not an engineering one, so no statutory floor is assumed and the setting is
+documented as requiring validation before production. There are likewise no
+UAE statutory deduction rules in this pass, and no full audit logging yet —
+every payroll and loan mutation already runs through a service, which is
+where audit logging will attach.
 
 ---
 
@@ -1152,3 +1200,4 @@ The following are explicitly **out of scope** unless later requested:
 | Post-Phase 5 hardening | Server-side selfie sanitisation — `SelfieSanitizer` (GD decode → flatten → JPEG re-encode, EXIF/GPS stripped, original never stored) + `App\Rules\ImageContent` (header decode check + pixel budget); closes §4.3's "EXIF is stripped by the app, not by the server" gap; no new dependency; `AttendanceSelfieSanitizationTest` (13), backend 321 tests |
 | Phase 7 | Site activity reports and daily site reports — 7 migrations (**41 tables total**), `SiteActivityReportService` / `DailySiteReportService` (author and project derived, `draft → submitted` only, one official report per site-day), `StoresPrivateImages`/`ReportPhotoStore` on the fail-closed `SelfieSanitizer`, `DailySiteReportPdf` on demand with dompdf (**§5.12**), 2 policies + `Visibility` row scoping, 8 permissions (**59 total / 278 grants**), 18 routes (104 definitions / 109 registered); Flutter `features/site_reports/` with GPS, repeatable rows, camera photos and local drafts, **303 tests** |
 | Phase 8 | **Payroll, loans and salary documents** — 7 migrations (**48 tables total**), `App\Support\Money` (**§5.13**), `PayrollCalculationService` outside any controller (attendance → overtime → LOP → allowances → adjustments → loans, all reusing the Phase 5/6 calculators), a one-way `draft → calculated → reviewed → processed → locked` ladder with a `payroll_id` on every installment it takes, on-demand salary-slip and certificate PDFs with no stored file, 5 policies (22 total), 11 permissions (**70 total / 332 grants**), 3 `payroll.*` settings (16 total), 36 routes (**140 definitions / 145 registered**); Flutter `features/{payroll,loans,salary_certificates}` + `core/presentation/{money,pdf_opener}.dart`, **377 tests** |
+| Post-Phase 8 payroll hardening | **Financial safety** — negative `net_salary` can no longer come from a repayment (**§5.14**): `loan_installments.deducted_amount` (1 migration, **48 tables / 41 migrations**) + `partially_deducted`, `RepaymentAllocation` carrying scheduled / before / now / left, `payroll.minimum_net_salary` setting (4 `payroll.*`, **17 total**), carry-forward read `due_date ≤ period end ∧ status ∈ {pending, partially_deducted}` with per-run provenance on `payroll_items`, `LoanInstallmentResource` wired into `LoanResource` (`remaining_amount` on the schedule and `next_installment`); no UAE statutory rule and no audit logging added — both deferred, services ready for it; `PayrollRepaymentTest` (11), backend **469 tests / 2915 assertions**, Flutter **378 tests** |

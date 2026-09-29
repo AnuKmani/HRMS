@@ -110,12 +110,13 @@ class SettingSeeder extends Seeder
         ],
 
         // --- payroll -----------------------------------------------------
-        // Phase 8. Nothing below is a number anybody hard-codes: the pay run
-        // reads all three through SettingsService, so retuning the divisor is
-        // an UPDATE and not a deploy. `rounding` is deliberately absent from
-        // this list - the precision money is stored at is a property of the
-        // schema (DECIMAL(12,2)) rather than a rule an operator could break
-        // by setting it to 7.
+        // Phase 8, plus the repayment floor below. Nothing in this block is
+        // a number anybody hard-codes: the pay run reads every setting
+        // through SettingsService, so retuning one is an UPDATE and not a
+        // deploy. `rounding` is deliberately absent from this list - the
+        // precision money is stored at is a property of the schema
+        // (DECIMAL(12,2)) rather than a rule an operator could break by
+        // setting it to 7.
         [
             // `fixed` divides the month by `payroll.lop_divisor` (30 by
             // default - the calendar-month convention). `working_days`
@@ -141,6 +142,32 @@ class SettingSeeder extends Seeder
             'group' => 'payroll',
             'label' => 'Fixed LOP divisor',
             'description' => 'Divisor used when the mode above is `fixed`. Also the base for the daily rate that prices overtime.',
+        ],
+        [
+            // The floor a repayment may not push net salary through. Read by
+            // PayrollCalculationService when it sizes how much of a due
+            // installment this run can actually take, so 0 (the development
+            // default) means "never pay less than nothing" and a configured
+            // 1000 means "somebody must still walk away with 1000.00".
+            //
+            // It caps *postponable* deductions only - loan and salary-
+            // advance installments, which are owed to the company and can
+            // wait for next month. Attendance, unpaid leave and approved
+            // adjustments are facts about work already done or not done;
+            // rewriting them to protect a floor would falsify the payslip,
+            // so they are reported honestly even when they alone take the
+            // row below it.
+            //
+            // UAE statutory wage-protection rules are deliberately not
+            // wired in here: which floor is lawful is a jurisdictional
+            // question, and applying one silently would be worse than
+            // applying none. Validate before production.
+            'key' => 'payroll.minimum_net_salary',
+            'value' => '0',
+            'type' => 'decimal',
+            'group' => 'payroll',
+            'label' => 'Minimum net salary',
+            'description' => 'Loan and salary-advance repayments are capped so this run never pays less than this amount. Attendance and approved deductions are never rewritten.',
         ],
         [
             // A generic multiplier rather than a statutory one. The UAE labour

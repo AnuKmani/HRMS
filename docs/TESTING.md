@@ -4,8 +4,10 @@
 > overtime, the site vertical slice (activity reports, the official daily
 > report, its photographs and its on-demand PDF) and now **the payroll
 > vertical slice** (ledger, calculation, loans and salary documents) are
-> covered end to end on top of Phases 1–7. Backend **458 passed (2761
-> assertions)**, Flutter **377 passed**. This document defines the strategy
+> covered end to end on top of Phases 1–7, plus the **payroll financial-
+> safety hardening** (a net-salary floor and partial repayments,
+> `PayrollRepaymentTest`). Backend **469 passed (2915
+> assertions)**, Flutter **378 passed**. This document defines the strategy
 > for the modules still to come (Phases 9–12).
 
 ---
@@ -388,10 +390,11 @@ not there.
 | **Retired by status, and there is no way to delete it** | `DELETE /holidays/{id}` → `405` |
 | Editing cannot make it collide with another | the duplicate check excludes the row being edited |
 
-### 3.7 Payroll, loans & salary documents ✅ (Phase 8 — `PayrollTest`, `LoanTest`, `SalaryDocumentTest`)
+### 3.7 Payroll, loans & salary documents ✅ (Phase 8 — `PayrollTest`, `LoanTest`, `SalaryDocumentTest`, `PayrollRepaymentTest`)
 
-**33 tests, 338 assertions** — `PayrollTest` 13 (140), `LoanTest` 11 (112),
-`SalaryDocumentTest` 9 (86). All on `hrms_testing`, all behind the shared
+**44 tests, 486 assertions** — `PayrollTest` 13 (140), `LoanTest` 11 (112),
+`SalaryDocumentTest` 9 (86) and **`PayrollRepaymentTest` 11 (148)**, the
+Phase 8 hardening file. All on `hrms_testing`, all behind the shared
 `SignsInAccounts` concern.
 
 **`PayrollTest` — 13**
@@ -446,6 +449,23 @@ not there.
 (`'28500.00'`), never as a float — a test that `assertEquals(28500.00, …)`
 would pass for the wrong number, which is the bug the schema is built to
 prevent.
+
+**`PayrollRepaymentTest` — 11** (Phase 8 hardening: the floor, and what
+happens when a repayment cannot be taken in full)
+
+| Test | Expectation |
+|---|---|
+| a scheduled installment is taken in full when the floor allows it | the ordinary case: `loan_deduction`, `deducted_amount`, `payroll_id` and the balance all move by the scheduled figure |
+| a repayment may never push net salary below zero | a 1,000.00 installment against a 500.00 salary takes **500.00**; `net_salary` lands on `0.00`, status `partially_deducted`, **one** deduction line for what actually moved |
+| the floor is a setting that caps a partial deduction | `payroll.minimum_net_salary` defaults to `0` in the seeder; set it to 1,000 and the same month, re-run, drops from 5,000 taken to 4,000 with the net on the floor |
+| unpaid days are taken before a repayment and are never rewritten | LOP is charged **in full**, the installment absorbs the difference, net lands exactly on the floor, remainder carried on the loan |
+| the remainder carries forward and the next run takes it | October collects September's leftover **before** October's own installment (due-date order); `deducted_amount` completes, the next row goes partial, the balance is 30,000 − 8,000 |
+| an installment the floor blocked is retried rather than skipped | stays `pending`, `deducted_amount = 0`, `payroll_id = null`, **no** payslip line, balance untouched — then an overdue August-style due date *is* collected by the next run that has room |
+| running the same month twice takes the installment once | second run: still 4,000 taken, still 26,000 outstanding, still **one** deduction line |
+| a recalculation gives the take back before it takes it again | released then re-claimed twice over; never 8,000, never 0, never a missing balance |
+| a locked month cannot change its loan deduction | `recalculate` → `409`, a fresh run reports `skipped: 1`, and retuning the floor afterwards changes nothing |
+| a salary advance is capped exactly like a loan | `advance_deduction` (not `loan_deduction`) capped, plus `metadata.scheduled_amount` / `deducted_amount` / `remaining_amount` on the line |
+| the schedule reports scheduled, deducted and remaining apart | `amount` `5000.00` · `deducted_amount` `4000.00` · `remaining_amount` `1000.00` · loan `outstanding_balance` `26000.00` · `next_installment` is the partial row and says **`1000.00`**, not the schedule's figure |
 
 ### 3.8 Documents & Files
 
@@ -897,6 +917,21 @@ POST /payroll/process {year: 2026, month: 9} again    → 200, `updated: 0`
    → an installment due in September is deducted ONCE, with `payroll_id`
      recorded on it; a recalculation releases it first, then takes it
      again inside the same transaction — never twice, never zero
+   → an installment that would take net salary below
+     payroll.minimum_net_salary (a setting, 0 by default) is taken only
+     PARTLY → `partially_deducted`, `deducted_amount` < `amount`, the
+     remainder carried on the row and offered to the NEXT run — along with
+     any older installment whose due date has already passed, so a blocked
+     payment is delayed, never lost
+   → four figures stay apart: `amount` (scheduled) · `deducted_amount`
+     (taken, all runs) · `amount − deducted_amount` (left on this row) ·
+     `loans.outstanding_balance` (left on the loan, moved by what was
+     TAKEN and never by what was merely due)
+   → LOP and approved adjustments are never rewritten to protect the floor;
+     a locked month refuses to have its deduction re-cut (409 / skipped)
+   → two runs cannot take the same remainder: `SELECT … FOR UPDATE` plus a
+     clamp to what is still outstanding, and one month's share is given
+     back from that month's `payroll_items` lines alone
    → POST /payroll/{id}/lock, then any step at all     → 403 at the policy,
                                      and the service refuses again (409)
    → an employee with payroll.view reads the list      → only their own row
@@ -1006,11 +1041,12 @@ A phase is complete only when:
 |---|---|
 | Test strategy (this document) | ✅ Written |
 | Development/testing database split (`hrms_laravel` vs `hrms_testing`) | ✅ Phase 2 safety cleanup |
-| Backend test suite | ✅ **458 passed (2761 assertions)** — 75 Phase 2 + 45 Phase 3 + 70 Phase 4 + 131 Phase 5 (incl. selfie hardening) + 62 Phase 6 (22 `LeaveRequestTest` · 11 `LeaveCertificateTest` · 13 `OvertimeTest` · 9 `TimesheetTest` · 7 `HolidayApiTest`) + **42 Phase 7** (19 `SiteActivityReportTest` · 15 `DailySiteReportTest` · 8 `DailySiteReportPdfTest`) + **33 Phase 8** (13 `PayrollTest` · 11 `LoanTest` · 9 `SalaryDocumentTest`) |
-| Flutter test suite | ✅ **377 passed** — 89 Phases 3–4 + 87 Phase 5 + 39 Phase 6 + 88 Phase 7 + **74 Phase 8** |
+| Backend test suite | ✅ **469 passed (2915 assertions)** — 75 Phase 2 + 45 Phase 3 + 70 Phase 4 + 131 Phase 5 (incl. selfie hardening) + 62 Phase 6 (22 `LeaveRequestTest` · 11 `LeaveCertificateTest` · 13 `OvertimeTest` · 9 `TimesheetTest` · 7 `HolidayApiTest`) + **42 Phase 7** (19 `SiteActivityReportTest` · 15 `DailySiteReportTest` · 8 `DailySiteReportPdfTest`) + **44 Phase 8** (13 `PayrollTest` · 11 `LoanTest` · 9 `SalaryDocumentTest` · **11 `PayrollRepaymentTest`**) |
+| Flutter test suite | ✅ **378 passed** — 89 Phases 3–4 + 87 Phase 5 + 39 Phase 6 + 88 Phase 7 + **75 Phase 8** |
 | Phase 6 registration checks | ✅ `php artisan route:list` (86 route definitions at that point) · `php artisan schedule:list` shows `EnforceSickCertificateDeadlines` |
 | Phase 7 registration checks | ✅ `php artisan route:list` — **104 route definitions under `api/*`, 109 registered** (18 Phase 7) · `php artisan migrate:status` all `Ran` · `composer validate` valid · `vendor\bin\pint --test` clean |
-| Phase 8 registration checks | ✅ `php artisan route:list` — **140 route definitions under `api/*`, 145 registered** (36 Phase 8) · `php artisan migrate:status` all `Ran` (48 tables / 40 migrations) · `composer validate` valid · `vendor\bin\pint --test` clean · `dart format lib test` clean · `flutter analyze` clean |
+| Phase 8 registration checks | ✅ `php artisan route:list` — **140 route definitions under `api/*`, 145 registered** (36 Phase 8) · `php artisan migrate:status` all `Ran` (48 tables / 41 migrations) · `composer validate` valid · `vendor\bin\pint --test` clean · `dart format lib test` clean · `flutter analyze` clean |
+| Payroll financial-safety hardening checks | ✅ `php artisan test` **469 passed** (all on `hrms_testing`, never `hrms_laravel`) · `php artisan migrate:status` all `Ran` · `composer validate` valid · `vendor\bin\pint --test` clean · `dart format .` clean · `flutter analyze` clean · `flutter test` **378 passed** |
 | `flutter analyze` / `pint --test` / `composer validate` clean | ✅ |
 | CI pipeline running tests on every commit | ⬜ |
 | Coverage measurement (needs xdebug/pcov) | ⬜ |

@@ -176,18 +176,27 @@ class Loan {
   );
 }
 
-/// One payment in the schedule.
+/// One payment in the schedule, with what has actually been taken of it.
 ///
-/// [payrollId] is the row that actually took the money. It is what makes
-/// "which months have been repaid" answerable without trusting the status
-/// column alone: `deducted` without a payroll behind it could only be a
-/// partial state, and a recalculation gives an installment back by clearing
-/// exactly this link.
+/// Four figures, kept apart on purpose because a screen answers a different
+/// question with each of them:
+///
+/// * [amount] — what the schedule says is due (the client never recomputes it)
+/// * [deductedAmount] — what pay runs have taken of it so far
+/// * [remainingAmount] — what is still owed on *this* payment
+/// * `Loan.outstandingBalance` — what is left on the loan as a whole
+///
+/// [payrollId] is the run that took money from it most recently. With a
+/// partial deduction the full history lives on the server's `payroll_items`;
+/// this is the pointer that says "somebody has already touched this row",
+/// which is what keeps a `deducted` status from being read as a guess.
 class LoanInstallment {
   const LoanInstallment({
     required this.sequence,
     this.dueDate,
     required this.amount,
+    this.deductedAmount = '0.00',
+    required this.remainingAmount,
     required this.status,
     this.payrollId,
     this.deductedAt,
@@ -195,6 +204,7 @@ class LoanInstallment {
   });
 
   static const statusPending = 'pending';
+  static const statusPartiallyDeducted = 'partially_deducted';
   static const statusDeducted = 'deducted';
   static const statusSkipped = 'skipped';
   static const statusAdjusted = 'adjusted';
@@ -202,6 +212,8 @@ class LoanInstallment {
   final int sequence;
   final String? dueDate;
   final String amount;
+  final String deductedAmount;
+  final String remainingAmount;
   final String status;
   final int? payrollId;
   final String? deductedAt;
@@ -210,8 +222,13 @@ class LoanInstallment {
   /// schedule can tell "the run was short" from "nobody took it".
   final String? skippedReason;
 
+  /// Some of it was taken and some was not: the rest is still owed and is
+  /// offered to the next payroll run rather than written off.
+  bool get isPartial => status == statusPartiallyDeducted;
+
   String get statusLabel => switch (status) {
     statusPending => 'Due',
+    statusPartiallyDeducted => 'Partly deducted',
     statusDeducted => 'Deducted',
     statusSkipped => 'Skipped',
     statusAdjusted => 'Adjusted',
@@ -221,15 +238,24 @@ class LoanInstallment {
   factory LoanInstallment.fromJson(
     Map<String, dynamic> json, {
     bool partial = false,
-  }) => LoanInstallment(
-    sequence: _int(json['sequence']) ?? 0,
-    dueDate: json['due_date'] as String?,
-    amount: json['amount'] as String? ?? '0.00',
-    status: json['status'] as String? ?? statusPending,
-    payrollId: partial ? null : _int(json['payroll_id']),
-    deductedAt: partial ? null : json['deducted_at'] as String?,
-    skippedReason: partial ? null : json['skipped_reason'] as String?,
-  );
+  }) {
+    final amount = json['amount'] as String? ?? '0.00';
+
+    return LoanInstallment(
+      sequence: _int(json['sequence']) ?? 0,
+      dueDate: json['due_date'] as String?,
+      amount: amount,
+      deductedAmount: json['deducted_amount'] as String? ?? '0.00',
+      // Falling back to the scheduled figure keeps an older payload (or a
+      // fixture that never says) meaning "nothing has been taken of it
+      // yet", which is what `pending` already claims.
+      remainingAmount: json['remaining_amount'] as String? ?? amount,
+      status: json['status'] as String? ?? statusPending,
+      payrollId: partial ? null : _int(json['payroll_id']),
+      deductedAt: partial ? null : json['deducted_at'] as String?,
+      skippedReason: partial ? null : json['skipped_reason'] as String?,
+    );
+  }
 }
 
 String? _nestedName(Object? raw) =>
