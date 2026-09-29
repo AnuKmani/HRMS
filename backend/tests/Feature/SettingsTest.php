@@ -72,7 +72,13 @@ class SettingsTest extends TestCase
         $this->assertSame(8, $this->service()->json('working_hours.default')['daily_hours']);
 
         $this->assertIsString($this->service()->string('system.currency'));
-        $this->assertSame('INR', $this->service()->string('system.currency'));
+        // The company's own currency, seeded for a UAE build — and not a
+        // constant anywhere: payroll, the PDFs and the expense form all read
+        // this row, so changing it changes all three at once.
+        $this->assertSame('AED', $this->service()->string('system.currency'));
+
+        $supported = $this->service()->json('system.supported_currencies');
+        $this->assertContains('AED', $supported);
     }
 
     public function test_missing_key_falls_back_to_supplied_default(): void

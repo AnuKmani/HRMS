@@ -8,8 +8,8 @@
 > and the three Flutter screens) are covered end to end on top of Phases 1–7,
 > plus the **payroll financial-
 > safety hardening** (a net-salary floor and partial repayments,
-> `PayrollRepaymentTest`). Backend **499 passed (3251
-> assertions)**, Flutter **454 passed**. This document defines the strategy
+> `PayrollRepaymentTest`). Backend **509 passed (3288
+> assertions)**, Flutter **465 passed**. This document defines the strategy
 > for the modules still to come (Phases 10–12).
 
 ---
@@ -1129,12 +1129,13 @@ A phase is complete only when:
 |---|---|
 | Test strategy (this document) | ✅ Written |
 | Development/testing database split (`hrms_laravel` vs `hrms_testing`) | ✅ Phase 2 safety cleanup |
-| Backend test suite | ✅ **499 passed (3251 assertions)** — 75 Phase 2 + 45 Phase 3 + 70 Phase 4 + 131 Phase 5 (incl. selfie hardening) + 62 Phase 6 (22 `LeaveRequestTest` · 11 `LeaveCertificateTest` · 13 `OvertimeTest` · 9 `TimesheetTest` · 7 `HolidayApiTest`) + **42 Phase 7** (19 `SiteActivityReportTest` · 15 `DailySiteReportTest` · 8 `DailySiteReportPdfTest`) + **44 Phase 8** (13 `PayrollTest` · 11 `LoanTest` · 9 `SalaryDocumentTest` · **11 `PayrollRepaymentTest`**) + **30 Phase 9** (**20 `ExpenseTest`** · **10 `ExpenseReceiptTest`**) |
-| Flutter test suite | ✅ **454 passed** — 89 Phases 3–4 + 87 Phase 5 + 39 Phase 6 + 88 Phase 7 + **75 Phase 8** + **76 Phase 9** (70 expense · 6 home/routes) |
+| Backend test suite | ✅ **509 passed (3288 assertions)** — 75 Phase 2 + 45 Phase 3 + 70 Phase 4 + 131 Phase 5 (incl. selfie hardening) + 62 Phase 6 (22 `LeaveRequestTest` · 11 `LeaveCertificateTest` · 13 `OvertimeTest` · 9 `TimesheetTest` · 7 `HolidayApiTest`) + **42 Phase 7** (19 `SiteActivityReportTest` · 15 `DailySiteReportTest` · 8 `DailySiteReportPdfTest`) + **44 Phase 8** (13 `PayrollTest` · 11 `LoanTest` · 9 `SalaryDocumentTest` · **11 `PayrollRepaymentTest`**) + **32 Phase 9** (**22 `ExpenseTest`** · **10 `ExpenseReceiptTest`**) + **8 currency pass** (**8 `ClientSettingsTest`**) |
+| Flutter test suite | ✅ **465 passed** — 89 Phases 3–4 + 87 Phase 5 + 39 Phase 6 + 88 Phase 7 + **75 Phase 8** + **76 Phase 9** (70 expense · 6 home/routes) + **11 currency pass** (7 `client_settings_test` · 4 expense form) |
 | Phase 6 registration checks | ✅ `php artisan route:list` (86 route definitions at that point) · `php artisan schedule:list` shows `EnforceSickCertificateDeadlines` |
 | Phase 7 registration checks | ✅ `php artisan route:list` — **104 route definitions under `api/*`, 109 registered** (18 Phase 7) · `php artisan migrate:status` all `Ran` · `composer validate` valid · `vendor\bin\pint --test` clean |
 | Phase 8 registration checks | ✅ `php artisan route:list` — **140 route definitions under `api/*`, 145 registered** (36 Phase 8) · `php artisan migrate:status` all `Ran` (48 tables / 41 migrations) · `composer validate` valid · `vendor\bin\pint --test` clean · `dart format lib test` clean · `flutter analyze` clean |
 | Phase 9 registration checks | ✅ `php artisan route:list` — **153 route definitions under `api/*`, 158 registered** (13 new under `expense`) · `php artisan migrate:status` all `Ran` (**44** migrations) · `composer validate` valid · `vendor\bin\pint --test` **PASS (375 files)** · `dart format .` clean (**216 files**) · `flutter analyze` clean · `flutter test` **454 passed** · `php artisan test` **499 passed (3251 assertions)**, all on `hrms_testing` |
+| Currency configuration checks | ✅ `php artisan route:list` — **154 route definitions under `api/*`, 159 registered** (1 new: `GET client-settings`) · `php artisan migrate:status` all `Ran` (**44** migrations) · `composer validate` valid · `vendor\bin\pint --test` **PASS (377 files)** · `dart format .` clean (**218 files**) · `flutter analyze` clean · `flutter test` **465 passed** · `php artisan test` **509 passed (3288 assertions)**, all on `hrms_testing` (never `hrms_laravel`) — the configured default, the form's default, a claim keeping its own code, and a code outside `system.supported_currencies` refused |
 | Payroll financial-safety hardening checks | ✅ `php artisan test` **469 passed** (all on `hrms_testing`, never `hrms_laravel`) · `php artisan migrate:status` all `Ran` · `composer validate` valid · `vendor\bin\pint --test` clean · `dart format .` clean · `flutter analyze` clean · `flutter test` **378 passed** |
 | `flutter analyze` / `pint --test` / `composer validate` clean | ✅ |
 | CI pipeline running tests on every commit | ⬜ |

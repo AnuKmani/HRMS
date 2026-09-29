@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\V1\AllowanceController;
 use App\Http\Controllers\Api\V1\ApprovalWorkflowController;
 use App\Http\Controllers\Api\V1\AttendanceController;
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\ClientSettingsController;
 use App\Http\Controllers\Api\V1\DailySiteReportController;
 use App\Http\Controllers\Api\V1\DepartmentController;
 use App\Http\Controllers\Api\V1\DesignationController;
@@ -82,6 +83,12 @@ Route::prefix('v1')->group(function () {
         Route::get('auth/sessions', [AuthController::class, 'sessions']);
         Route::delete('auth/sessions/{id}', [AuthController::class, 'revokeSession'])
             ->whereNumber('id');
+
+        // Client-safe configuration: the currency a form should offer, and
+        // the codes it may offer. No `permission:` on purpose — see
+        // ClientSettingsController for why a non-secret value must not be
+        // gated behind a right somebody has to be granted first.
+        Route::get('client-settings', ClientSettingsController::class);
 
         // The Phase 3 proof that RBAC is enforced server-side: without
         // roles.view this 403s no matter what the Flutter UI chooses to show.

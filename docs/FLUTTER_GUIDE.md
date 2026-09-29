@@ -9,7 +9,7 @@
 > a project, receipts from the camera, the same approval engine as leave,
 > and money kept as a decimal string from the API to the screen), all
 > in the same `data / domain / presentation` shape. `dart format .` clean
-> (216 files), `flutter analyze` clean, `flutter test` **454 passed**. This
+> (218 files), `flutter analyze` clean, `flutter test` **465 passed**. This
 > guide explains the concepts and patterns the app uses, written for someone
 > who knows PHP/Laravel but is new to Flutter/Dart. Sections that were
 > written as a plan in earlier phases — the offline queue, the location and
@@ -826,6 +826,7 @@ the moment nothing animates and never reaches it — pump a fixed loop of
 mobile/lib/
 ├── core/
 │   ├── config/app_config.dart          # base URL from --dart-define
+│   ├── config/client_settings.dart      # ← currency: what the server configured, read not remembered
 │   ├── data/page_result.dart           # PagedList<T> envelope → items/meta/has_next
 │   ├── network/api_client.dart         # Dio + bearer interceptor + ApiEnvelope
 │   ├── network/api_exception.dart      # ApiException + envelope parsing
@@ -1043,6 +1044,28 @@ And the gate that precedes all of it runs **twice on purpose**: the form's
 permission its `build` checks — so a claim the session may not edit is never
 downloaded first and refused a moment later.
 
+### 12.3 The currency comes from the server (currency configuration ✅)
+
+The form used to start the `currency` box at a value somebody had typed into
+the source. That is a configuration item wearing a code costume — it survives
+a company moving country and every claim it produces is wrong in a way the
+person filing it had no way to notice. `core/config/client_settings.dart`
+replaces the constant with a read.
+
+| Aspect | Design |
+|---|---|
+| What is fetched | `GET /client-settings` → `{default_currency, supported_currencies}`. Two values, allow-listed on the server, so this route cannot leak anything else |
+| When | once, for a **new** claim only. An **edit never fetches it** — the draft's own `currency` overwrites the box, so a record filed in another code keeps it and a narrowed setting cannot trap somebody out of correcting their own claim |
+| One code configured | `_currencyEditable` is false: the value is shown and closed. A field that offers a choice between one option is an invitation to type over it |
+| Two or more | the box opens, prefilled with the default, and the helper names the accepted codes — the server's list, not the app's |
+| Fetch fails | `_settingsFailed` opens the box rather than blocking the form: an unreachable settings call is not the same statement as "this company accepts nothing", and `StoreExpenseRequest` decides anyway. While nothing has arrived, `_awaitingCurrency` disables **Save**, so a claim cannot be submitted with a box the configuration has not filled in yet |
+| Conversion | none, anywhere. `currency` travels as a three-letter code and `Money.format(value, currency:)` prints it — no figure is ever re-priced from one code into another |
+
+The source is an interface (`ClientSettingsSource`) for the reason every
+repository here is one: `ScriptedClientSettings` in `test/support/phase9.dart`
+answers with a fixture, so a widget test never stands a server up to ask what
+currency it should offer.
+
 ---
 
 ## 13. Running the app
@@ -1200,5 +1223,7 @@ flutter build appbundle         # build an AAB for Play Store
 | `flutter analyze` | ✅ clean |
 | `flutter test` | ✅ **378 passed** (303 before Phase 8, +74 in `test/features/{payroll,loans,salary_certificates}/` + `money_test` + the route and home tests, +1 for a partly deducted installment) |
 | **Phase 9 validation summary** — `dart format .` **clean** (216 files) · `flutter analyze` **clean** · `flutter test` **454 passed** (378 before Phase 9, **+76** in `test/features/expenses/` + `test/features/home/home_phase9_test.dart` + `test/app_phase9_routes_test.dart`) | ✅ Phase 9 |
+| **Currency configuration** — `core/config/client_settings.dart` (`ClientSettings` · `ClientSettingsSource` · `clientSettingsProvider`) + the form's `_currencyEditable` / `_currencyHelper` / `_awaitingCurrency`; `ScriptedClientSettings` added to `scopedPhase9` so no test reaches the network for it; `expense.dart`'s parser no longer invents a code when the server omits one | ✅ Post-Phase 9 |
+| **Currency configuration validation summary** — `dart format .` **clean** (218 files) · `flutter analyze` **clean** · `flutter test` **465 passed** (**+11**: 7 in `test/core/config/client_settings_test.dart`, 4 in `expense_form_screen_test.dart`) | ✅ Post-Phase 9 |
 | Local database (Drift) + relational offline cache | ⬜ Not started — Phase 5 proved the queue does not need it (§10); revisit when a module is genuinely relational |
 | Shared widgets under `core/widgets/` | ⬜ The list and form widgets live in `core/presentation/` today; the split is worth it once a second, differently-shaped widget set appears |

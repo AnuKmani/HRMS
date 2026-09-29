@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:mobile/core/config/client_settings.dart';
 import 'package:mobile/core/data/device_camera.dart';
 import 'package:mobile/core/permissions/permission_scope.dart';
 import 'package:mobile/core/presentation/pdf_opener.dart';
@@ -245,14 +246,56 @@ class ScriptedExpenses extends Scripted<Expense> implements ExpenseRepository {
   static int _nextReceiptId = 1001;
 }
 
+/// The client settings, scripted.
+///
+/// The default is a single configured currency — which is the interesting
+/// case, because one code is not a menu and the form has to be shown *not*
+/// offering a choice. A test that wants the other shape replaces [settings]
+/// before pumping; a test that wants the fetch to fail sets [failure].
+class ScriptedClientSettings implements ClientSettingsSource {
+  ScriptedClientSettings({
+    this.settings = const ClientSettings(
+      defaultCurrency: 'AED',
+      supportedCurrencies: ['AED'],
+    ),
+  });
+
+  ClientSettings settings;
+
+  /// Thrown once by the next [load], then cleared — the shape every other
+  /// scripted double in this file uses, so one failure is one failure.
+  Object? failure;
+
+  int loadCalls = 0;
+
+  @override
+  Future<ClientSettings> load() async {
+    loadCalls++;
+
+    final error = failure;
+    if (error != null) {
+      failure = null;
+      throw error;
+    }
+
+    return settings;
+  }
+}
+
 /// Wraps a screen in the providers Phase 9 needs: a permission scope with
 /// exactly the permissions under test, plus any scripted repository.
+///
+/// The client settings are *always* overridden, for the same reason the
+/// camera always is: without one the form would reach the real HTTP client
+/// to ask what currency it should offer, and a widget test has no server
+/// behind it to answer.
 Widget scopedPhase9({
   required Widget child,
   List<String> permissions = const <String>[],
   List<String> roles = const <String>['Employee'],
   ScriptedExpenses? expenses,
   ScriptedCamera? camera,
+  ScriptedClientSettings? clientSettings,
   PdfOpener? pdfOpener,
 }) => ProviderScope(
   overrides: [
@@ -260,6 +303,9 @@ Widget scopedPhase9({
       PermissionScope(buildUser(permissions: permissions, roles: roles)),
     ),
     if (expenses != null) expenseRepositoryProvider.overrideWithValue(expenses),
+    clientSettingsProvider.overrideWithValue(
+      clientSettings ?? ScriptedClientSettings(),
+    ),
     // Always overridden, for the same reason Phase 7 always overrides it:
     // the receipt sheet opens the *real* camera provider otherwise, and a
     // widget test would then wait on a platform channel nobody answers.

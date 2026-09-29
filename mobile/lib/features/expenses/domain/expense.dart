@@ -169,7 +169,12 @@ class Expense {
     siteName: _nestedName(json['site']),
     expenseDate: json['expense_date'] as String? ?? '',
     amount: json['amount'] as String? ?? '0.00',
-    currency: json['currency'] as String? ?? 'INR',
+    // Never a guessed code. `currency` is required in StoreExpenseRequest,
+    // so the only way this is empty is a server that did not send it — and
+    // an unknown code prints as *no* code rather than as the wrong one,
+    // which is a smaller error on a payslip or a claim than `INR` on a
+    // receipt filed in dirhams.
+    currency: json['currency'] as String? ?? '',
     description: json['description'] as String? ?? '',
     status: json['status'] as String? ?? statusDraft,
     summary: json['summary'] as String?,

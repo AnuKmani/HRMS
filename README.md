@@ -149,7 +149,7 @@ HRMS/
 │   │   └── rate_limiting.php   # login, password-reset, attendance limits
 │   ├── database/migrations/
 │   ├── routes/api.php
-│   └── tests/               # Feature + Unit (469 tests, 2915 assertions)
+│   └── tests/               # Feature + Unit (509 tests, 3288 assertions)
 │
 ├── docs/                    # Project documentation
 │   ├── ARCHITECTURE.md
@@ -260,7 +260,7 @@ php artisan serve          # http://127.0.0.1:8000
 > database settings, not environment variables.
 
 ```bash
-php artisan test                  # 469 tests, 2915 assertions
+php artisan test                  # 509 tests, 3288 assertions
 ./vendor/bin/pint                 # code style
 ```
 
@@ -645,15 +645,37 @@ does not price it.
 >   not a module of its own.
 > - **No PDF capture from the app.** The camera files a JPEG; a PDF receipt
 >   can be uploaded and viewed, but nothing in the app produces one.
-> - **No currency conversion**, and `currency` is a required three-letter
->   text field prefilled `INR` because there is no settings endpoint for the
->   app to read a default from.
+> - **No currency conversion.** `currency` is validated against the codes
+>   the operator configured — see the currency configuration pass below —
+>   and nothing is ever re-priced from one code into another.
 > - **No audit logging of expense decisions.** The service layer is
 >   audit-ready — every decision is already a method call — but writes no
 >   audit rows yet.
 > - **No FCM notifications** on submission, approval or rejection.
 > - Employee documents, onboarding, training and assets remain Phase 10's
 >   scope, as they were before.
+
+### ✅ Phase 9 · Expense currency configuration (COMPLETE)
+
+A follow-up pass on Phase 9. The claim form was prefilling a currency that
+somebody had typed into the source — a configuration value wearing a code
+costume. The company's currency is now a setting the server owns and the
+app reads.
+
+| Deliverable | Status |
+|---|---|
+| **`system.currency` is the company/base currency** — reseeded from `INR` to **`AED`** for the UAE build, and read by everything that prints a figure: payroll, salary slips, certificates, loans, and the default on a new claim. One row, not a constant in four services | ✅ |
+| **`system.supported_currencies`** (json) seeded **`["AED"]`** — the codes a claim may be filed in. One entry means there is no choice to offer; two or more turn the field into a menu; an empty list switches the membership rule off rather than refusing every claim for want of a configuration | ✅ |
+| **`GET /api/v1/client-settings`** — the smallest read-only configuration window: `default_currency` + `supported_currencies`, built from an **allow-list** (a denylist is a list of things somebody remembered), behind `auth:sanctum` and no `permission:` because a non-secret value must not need a grant. It reconciles the two settings, so the default it offers is always one the API will accept | ✅ |
+| **The API stays authoritative** — `StoreExpenseRequest` normalises `currency` to upper case *before* any rule runs, then refuses a code outside the configured list; `UpdateExpenseRequest` additionally accepts the code the claim was already filed in, so narrowing the setting later never locks a person out of correcting their own draft | ✅ |
+| **Flutter reads it instead of guessing** — `core/config/client_settings.dart` (`ClientSettings`, `ClientSettingsSource`, `clientSettingsProvider`) fetches the configuration for a *new* claim. One configured currency is shown and closed; several become selectable; a failed fetch opens the box rather than blocking the form, because the server decides anyway. **Opening a draft never fetches it** — an edit keeps the currency the claim was filed in, and nothing is converted anywhere | ✅ |
+| Tests: backend **509 passed (3288 assertions)** — +8 `ClientSettingsTest`, +2 `ExpenseTest` (`currency` rejected when unsupported, preserved when supported) · Flutter **465 passed** (+11: 7 `client_settings_test` + 4 form) · `dart format .` clean (218 files) · `flutter analyze` clean · `vendor\bin\pint --test` **PASS** (377 files) | ✅ |
+
+> **Consequences worth knowing:** `system.currency` is shared by design, so
+> payroll documents and `GET /payroll/summary` now report **AED**. Two
+> assertions changed with it (`PayrollTest`, `SalaryDocumentTest`) — the
+> expected value, not the behaviour. No shipped Phase 1–8 or Phase 9 row
+> above was rewritten to say so.
 
 ### Planned Phases
 

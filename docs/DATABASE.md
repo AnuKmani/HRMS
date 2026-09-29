@@ -966,6 +966,17 @@ touching anything else — they are `firstOrCreate` / `syncPermissions` only.
 > not a statutory rate, and why the floor is a setting rather than a 0 in
 > the calculation.
 
+> The company's currency is a **pair of rows**: `system.currency` (**`AED`**)
+> is what payroll, the salary-slip and certificate PDFs, `PayrollResource`,
+> `LoanResource` and a new expense claim's default all read, and
+> `system.supported_currencies` (**`["AED"]`**, `json`) is the list a claim
+> may be filed in — one entry offers no choice, two or more make a menu, and
+> an empty list switches the membership rule off. Both are served to the app
+> by `GET /api/v1/client-settings` (allow-listed, read-only), so a deployment
+> changes a row rather than shipping a build. `SettingSeeder` uses
+> `updateOrCreate`, so re-seeding **does** reset these values to the shipped
+> defaults: tune them after seeding.
+
 > ⚠️ `DevelopmentDataSeeder` contains **sample structure only**. It creates no
 > employees, users, salaries or assignments. Every row it writes is labelled
 > *"Development sample data."* in its `description`.

@@ -81,7 +81,7 @@ class SalaryDocumentTest extends TestCase
             $this->assertStringContainsString($needle, $html);
         }
 
-        $this->assertStringContainsString('INR 30000.00', $html);
+        $this->assertStringContainsString('AED 30000.00', $html);
         $this->assertStringNotContainsString('<script', $html);
     }
 
@@ -337,7 +337,7 @@ class SalaryDocumentTest extends TestCase
             $employee->full_name,
             $employee->employee_code,
             'Current monthly salary',
-            'INR 125000.00',
+            'AED 125000.00',
             'Authorised signatory',
         ] as $needle) {
             $this->assertStringContainsString($needle, $html);

@@ -320,7 +320,10 @@ reimbursed until two people have signed it off: **your supervisor**, then
    *Up to 1000.00*. That line is read from the category itself, so it is the
    rule rather than a copy of it that could drift
 4. **Amount** and **Currency** — a plain figure and the three-letter code it
-   was charged in; the currency starts at `INR`
+   was charged in. The currency arrives **already filled in with your
+   company's own code** and is closed to typing when only one is configured;
+   it only becomes a list if your company has deliberately allowed several.
+   Nothing is ever converted — the claim is filed in what you actually spent
 5. **What it was for** — required, in a sentence an approver can act on
 6. **Site** and **Project** — both optional; if you pick a site, the form
    reminds you the site has to belong to the project you chose
@@ -403,10 +406,15 @@ describes the filter and not the page you happened to scroll to.
 >   capture or produce a PDF; a receipt that already exists as a PDF can be
 >   stored and opened, but not made here.
 > - **No currency conversion.** The amount is claimed in the currency typed —
->   nothing converts it into another.
-> - **`INR` is a starting value, not a setting.** There is no settings screen
->   to read your organisation's default currency from, so the field starts at
->   `INR` and you change it per claim.
+>   nothing converts it into another, ever.
+> - **You cannot change your company's currency from the app.** It is a
+>   setting on the server, and the form reads it when you open a new claim:
+>   one configured code arrives filled in and closed, several arrive as a
+>   list. An administrator changes it — there is no settings screen for it
+>   here yet.
+> - **A filed claim keeps its currency.** Opening a draft to correct a
+>   description does not touch the code it was filed with, and no later
+>   change to the setting re-prices what is already on record.
 > - **No notifications.** Nothing tells you that a claim is waiting, was
 >   approved or was refused (Phase 11); open the list to see where it stands.
 > - **No audit trail rows for expense decisions.** The chain and the remarks

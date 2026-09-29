@@ -7,6 +7,7 @@ use App\Models\EmployeeSiteAssignment;
 use App\Models\Expense;
 use App\Models\ExpenseCategory;
 use App\Models\Project;
+use App\Models\Setting;
 use App\Models\Site;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Feature\Concerns\BuildsExpenses;
@@ -126,6 +127,50 @@ class ExpenseTest extends TestCase
             ->assertJsonValidationErrors('currency');
 
         $this->assertSame(0, Expense::query()->count());
+    }
+
+    public function test_the_currency_must_be_one_this_company_accepts(): void
+    {
+        $this->signInAs('Employee');
+
+        // `system.supported_currencies` is seeded to `["AED"]`. A claim in a
+        // code the operator never opted into is refused rather than quietly
+        // converted: conversion is FX, and this phase deliberately has none,
+        // so a silent one would be a number nobody agreed to.
+        $this->postJson('/api/v1/expenses', $this->claimPayload(['currency' => 'JPY']))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('currency');
+
+        $this->assertSame(0, Expense::query()->count());
+    }
+
+    public function test_a_claim_keeps_the_currency_it_was_filed_in(): void
+    {
+        $this->signInAs('Employee');
+
+        // Widen the setting the way an operator would, then file in a second
+        // code: the rule reads the row, so it moves when the row moves.
+        Setting::query()->where('key', 'system.supported_currencies')
+            ->firstOrFail()
+            ->update(['value' => '["AED", "USD"]']);
+
+        $claim = $this->claim(['currency' => 'usd']);
+
+        $this->assertSame('USD', $claim['currency']);
+        $this->assertSame(
+            'USD',
+            Expense::query()->findOrFail($claim['id'])->currency,
+            'Read back from the row: a payload may echo what it was given.',
+        );
+
+        // A correction leaves it alone. Nothing in this API re-prices an
+        // existing claim, and the update endpoint offers no way to move one
+        // into a currency the configuration never sanctioned.
+        $this->putJson('/api/v1/expenses/'.$claim['id'], [
+            'description' => 'Corrected description.',
+        ])->assertOk();
+
+        $this->assertSame('USD', Expense::query()->findOrFail($claim['id'])->currency);
     }
 
     public function test_money_is_rounded_to_the_column_and_not_left_to_a_float(): void

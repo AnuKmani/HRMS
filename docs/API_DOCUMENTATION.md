@@ -1100,7 +1100,7 @@ deliberately unlike leave and overtime: `Visibility` narrows the rows, so
     "project_id": 1,
     "site_id": 7,
     "amount": "250.00",
-    "currency": "INR",
+    "currency": "AED",
     "description": "Taxi fare to the client site."
 }
 ```
@@ -1111,7 +1111,7 @@ deliberately unlike leave and overtime: `Visibility` narrows the rows, so
 | `expense_category_id` | required, must exist **and still be active** |
 | `project_id`, `site_id` | nullable, must exist — and a `site_id` whose project is not the project sent answers `422` on `site_id` (`That site does not belong to the selected project.`) |
 | `amount` | required, `numeric`, `> 0`, `<= 99999999.99`, echoed back as a decimal string |
-| `currency` | required, exactly three letters. There is no settings endpoint for the app to read a default from, so the form prefills `INR` |
+| `currency` | required, exactly three letters, **normalised to upper case before any rule runs**, and must be one of `system.supported_currencies` (`This company does not accept claims filed in that currency.` otherwise). The default the form offers is `system.currency`, read from **`GET /client-settings`** (§2.10b) — never a value baked into the app. `PUT` also accepts the code the claim was already filed in, so narrowing the setting cannot lock a draft out of being corrected |
 | `description` | required, 3–500 characters |
 | `employee_id`, `status` | **prohibited** — the claimant is the bearer token and the lifecycle is the five service methods above. Either key buys a `422`, not a silently dropped field the client believed it had set |
 
@@ -1258,7 +1258,7 @@ disclosures, so they are different permissions.
   each written once by the transition that owns it; `final_approved_by`
   names the last approver, `approval_workflow_id` the chain it runs on.
 - `is_draft`, `is_open`, `summary` (one line for a list row:
-  `Travel — INR 250.00 on 2026-09-28`), `receipt_count` / `receipts`, and
+  `Travel — AED 250.00 on 2026-09-28`), `receipt_count` / `receipts`, and
   the two category rules `requires_receipt` and `maximum_amount` read off
   the claim's own category.
 
@@ -1270,6 +1270,33 @@ refused approval record rather than on the claim: *who said no, and why* is
 a property of a step of the chain, which is where the timeline reads it
 from, and Flutter's `reject(id, {required String remarks})` cannot send one
 without it.
+
+### 2.10b Client settings — (currency configuration ✅)
+
+**`GET /client-settings`** → `200`:
+
+```json
+{
+    "default_currency": "AED",
+    "supported_currencies": ["AED"]
+}
+```
+
+The two values a form needs before anybody can type into it, and nothing
+else.
+
+| Property | Detail |
+|---|---|
+| Authentication | bearer token only — **no `permission:`**, like `attendance/today` |
+| Why no permission | the payload is non-secret (no payroll floors, no geofence radii, no timings) and *every* signed-in session needs it to open a claim form; gating it would show the wrong currency until somebody granted a right nobody asked for |
+| `default_currency` | `system.currency`, upper-cased, reconciled against the list below — the default offered is always one `POST /expenses` will accept |
+| `supported_currencies` | `system.supported_currencies`, upper-cased and de-duplicated: exactly the list `currency` is validated against. One entry ⇒ no choice is offered, several ⇒ a menu, empty ⇒ the company currency is returned and the membership rule is off |
+| Allow-list, not a filter | the payload is built from named keys. A denylist is a list of things somebody remembered; sensitive rows were never candidates |
+| Writes | none — there is no `PUT`. A currency is an operator's row, not something a phone edits |
+
+Sourced once per *new* claim by Flutter's `core/config/client_settings.dart`.
+Opening a draft does **not** fetch it: an edit keeps the currency the claim
+was filed in, and nothing is ever converted.
 
 ### 2.11 Documents, Training, Assets
 
@@ -1669,11 +1696,11 @@ Syncing is manual ("Sync now"), oldest first, and stops at the first 0 or
 | §4.5 File upload rules (expense receipts) | ✅ **Phase 9** |
 | §4 File upload rules (employee documents) | ⬜ Phase 10 |
 
-Backend proof: `php artisan test` → **499 passed (3251 assertions)**; **153
-route definitions** under `api/*` (158 registered) — Phase 6 added 37,
-Phase 7 added 18, Phase 8 added 36, **Phase 9 added 13**. Flutter proof:
-`dart format .` clean (216 files), `flutter analyze` clean, `flutter test`
-→ **454 passed**.
+Backend proof: `php artisan test` → **509 passed (3288 assertions)**; **154
+route definitions** under `api/*` (159 registered) — Phase 6 added 37,
+Phase 7 added 18, Phase 8 added 36, Phase 9 added 13, **the currency pass
+added 1**. Flutter proof: `dart format .` clean (218 files), `flutter
+analyze` clean, `flutter test` → **465 passed**.
 
 > To explore a running API later, use Laravel's generated OpenAPI/Swagger UI or
 > a tool such as Postman.

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:mobile/core/config/client_settings.dart';
 import 'package:mobile/core/network/api_exception.dart';
 import 'package:mobile/features/expenses/presentation/expense_form_screen.dart';
 
@@ -79,6 +80,7 @@ void main() {
     WidgetTester tester, {
     int? expenseId,
     List<String> permissions = const ['expenses.view', 'expenses.create'],
+    ScriptedClientSettings? clientSettings,
   }) async {
     useTallScreen(tester);
 
@@ -86,6 +88,7 @@ void main() {
       scopedPhase9(
         permissions: permissions,
         expenses: script,
+        clientSettings: clientSettings,
         child: MaterialApp.router(
           routerConfig: formRouter(
             expenseId == null ? '/expenses/new' : '/expenses/$expenseId/edit',
@@ -95,6 +98,14 @@ void main() {
     );
     await advance(tester);
   }
+
+  /// The currency box itself, not the label and helper wrapped around it.
+  TextField currencyField(WidgetTester tester) => tester.widget<TextField>(
+    find.descendant(
+      of: find.byKey(const ValueKey('expense-currency')),
+      matching: find.byType(TextField),
+    ),
+  );
 
   Future<void> chooseCategory(
     WidgetTester tester, {
@@ -139,7 +150,9 @@ void main() {
     await pickDate(tester, const ValueKey('expense-date'));
     await chooseCategory(tester);
     await type(tester, const ValueKey('expense-amount'), '250.00');
-    await type(tester, const ValueKey('expense-currency'), 'AED');
+    // No typing here on purpose: with one currency configured the box is
+    // filled in and closed, so what is asserted below is the *default* the
+    // server configured rather than anything this test put in.
     await type(tester, const ValueKey('expense-description'), 'Taxi fare.');
 
     await tapIn(tester, find.byKey(const ValueKey('save-expense')));
@@ -157,6 +170,8 @@ void main() {
     expect(body.keys, isNot(contains('status')));
     expect(body['expense_category_id'], 1);
     expect(body['amount'], '250.00');
+    // The configured company currency, arrived at by asking the server
+    // rather than by reading it out of this file.
     expect(body['currency'], 'AED');
     expect(body['description'], 'Taxi fare.');
     expect(body['expense_date'], isNotEmpty);
@@ -253,5 +268,121 @@ void main() {
     );
     expect(save.onPressed, isNull);
     expect(script.createCalls, 1);
+  });
+
+  /* ------------------------------------------------- where the currency */
+
+  testWidgets('one configured currency is shown, not offered', (tester) async {
+    await pumpForm(tester);
+
+    // Asked the server, got one code, and closed the box: a choice between
+    // one option is an invitation to type over it.
+    expect(currencyField(tester).enabled, isFalse);
+    expect(find.text('AED'), findsOneWidget);
+    expect(
+      find.text(
+        'The company currency. File it as you spent it — nothing is converted.',
+      ),
+      findsOneWidget,
+    );
+
+    // Waiting on the configuration is not the same as waiting forever: the
+    // answer is in, so saving is allowed again.
+    final save = tester.widget<FilledButton>(
+      find.byKey(const ValueKey('save-expense')),
+    );
+    expect(save.onPressed, isNotNull);
+  });
+
+  testWidgets('several configured currencies become a menu the form keeps '
+      'to', (tester) async {
+    await pumpForm(
+      tester,
+      clientSettings: ScriptedClientSettings(
+        settings: const ClientSettings(
+          defaultCurrency: 'USD',
+          supportedCurrencies: ['USD', 'EUR'],
+        ),
+      ),
+    );
+
+    expect(currencyField(tester).enabled, isTrue);
+    expect(find.text('USD'), findsOneWidget);
+    expect(
+      find.text('This company accepts USD, EUR. No conversion is applied.'),
+      findsOneWidget,
+    );
+
+    await pickDate(tester, const ValueKey('expense-date'));
+    await chooseCategory(tester);
+    await type(tester, const ValueKey('expense-amount'), '250.00');
+    await type(tester, const ValueKey('expense-currency'), 'EUR');
+    await type(tester, const ValueKey('expense-description'), 'Taxi fare.');
+
+    await tapIn(tester, find.byKey(const ValueKey('save-expense')));
+    await advance(tester);
+
+    expect(script.createCalls, 1);
+    expect(script.lastCreated!['currency'], 'EUR');
+  });
+
+  testWidgets('a draft keeps the code it was filed with, whatever the '
+      'setting says now', (tester) async {
+    final settings = ScriptedClientSettings();
+
+    await pumpForm(
+      tester,
+      expenseId: 1,
+      permissions: const ['expenses.view', 'expenses.update'],
+      clientSettings: settings,
+    );
+
+    // The configuration says AED. This draft was filed in INR, and an edit
+    // does not re-price a record: no conversion happens anywhere in this
+    // app, least of all underneath somebody correcting a description.
+    expect(find.text('INR'), findsOneWidget);
+    expect(currencyField(tester).enabled, isFalse);
+    expect(
+      settings.loadCalls,
+      0,
+      reason: 'Opening a draft needs no configuration.',
+    );
+
+    await type(tester, const ValueKey('expense-description'), 'Corrected.');
+    await tapIn(tester, find.byKey(const ValueKey('save-expense')));
+    await advance(tester);
+
+    expect(
+      script.lastCreated,
+      isNotNull,
+      reason: 'The correction must have gone out as an update.',
+    );
+    expect(script.lastCreated!['currency'], 'INR');
+  });
+
+  testWidgets('a settings call that fails opens the box instead of blocking '
+      'the claim', (tester) async {
+    final settings = ScriptedClientSettings()
+      ..failure = const ApiException(
+        statusCode: 500,
+        message: 'Something went wrong.',
+      );
+
+    await pumpForm(tester, clientSettings: settings);
+
+    expect(settings.loadCalls, 1);
+    expect(currencyField(tester).enabled, isTrue);
+    expect(currencyField(tester).controller!.text, isEmpty);
+
+    // Still no configuration, but there is nothing left to wait for — and
+    // the server is the one that decides whether a code is acceptable, so
+    // an unreachable settings call is not a reason to hold the form shut.
+    final save = tester.widget<FilledButton>(
+      find.byKey(const ValueKey('save-expense')),
+    );
+    expect(save.onPressed, isNotNull);
+
+    await type(tester, const ValueKey('expense-currency'), 'AED');
+    expect(currencyField(tester).controller!.text, 'AED');
   });
 }

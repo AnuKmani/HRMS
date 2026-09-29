@@ -5,6 +5,7 @@ namespace App\Http\Requests;
 use App\Models\Expense;
 use App\Models\ExpenseCategory;
 use App\Models\Site;
+use App\Services\SettingsService;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -40,6 +41,15 @@ use Illuminate\Validation\Validator;
  * a project they run, or `expenses.manage` — is not a field question and is
  * answered in ExpenseService through Visibility::mayClaimExpenseAt(), which
  * asks it on create, on update and again at submit.
+ *
+ * **The currency is configured, not assumed.** The code a claim is filed in
+ * comes from `system.supported_currencies` (see allowedCurrencies()) and the
+ * default the form offers comes from `system.currency` — both settings, both
+ * readable at `GET /api/v1/client-settings`. Three letters is the shape of an
+ * ISO code; whether *this* company accepts that code is a rule only the
+ * server knows, which is why the membership check lives here and not in the
+ * Flutter form. `prepareForValidation()` upper-cases it first so `aed` and
+ * `AED` are the same claim rather than one passing and one being refused.
  */
 class StoreExpenseRequest extends FormRequest
 {
@@ -49,10 +59,51 @@ class StoreExpenseRequest extends FormRequest
     }
 
     /**
+     * Currency is upper-cased before any rule sees it, so the three-letter
+     * shape rule and the supported-code rule answer the same question about
+     * the same spelling. ExpenseService upper-cases it again on the way into
+     * the row; this is for the validator, not for storage.
+     */
+    public function prepareForValidation(): void
+    {
+        if ($this->filled('currency')) {
+            $this->merge(['currency' => strtoupper((string) $this->input('currency'))]);
+        }
+    }
+
+    /**
+     * The currency codes a claim may be filed in, per
+     * `system.supported_currencies`.
+     *
+     * An empty (or absent) list means the membership rule is switched off
+     * rather than every claim refused: a setting an operator has not filled
+     * in is not a reason to stop work, it is a reason to fall back to the
+     * three-letter shape rule alone.
+     *
+     * @return array<int, string>
+     */
+    protected function allowedCurrencies(): array
+    {
+        $codes = [];
+
+        foreach (app(SettingsService::class)->json('system.supported_currencies') as $code) {
+            if (! is_string($code) || trim($code) === '') {
+                continue;
+            }
+
+            $codes[] = strtoupper(trim($code));
+        }
+
+        return array_values(array_unique($codes));
+    }
+
+    /**
      * @return array<string, array<int, mixed>>
      */
     public function rules(): array
     {
+        $allowed = $this->allowedCurrencies();
+
         return [
             'expense_date' => ['required', 'date_format:Y-m-d', 'before_or_equal:today'],
 
@@ -72,7 +123,13 @@ class StoreExpenseRequest extends FormRequest
             // value that column can hold rather than a number somebody chose.
             'amount' => ['required', 'numeric', 'gt:0', 'lte:99999999.99'],
 
-            'currency' => ['required', 'string', 'size:3', 'alpha'],
+            'currency' => array_filter([
+                'required',
+                'string',
+                'size:3',
+                'alpha',
+                $allowed === [] ? null : Rule::in($allowed),
+            ]),
 
             'description' => ['required', 'string', 'min:3', 'max:500'],
 
@@ -130,6 +187,7 @@ class StoreExpenseRequest extends FormRequest
             'currency.required' => 'Enter the currency — three letters, as in AED.',
             'currency.size' => 'A currency code is exactly three letters.',
             'currency.alpha' => 'A currency code is letters only.',
+            'currency.not_in' => 'This company does not accept claims filed in that currency.',
             'description.required' => 'Say what this expense was for.',
             'description.min' => 'Describe the expense in at least three characters.',
             'description.max' => 'Keep the description to 500 characters.',

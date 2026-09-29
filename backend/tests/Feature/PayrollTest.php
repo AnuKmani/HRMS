@@ -437,7 +437,7 @@ class PayrollTest extends TestCase
 
         $this->assertSame(3, $summary['employee_count']);
         $this->assertSame(179999.0, (float) $summary['gross_payroll']);
-        $this->assertSame('INR', $summary['currency']);
+        $this->assertSame('AED', $summary['currency']);
 
         // No names, no ids, no per-person figures anywhere in the payload -
         // the shape is what keeps a summary-only grant summary-only.

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/config/client_settings.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/permissions/permission_scope.dart';
 import '../../../core/presentation/fields.dart';
@@ -28,6 +29,11 @@ import 'expenses_controller.dart';
 /// copied into Dart is a rule that stops being true the day the backend
 /// changes it, and nobody notices until a claim the screen accepted comes
 /// back red.
+///
+/// The currency is the one field that has a value *before* anybody types:
+/// `GET /client-settings` says which code the company holds and which it
+/// will accept, and this form offers exactly that — see [_currencyEditable]
+/// for why a single configured currency is shown rather than asked for.
 class ExpenseFormScreen extends ConsumerStatefulWidget {
   const ExpenseFormScreen({super.key, this.expenseId});
 
@@ -57,6 +63,15 @@ class _ExpenseFormScreenState extends ConsumerState<ExpenseFormScreen> {
   bool _saving = false;
   bool _forbidden = false;
 
+  /// The company's configured currency, fetched once for a *new* claim.
+  ///
+  /// Null until it arrives, and staying null if it never does — the two are
+  /// told apart by [_settingsFailed], because they mean different things to
+  /// the field below: still loading is "wait a moment", failed is "open the
+  /// box and let the person type, the server will still decide".
+  ClientSettings? _settings;
+  bool _settingsFailed = false;
+
   String? _banner;
   Map<String, String> _errors = const <String, String>{};
 
@@ -67,18 +82,49 @@ class _ExpenseFormScreenState extends ConsumerState<ExpenseFormScreen> {
     super.initState();
     _date = TextEditingController();
     _amount = TextEditingController();
-    // The organisation's code, and the same default `Money` formats with.
-    // The app has no settings endpoint, so rather than leave the field blank
-    // and make every first claim fail on a rule the person was never shown,
-    // it starts at the code the server's own example uses and says so.
-    _currency = TextEditingController(text: 'INR');
+    // Empty on purpose, and the reason this file used to say `INR`: what
+    // fills it is `GET /client-settings`, the company's own configured
+    // currency, not a value somebody typed into the app when it was written.
+    // A draft opened for edit overwrites it with the claim's own code, so a
+    // record filed last year keeps what it was filed in.
+    _currency = TextEditingController();
     _description = TextEditingController();
 
-    if (!_isCreate) {
-      // The same condition the build gate uses: a draft this session may not
-      // correct is never downloaded either. Otherwise a URL typed by hand
-      // would fetch the claim first and refuse it a moment later.
-      if (ref.read(permissionScopeProvider).canUpdateExpenses) _load();
+    final scope = ref.read(permissionScopeProvider);
+
+    if (_isCreate) {
+      // The same condition the build gate uses, asked before the fetch: a
+      // form this session may not submit should not have asked the server
+      // what currency it would have offered either.
+      if (scope.canCreateExpenses) _loadSettings();
+    } else if (scope.canUpdateExpenses) {
+      _load();
+    }
+  }
+
+  /// Reads the configured currency for a *new* claim.
+  ///
+  /// Any failure — offline, a 401, a payload in a shape nobody expected —
+  /// ends with [_settingsFailed] rather than an exception, because the field
+  /// has a defined answer for that case: leave it open, let the person type
+  /// the code they actually spent in, and let `StoreExpenseRequest` decide
+  /// whether this company accepts it.
+  Future<void> _loadSettings() async {
+    try {
+      final loaded = await ref.read(clientSettingsProvider).load();
+      if (!mounted) return;
+
+      setState(() {
+        _settings = loaded;
+        // Only while empty: a person who has already typed over the default
+        // does not have it put back underneath them by a late reply.
+        if (_currency.text.isEmpty) {
+          _currency.text = loaded.defaultCurrency;
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _settingsFailed = true);
     }
   }
 
@@ -140,6 +186,65 @@ class _ExpenseFormScreenState extends ConsumerState<ExpenseFormScreen> {
     // Editing carries the rules with it, so a draft opened on a slow
     // connection still says "Needs a receipt" before anything else loads.
     return _category;
+  }
+
+  /// Whether this session may *choose* the code.
+  ///
+  /// Four cases, in the order they matter:
+  ///
+  ///  - **editing** — never. A claim records what was spent and in what; the
+  ///    configuration moving afterwards does not re-price the past, and this
+  ///    is the only screen in the app that could rewrite a filed currency.
+  ///  - **one configured currency** — never either. There is no choice to
+  ///    offer, so the box shows the value and refuses a keystroke rather
+  ///    than letting somebody type a code the API will come back on.
+  ///  - **two or more** — yes, and only those, because that is what
+  ///    "intentionally configured" means.
+  ///  - **no configuration arrived** — open, and empty. A timed-out settings
+  ///    call is not the same statement as "this company accepts nothing",
+  ///    and locking a person out of their own form over it would be worse
+  ///    than letting the server answer the question when the claim lands.
+  bool get _currencyEditable {
+    if (!_isCreate) return false;
+
+    final settings = _settings;
+    if (settings == null) return _settingsFailed;
+
+    return settings.allowsCurrencyChoice;
+  }
+
+  /// True from the moment a new claim opens until the configured currency
+  /// lands — either as a value or as [_settingsFailed].
+  ///
+  /// The save button waits behind it: submitting a claim whose currency box
+  /// has not been filled in yet would only earn a 422 for a rule the person
+  /// was never shown.
+  bool get _awaitingCurrency {
+    if (!_isCreate) return false;
+    return !_settingsFailed && _settings == null;
+  }
+
+  /// One sentence saying where this value came from. The field is read-only
+  /// in the common case, and a disabled box with no explanation reads as a
+  /// bug rather than as a decision.
+  String get _currencyHelper {
+    if (!_isCreate) {
+      return 'The currency this claim was filed in. It is never re-priced.';
+    }
+
+    final settings = _settings;
+
+    if (settings == null) {
+      return _settingsFailed
+          ? 'The company currency could not be read. Enter the three-letter code you spent in.'
+          : 'Reading the company currency…';
+    }
+
+    if (settings.allowsCurrencyChoice) {
+      return 'This company accepts ${settings.supportedSummary}. No conversion is applied.';
+    }
+
+    return 'The company currency. File it as you spent it — nothing is converted.';
   }
 
   Future<void> _save() async {
@@ -314,8 +419,12 @@ class _ExpenseFormScreenState extends ConsumerState<ExpenseFormScreen> {
               label: 'Currency',
               controller: _currency,
               isRequired: true,
-              hint: 'INR',
-              helper: 'Three letters, the code this was charged in.',
+              // Editable only when there is a choice to make — see
+              // _currencyEditable for why the common case is a box that
+              // shows the configured code instead of asking for one.
+              enabled: _currencyEditable,
+              hint: 'Three letters',
+              helper: _currencyHelper,
               errorText: _errors['currency'],
             ),
             LabeledTextField(
@@ -365,7 +474,9 @@ class _ExpenseFormScreenState extends ConsumerState<ExpenseFormScreen> {
             const SizedBox(height: 8),
             FilledButton(
               key: const ValueKey('save-expense'),
-              onPressed: _saving || _forbidden ? null : _save,
+              onPressed: _saving || _forbidden || _awaitingCurrency
+                  ? null
+                  : _save,
               child: _saving
                   ? const SizedBox(
                       width: 22,

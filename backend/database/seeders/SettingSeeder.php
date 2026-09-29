@@ -209,12 +209,31 @@ class SettingSeeder extends Seeder
             'description' => 'PHP date format used when rendering dates to users.',
         ],
         [
+            // The company's own currency, and the default a new expense
+            // claim is filed in. It is one setting read by payroll, by the
+            // PDF documents and by the client-settings endpoint — not a code
+            // constant in three controllers, so a company that moves country
+            // changes a row instead of shipping a release.
             'key' => 'system.currency',
-            'value' => 'INR',
+            'value' => 'AED',
             'type' => 'string',
             'group' => 'system',
-            'label' => 'Currency',
-            'description' => 'ISO currency code used across payroll and expenses.',
+            'label' => 'Company currency',
+            'description' => 'ISO currency code of the company\'s base currency: the default for new expense claims and the code payroll documents print.',
+        ],
+        [
+            // Which codes a claim may be filed in, kept apart from the
+            // default above because they answer different questions: what
+            // the company holds, and what it will accept. One entry means
+            // the form has no choice to offer; two or more turn the field
+            // into a menu. An empty list switches the membership rule off
+            // rather than refusing every claim for want of a configuration.
+            'key' => 'system.supported_currencies',
+            'value' => '["AED"]',
+            'type' => 'json',
+            'group' => 'system',
+            'label' => 'Supported currencies',
+            'description' => 'Currency codes an expense claim may be filed in. The company currency is offered first when it is one of them.',
         ],
     ];
 
@@ -222,7 +241,10 @@ class SettingSeeder extends Seeder
     {
         foreach (self::SETTINGS as $setting) {
             // updateOrCreate (not create) so re-seeding never fails on the
-            // unique key and never clobbers an operator's tuned value.
+            // unique key. It *does* reset `value` to the shipped default —
+            // which is what moves an older dev database from INR to AED — so
+            // an operator's tuning belongs after the seeders have run, not
+            // before.
             Setting::query()->updateOrCreate(
                 ['key' => $setting['key']],
                 $setting + ['is_editable' => true],

@@ -53,12 +53,54 @@ class UpdateExpenseRequest extends StoreExpenseRequest
 
             'amount' => ['sometimes', 'numeric', 'gt:0', 'lte:99999999.99'],
 
-            'currency' => ['sometimes', 'string', 'size:3', 'alpha'],
+            'currency' => array_filter([
+                'sometimes',
+                'string',
+                'size:3',
+                'alpha',
+                ($allowed = $this->allowedCurrencies()) === []
+                    ? null
+                    : Rule::in($allowed),
+            ]),
 
             'description' => ['sometimes', 'string', 'min:3', 'max:500'],
 
             'employee_id' => ['prohibited'],
             'status' => ['prohibited'],
         ];
+    }
+
+    /**
+     * The supported list, plus whatever *this* claim was already filed in.
+     *
+     * The union matters for exactly one case: a claim whose currency is no
+     * longer on the supported list — an operator narrowed it after the fact,
+     * or the claim predates the setting. Such a claim must still be
+     * correctable, or a person would be unable to fix a typo in their
+     * description without first being told their own historical currency is
+     * unsupported. Preserving what was stored is the point of a record; the
+     * membership rule is about what may be *chosen*, and this endpoint is
+     * not offering a choice.
+     *
+     * @return array<int, string>
+     */
+    protected function allowedCurrencies(): array
+    {
+        $allowed = parent::allowedCurrencies();
+
+        // Nothing configured means nothing to be stricter than: creation
+        // accepts any three-letter code here, so an update must not invent a
+        // rule the create endpoint never had.
+        if ($allowed === []) {
+            return [];
+        }
+
+        $expense = $this->route('expense');
+
+        if ($expense instanceof Expense && $expense->currency !== '') {
+            $allowed[] = strtoupper((string) $expense->currency);
+        }
+
+        return array_values(array_unique($allowed));
     }
 }
