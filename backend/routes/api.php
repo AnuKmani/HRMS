@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\V1\DepartmentController;
 use App\Http\Controllers\Api\V1\DesignationController;
 use App\Http\Controllers\Api\V1\EmployeeController;
 use App\Http\Controllers\Api\V1\EmployeeSiteAssignmentController;
+use App\Http\Controllers\Api\V1\ExpenseController;
 use App\Http\Controllers\Api\V1\HolidayController;
 use App\Http\Controllers\Api\V1\LeaveBalanceController;
 use App\Http\Controllers\Api\V1\LeaveRequestController;
@@ -646,5 +647,73 @@ Route::prefix('v1')->group(function () {
         Route::get('salary-certificate-requests/{salaryCertificateRequest}', [SalaryCertificateRequestController::class, 'show'])
             ->whereNumber('salaryCertificateRequest')
             ->middleware('permission:salary_certificates.view');
+
+        /* ----------------------------------------- Phase 9: expenses */
+
+        // Ordering, once more (the Phase 7 rule): `expenses/summary` is
+        // declared before `expenses/{expense}` because Laravel matches in
+        // declaration order and `/summary` would otherwise be swallowed as
+        // an id — which surfaces not here but as a 404 with no explanation.
+        Route::get('expenses', [ExpenseController::class, 'index'])
+            ->middleware('permission:expenses.view');
+
+        Route::get('expenses/summary', [ExpenseController::class, 'summary'])
+            ->middleware('permission:expenses.view');
+
+        // Reference data for the form. Read-only: a category is a row an
+        // operator seeds, not a resource this API creates.
+        Route::get('expense-categories', [ExpenseController::class, 'categories'])
+            ->middleware('permission:expenses.view');
+
+        Route::post('expenses', [ExpenseController::class, 'store'])
+            ->middleware('permission:expenses.create');
+
+        // `expenses.create` for the three an author drives (submit, cancel,
+        // file) and `expenses.update` for the edit — the same split leave
+        // uses, because filing and correcting are the same act while
+        // signing off is a different one that needs `expenses.approve`.
+        //
+        // Receipts are gated with `expenses.view`, not with
+        // `expenses.receipts.view`: the coarse gate has to admit the person
+        // who *filed* the receipt, and ExpensePolicy then asks the real
+        // question — your own claim's evidence, or somebody else's with
+        // `expenses.receipts.view` on top of a claim you may already read.
+        Route::post('expenses/{expense}/receipts', [ExpenseController::class, 'storeReceipts'])
+            ->whereNumber('expense')
+            ->middleware('permission:expenses.view');
+
+        Route::get('expenses/{expense}/receipts/{receipt}', [ExpenseController::class, 'receipt'])
+            ->whereNumber('expense')
+            ->whereNumber('receipt')
+            ->middleware('permission:expenses.view');
+
+        Route::delete('expenses/{expense}/receipts/{receipt}', [ExpenseController::class, 'deleteReceipt'])
+            ->whereNumber('expense')
+            ->whereNumber('receipt')
+            ->middleware('permission:expenses.view');
+
+        Route::post('expenses/{expense}/submit', [ExpenseController::class, 'submit'])
+            ->whereNumber('expense')
+            ->middleware('permission:expenses.create');
+
+        Route::post('expenses/{expense}/approve', [ExpenseController::class, 'approve'])
+            ->whereNumber('expense')
+            ->middleware('permission:expenses.approve');
+
+        Route::post('expenses/{expense}/reject', [ExpenseController::class, 'reject'])
+            ->whereNumber('expense')
+            ->middleware('permission:expenses.approve');
+
+        Route::post('expenses/{expense}/cancel', [ExpenseController::class, 'cancel'])
+            ->whereNumber('expense')
+            ->middleware('permission:expenses.create');
+
+        Route::get('expenses/{expense}', [ExpenseController::class, 'show'])
+            ->whereNumber('expense')
+            ->middleware('permission:expenses.view');
+
+        Route::put('expenses/{expense}', [ExpenseController::class, 'update'])
+            ->whereNumber('expense')
+            ->middleware('permission:expenses.update');
     });
 });

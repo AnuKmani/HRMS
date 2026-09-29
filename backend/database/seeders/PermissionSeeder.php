@@ -229,8 +229,19 @@ class PermissionSeeder extends Seeder
         ],
         'expenses' => [
             'expenses.view',
+            'expenses.create',
+            'expenses.update',
             'expenses.approve',
             'expenses.manage',
+
+            // Three segments, for the reason `leave.balance.view` and
+            // `employees.salary.view` are: seeing a list of claims is one
+            // act, being handed the document behind one is another. A
+            // receipt is somebody's invoice or card slip, so it gets its
+            // own door — held by whoever may read claims they did not file
+            // themselves. The person who filed it reads their own back
+            // through ownership, without needing this.
+            'expenses.receipts.view',
         ],
         'settings' => [
             'settings.view',

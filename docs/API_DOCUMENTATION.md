@@ -1,12 +1,13 @@
 # API Documentation
 
-> **Status:** Phases 1–7. §1 conventions, §2.1 authentication (Phase 3),
+> **Status:** Phases 1–9. §1 conventions, §2.1 authentication (Phase 3),
 > §2.2–§2.3 the organisation modules (Phase 4), §2.4–§2.5 attendance, site
 > visits and movement (Phase 5), §2.6 site activity and daily reports
 > (Phase 7) and §2.7–§2.9 timesheets, overtime, approval workflows, leave,
-> certificates and holidays (Phase 6) are **live**. Everything from §2.10
-> onward is the contract the remaining phases build against. See §6 for the
-> per-section status.
+> certificates and holidays (Phase 6) are **live**, as are §2.10 payroll,
+> loans and salary documents (Phase 8) and §2.10a expenses and receipts
+> (Phase 9). Everything from §2.11 onward is the contract the remaining
+> phases build against. See §6 for the per-section status.
 
 **Base URL (development):** `http://127.0.0.1:8000/api/v1/`
 **Content type:** `application/json` (except file uploads: `multipart/form-data`)
@@ -153,12 +154,12 @@ Behaviour that holds across every authenticated endpoint:
 
 > **Implemented:** §2.1 (Phase 3), §2.2–§2.3 (Phase 4), §2.4–§2.5 (Phase 5),
 > §2.6 in **Phase 7**, §2.7 (timesheets + overtime), §2.8 (leave), §2.9
-> (holidays) and §2.7's approval-workflows in **Phase 6**, and §2.10 in
-> **Phase 8**. Everything still pending is listed here as the contract to
-> build against.
+> (holidays) and §2.7's approval-workflows in **Phase 6**, §2.10 in
+> **Phase 8** and §2.10a in **Phase 9**. Everything still pending is listed
+> here as the contract to build against.
 
-**Two gates, both live on every Phase 4, Phase 5, Phase 6, Phase 7 and Phase 8
-route**
+**Two gates, both live on every Phase 4, Phase 5, Phase 6, Phase 7, Phase 8
+and Phase 9 route**
 (the three exceptions are named in §2.7 / §2.9 — holiday reads, and the
 certificate read/write, which are policy-only on purpose):
 
@@ -1052,10 +1053,223 @@ Flutter form does not offer yet (see `docs/FLUTTER_GUIDE.md`); the API does.
 
 #### What is *not* here yet
 
-`/expenses` (Phase 9), `/documents`, `/training`, `/assets` (Phase 10) and
-`/notifications` (Phase 11) remain contracts, as §2.11–§2.13 say. Phase 8 adds
+`/documents`, `/training`, `/assets` (Phase 10) and
+`/notifications` (Phase 11) remain contracts, as §2.11–§2.13 say
+(`/expenses` left this list in Phase 9 and is documented in §2.10a below).
+Phase 8 adds
 **no rate limiter**: none of these routes accepts a credential, a file or an
 unbounded body — see §3.
+
+### 2.10a Expenses & Receipts — (Phase 9 ✅)
+
+**13 routes.** A claim is the same five-state object leave and overtime are
+— `draft → pending → approved | rejected | cancelled` — and it reaches each
+one only through `ExpenseService`: `submit`, `approve`, `reject` and
+`cancel` are service methods, each inside a DB transaction, so no controller
+writes a status even by accident. Money is a **decimal string end to end**
+— `DECIMAL(12,2)`, `App\Support\Money`, `Money::round()` — and `amount` is
+validated `numeric`, `> 0`, `<= 99999999.99`, which is the largest value
+the column can hold rather than a number somebody chose.
+
+#### Claims
+
+| Method | Path | Gate |
+|---|---|---|
+| GET | `/expenses` | `expenses.view` + row scope |
+| GET | `/expenses/summary` | `expenses.view` + row scope |
+| GET | `/expenses/{expense}` | `expenses.view` + policy |
+| POST | `/expenses` | `expenses.create` |
+| PUT | `/expenses/{expense}` | `expenses.update` + policy |
+| POST | `/expenses/{expense}/submit` | `expenses.create` + own claim or `expenses.manage` |
+| POST | `/expenses/{expense}/cancel` | `expenses.create` + own claim or `expenses.manage` |
+| POST | `/expenses/{expense}/approve` | `expenses.approve` + **current link**, never your own |
+| POST | `/expenses/{expense}/reject` | `expenses.approve` + **current link**, `remarks` required |
+
+`expenses/summary` is declared before `expenses/{expense}` — the Phase 7
+ordering rule again — so `/summary` can never be swallowed as an id.
+Reading fails closed to *your own*, exactly as payroll and loans do and
+deliberately unlike leave and overtime: `Visibility` narrows the rows, so
+`expenses.view` alone never hands an Employee a colleague's spend.
+
+**`POST /expenses`** → `201`:
+
+```json
+{
+    "expense_date": "2026-09-28",
+    "expense_category_id": 3,
+    "project_id": 1,
+    "site_id": 7,
+    "amount": "250.00",
+    "currency": "INR",
+    "description": "Taxi fare to the client site."
+}
+```
+
+| Field | Rule |
+|---|---|
+| `expense_date` | required, `Y-m-d`, not in the future — a claim is money already spent; a future date is a plan |
+| `expense_category_id` | required, must exist **and still be active** |
+| `project_id`, `site_id` | nullable, must exist — and a `site_id` whose project is not the project sent answers `422` on `site_id` (`That site does not belong to the selected project.`) |
+| `amount` | required, `numeric`, `> 0`, `<= 99999999.99`, echoed back as a decimal string |
+| `currency` | required, exactly three letters. There is no settings endpoint for the app to read a default from, so the form prefills `INR` |
+| `description` | required, 3–500 characters |
+| `employee_id`, `status` | **prohibited** — the claimant is the bearer token and the lifecycle is the five service methods above. Either key buys a `422`, not a silently dropped field the client believed it had set |
+
+`PUT /expenses/{expense}` takes the same shape with every field `sometimes`
+and `employee_id` / `status` still prohibited; the service answers it with
+**409** once the claim is no longer a draft. On both routes the claim is
+never about anyone else: the claimant is derived from the token, and
+site↔project consistency plus `Visibility::mayClaimExpenseAt()` (a posting,
+a project they run, or `expenses.manage`) decide what may be booked — asked
+on create, on update and again at submit.
+
+**Errors**, on every route in this section:
+
+| Code | When |
+|---|---|
+| `403` | the coarse permission or the policy says no — including `This account is not linked to an employee record.` when a writing user has no employee row |
+| `404` | unknown id; a receipt id that is not attached to the claim named in the path (`That receipt is not attached to this claim.`); bytes that have gone missing |
+| `409` | an illegal transition, always with a `message` naming the state — `Only a draft claim can be edited. Cancel it and file a new one.` · `Only a draft claim can be submitted.` · `This claim is not waiting for approval.` · `Only a draft or a pending claim can be cancelled.` · `Receipts can only be changed while the claim is a draft.` |
+| `422` | field validation with the `errors` map of §1.4: a prohibited field, a category ceiling (`Food claims are capped at 1000.00…` on `amount`), `You may only claim against a project or site you are assigned to.` on `site_id` / `project_id`, and `Attach at least one receipt — {Category} claims require evidence.` on `receipts` at submit. The 10-receipt ceiling answers `422` with a `message` rather than a field error |
+
+**Filters**, all on `GET /expenses`, all narrowing rather than replacing:
+`status` (comma-separated), `employee_id`, `project_id`, `site_id`,
+`expense_category_id` (aliases `category`, `category_id`), and the
+inclusive `expense_date` window `from` / `to` (aliases `date_from` /
+`date_to`) — those are the spellings the controller reads. `page`,
+`per_page`, `sort` (allow-listed: `expense_date` default, `amount`,
+`status`, `created_at`), `direction` (default `desc`) and `search` / `q`
+(on `description`) behave as §1.7–§1.8 say. The list itself is the usual
+`PaginatedResponse` — `{items, meta}`.
+
+> **The window is `from` / `to`.** `applyFilters()` reads `from` and `to`
+> (aliases `date_from` / `date_to`) against `expense_date`; the Flutter side
+> sends the same spelling. Nothing in the app offers a date range yet — the
+> parameter exists for whoever builds one.
+
+`GET /expenses/{expense}` loads `receipts` and `approvalRecords.actor`, so
+`receipts` and `approval_chain` appear **on `show` and only there** — a list
+of fifty rows must not pull fifty chains.
+
+#### Summary
+
+`GET /expenses/summary` — same gate, same row scope, same filters as the
+index (they narrow the summary exactly as they narrow the list):
+
+```json
+{
+    "from": "2026-09-01",
+    "to": "2026-09-30",
+    "by_status": {
+        "draft":    {"count": 2, "amount": "410.00"},
+        "pending":  {"count": 1, "amount": "250.00"},
+        "approved": {"count": 3, "amount": "900.00"},
+        "rejected": {"count": 1, "amount": "300.00"},
+        "cancelled": {"count": 0, "amount": "0.00"}
+    },
+    "by_category": [{"expense_category_id": 3, "name": "Travel", "count": 4, "amount": "1150.00"}],
+    "by_project":  [{"project_id": 1, "count": 5, "amount": "1560.00"}]
+}
+```
+
+All five statuses are always present and zero-filled, so a screen prints
+`"0.00"` for a state nobody reached rather than interpreting a missing key;
+`by_category` and `by_project` may be empty arrays; every amount is a
+decimal string. **This is a simple summary, not analytics** — the three
+totals a queue screen asks for and the range they cover, deliberately with
+no second aggregate and no trend behind them.
+
+#### Expense categories
+
+| Method | Path | Gate |
+|---|---|---|
+| GET | `/expense-categories` | `expenses.view` |
+
+**A plain, unpaginated collection**: `data` is the array itself, not
+`{items, meta}`. `?all=1` is the only query parameter honoured — without
+it the active rows only, with it every row (so history still reads back a
+retired category); no `page`, no `per_page`, no `sort`, no filters. Fields:
+`id`, `name`, `code`, `description`, `status`, `is_active`,
+`requires_receipt`, `maximum_amount`, `created_at`, `updated_at` — where
+`maximum_amount: null` means **no ceiling**, which is not the same as `0`,
+and `requires_receipt` is the rule the form has to show *before* the server
+can be asked to accept the claim. Six rows are seeded, and there is
+deliberately **no POST / PUT / DELETE**: a category is configuration an
+operator seeds, not a resource this API writes.
+
+#### Receipts
+
+| Method | Path | Gate |
+|---|---|---|
+| POST | `/expenses/{expense}/receipts` | `expenses.view` + `storeReceipt` — your own claim, or anybody's with `expenses.manage` (the draft-only rule is the service's `409`, not this gate's `403`) |
+| GET | `/expenses/{expense}/receipts/{receipt}` | `expenses.view` + `ExpensePolicy::viewReceipt` |
+| DELETE | `/expenses/{expense}/receipts/{receipt}` | `expenses.view` + `deleteReceipt` — the same two ways in |
+
+**Upload** is `multipart/form-data`, field name **`receipts`**, **1–6 per
+request** on top of the service's **10 per claim** (over which it answers
+`422` with a message). The rule set is `mimes:pdf,jpg,jpeg,png,webp` +
+`mimetypes:application/pdf,image/jpeg,image/png,image/webp` — PDF, JPEG,
+PNG, WebP — plus `CertificateContent`'s byte-level read, so a 3 KB of
+garbage renamed `note.pdf` fails at the request on
+`errors.receipts[0]`. Each file is capped at **5120 KB**
+(`hrms.storage.expense_receipt_max_kilobytes`, `HRMS_EXPENSE_RECEIPT_MAX_KB`)
+and lands in `hrms.storage.expense_receipt_directory`
+(`HRMS_EXPENSE_RECEIPT_DIRECTORY`, default `expense-receipts`) as a
+server-minted `expense-receipts/{expenseId}/{uuid}.{ext}` on the **private**
+disk — the client's filename is kept as `original_name` data and never
+addresses anything. The batch is one transaction: a request that fails
+part-way leaves no file and no half-updated claim. The response is the
+**whole `ExpenseResource`** again, not an acknowledgement, because the
+screen it came from is drawing a `receipt_count`.
+
+**Read** — `GET …/receipts/{receipt}` is the only route to the bytes: raw
+stream, `Content-Type` from the stored extension,
+`Content-Disposition: attachment; filename="receipt.pdf"` — a name minted
+server-side, since `original_name` is client input with no business in a
+response header — plus `Cache-Control: no-store, no-cache, must-revalidate,
+max-age=0` and `X-Content-Type-Options: nosniff`. You cannot list receipts and
+cannot fetch one for a claim you could not already read; an id that belongs
+to a different claim answers `404`, and the state refusals
+(`Receipts can only be changed while the claim is a draft.`) belong to
+upload and delete, which answer `409`.
+
+`ExpenseReceiptResource` is everything the API ever says about one:
+`{id, expense_id, original_name, mime_type, size_bytes, is_image, is_pdf,
+url, uploaded_by, created_at}`. **No storage path, ever** — and `url` is the
+id-based route above (`/api/v1/expenses/{expense}/receipts/{receipt}`),
+relative and deliberately unsigned, not a file URL to follow: a signed URL
+is a bearer credential in a screenshot, a log line and a forwarded email.
+`uploaded_by` is the **user** id.
+
+The coarse gate is `expenses.view` rather than `expenses.receipts.view`
+because the door has to admit the person who *filed* the receipt;
+`viewReceipt` is the fine rule — your own claim's evidence, or
+`expenses.receipts.view` **on top of** read access to that claim — being
+shown a claim and being handed the invoice behind it are different
+disclosures, so they are different permissions.
+
+#### Workflow fields
+
+- `current_approval_step` — the link the claim is waiting on, `null` as a
+  draft and again once decided.
+- `approval_chain` — the frozen `ApprovalRecord` sequence with each actor,
+  **`show` only**.
+- `submitted_at`, `approved_at`, `rejected_at`, `cancelled_at` — ISO-8601,
+  each written once by the transition that owns it; `final_approved_by`
+  names the last approver, `approval_workflow_id` the chain it runs on.
+- `is_draft`, `is_open`, `summary` (one line for a list row:
+  `Travel — INR 250.00 on 2026-09-28`), `receipt_count` / `receipts`, and
+  the two category rules `requires_receipt` and `maximum_amount` read off
+  the claim's own category.
+
+Seeded **EXP-STD**: step 1 "Standard expense approval"
+(`reporting_manager`), step 2 "Finance / HR" (`permission: expenses.manage`)
+— the same two-step shape as leave and overtime, on
+`ApprovalWorkflow::SUBJECT_EXPENSE`. A rejection stores its `remarks` on the
+refused approval record rather than on the claim: *who said no, and why* is
+a property of a step of the chain, which is where the timeline reads it
+from, and Flutter's `reject(id, {required String remarks})` cannot send one
+without it.
 
 ### 2.11 Documents, Training, Assets
 
@@ -1105,6 +1319,7 @@ attached at the route as `throttle:{name}`. Never inline a number in a route.
 | `POST /auth/forgot-password`, `POST /auth/reset-password` | **5 / 15 minutes** | client IP | ✅ Phase 3 |
 | `POST /attendance/check-in`, `POST /attendance/check-out`, `POST /site-visits/start`, `POST /site-visits/{id}/end` | **30 / minute** | authenticated user id | ✅ Phase 5 |
 | Payroll / loans / certificate writes (36 routes) | none | — | ✅ Phase 8, **deliberately** — see below |
+| Expense writes (13 routes) | none | — | ✅ Phase 9, **deliberately** — see below |
 | General API | 60 / minute | — | ⬜ Planned |
 | Exports (PDF/Excel) | 10 / minute | — | ⬜ Phase 11 |
 
@@ -1127,6 +1342,14 @@ HR Admin, Payroll Admin) and by the one-way ladder, so a repeat call costs
 `updated: 0` rather than a second recalculation. A `process` limiter would be
 the first thing to add if the general limiter (§row above) stays unwelcome —
 it belongs in `config/rate_limiting.php`, not inline.
+
+**Phase 9 added no limiter either, and for the same reason.** None of the 13
+expense routes accepts a credential or an unbounded body — each sits behind
+`auth:sanctum` + a permission + a policy, and the one write that takes bytes
+is bounded structurally instead: 6 files per request, 10 per claim, 5120 KB
+each (§4.5). A flood of claim writes is stopped by the permission middleware
+before it reaches a query; a flood of receipts is stopped by the byte
+ceiling.
 
 Exceeded → **HTTP 429** in the standard envelope, with a `Retry-After` header.
 
@@ -1158,7 +1381,8 @@ Phase 6 uploads exactly one kind of file: the **medical certificate** for a
 sick-leave request. It is described in §4.2 below. Phase 5's check-in
 **selfie** follows the same shape with stricter rules (§4.1), and Phase 7
 adds the report photographs (§4.3). **Phase 8 uploads nothing** — its two
-documents are rendered from a row on demand, described in §4.4.
+documents are rendered from a row on demand, described in §4.4. Phase 9
+adds the **expense receipts**, described in §4.5.
 
 - `multipart/form-data`, field name `selfie`, on `POST /attendance/check-in` only
 - Max size **5120 KB** — `hrms.storage.selfie_max_kilobytes` (`HRMS_SELFIE_MAX_KB`)
@@ -1321,6 +1545,45 @@ anywhere in this flow. The document does not exist until it is asked for, so
 it cannot go stale behind a recalculation, cannot be listed, cannot be
 guessed at by path, and needs no expiry policy.
 
+### 4.5 Expense receipts — Phase 9
+
+- `multipart/form-data`, field name **`receipts`** (plural), on
+  `POST /api/v1/expenses/{expense}/receipts` only
+- **6 per request**, **10 per claim** — the first is about one request's
+  weight, the second about how much paper a single claim may end up
+  carrying; over either, the request answers `422` with a message
+  (`Attach up to six receipts at a time.` / `A claim can carry at most 10
+  receipts.`), and a batch that fails part-way writes no file and no row
+- Max size **5120 KB** each — `hrms.storage.expense_receipt_max_kilobytes`
+  (`HRMS_EXPENSE_RECEIPT_MAX_KB`); directory
+  `hrms.storage.expense_receipt_directory` (`HRMS_EXPENSE_RECEIPT_DIRECTORY`,
+  default `expense-receipts`)
+- Types: `pdf, jpg, jpeg, png, webp`, checked the same ways as §4.2's
+  certificate — declared extension (`mimes`), `finfo` sniff (`mimetypes`),
+  the byte ceiling, and `CertificateContent` reading the first bytes itself,
+  so a renamed `.exe` fails at the request on `errors.receipts[0]`.
+  `ExpenseReceiptStore` repeats the MIME and size checks before writing — a
+  storage layer that trusts a validation layer it may one day stop sharing
+  an author with is waiting for an upload bug
+- **No re-encoding**, unlike §4.1 / §4.3: a receipt has to stay the document
+  it was (a re-encoded PDF stops opening) and nothing here decodes pixels.
+  What *is* stripped is the client's filename — the stored name is
+  server-minted `expense-receipts/{expenseId}/{uuid}.{ext}`, so no upload can
+  address a path outside that directory and no client-chosen extension
+  survives
+- **Private storage** (`local` disk → `storage/app/private`). No public URL,
+  no signed URL, no directory listing, no path in any JSON:
+  `ExpenseReceiptResource` emits metadata only (`id, expense_id,
+  original_name, mime_type, size_bytes, is_image, is_pdf, url, uploaded_by,
+  created_at`) and its `url` is the id-based route, not a file URL
+- Download: `GET /api/v1/expenses/{expense}/receipts/{receipt}` — raw bytes
+  behind `ExpensePolicy::viewReceipt` (your own claim, or
+  `expenses.receipts.view` **plus** read access to that claim), `Content-Type`
+  from the stored extension, `Content-Disposition: attachment` with a
+  **server-minted** filename (never `original_name`), `Cache-Control:
+  no-store`, `X-Content-Type-Options: nosniff`. `404` when the id is not
+  attached to the claim named in the path or the bytes are gone
+
 ---
 
 ## 5. Offline Sync Contract
@@ -1390,23 +1653,27 @@ Syncing is manual ("Sync now"), oldest first, and stops at the first 0 or
 | §2.8 Leave / §2.8a Certificates & LOP / §2.9 Holidays | ✅ Phase 6 |
 | §2.6 Site Activity & Daily Reports | ✅ **Phase 7** |
 | §2.10 Payroll / Loans / Salary documents | ✅ **Phase 8** |
-| §2.11–§2.13 Everything else | ⬜ Phases 9–12 |
+| §2.10a Expenses & Receipts | ✅ **Phase 9** |
+| §2.11–§2.13 Everything else | ⬜ Phases 10–12 |
 | Rate limiting — auth routes | ✅ Phase 3 |
 | Rate limiting — attendance writes | ✅ Phase 5 |
 | Rate limiting — leave/timesheet/overtime/holiday writes | **deliberately none** — see §3 |
 | Rate limiting — site-report writes | **deliberately none** — see §3 |
 | Rate limiting — payroll / loan / certificate writes | **deliberately none** — see §3 |
+| Rate limiting — expense writes | **deliberately none** — see §3 |
 | Rate limiting — remaining scopes | ⬜ As their modules land |
 | §4.1 File upload rules (selfie) | ✅ Phase 5, **sanitised server-side since the post-Phase 5 hardening pass** |
 | §4.2 File upload rules (medical certificate) | ✅ Phase 6 |
 | §4.3 File upload rules (report photographs) | ✅ **Phase 7** |
 | §4.4 Salary documents (rendered, never uploaded) | ✅ **Phase 8** |
+| §4.5 File upload rules (expense receipts) | ✅ **Phase 9** |
 | §4 File upload rules (employee documents) | ⬜ Phase 10 |
 
-Backend proof: `php artisan test` → **469 passed (2915 assertions)**; **140
-route definitions** under `api/*` (145 registered) — Phase 6 added 37,
-Phase 7 added 18, **Phase 8 added 36**. Flutter proof: `dart format .` clean,
-`flutter analyze` clean, `flutter test` → **378 passed**.
+Backend proof: `php artisan test` → **499 passed (3251 assertions)**; **153
+route definitions** under `api/*` (158 registered) — Phase 6 added 37,
+Phase 7 added 18, Phase 8 added 36, **Phase 9 added 13**. Flutter proof:
+`dart format .` clean (216 files), `flutter analyze` clean, `flutter test`
+→ **454 passed**.
 
 > To explore a running API later, use Laravel's generated OpenAPI/Swagger UI or
 > a tool such as Postman.

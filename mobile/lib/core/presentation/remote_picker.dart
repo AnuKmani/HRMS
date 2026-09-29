@@ -31,6 +31,7 @@ class RemotePickerField<T> extends ConsumerWidget {
     this.hint = 'Not set',
     this.searchHint,
     this.sheetTitle,
+    this.helper,
   });
 
   final String label;
@@ -53,6 +54,13 @@ class RemotePickerField<T> extends ConsumerWidget {
   final String? searchHint;
   final String? sheetTitle;
 
+  /// A line under the control explaining what it is for — the same
+  /// courtesy `LabeledTextField` gives, and for the same reason: a field
+  /// whose consequence is invisible (a site that has to belong to a chosen
+  /// project) is a field people fill in wrong and only learn about from the
+  /// refusal.
+  final String? helper;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
@@ -74,6 +82,7 @@ class RemotePickerField<T> extends ConsumerWidget {
             child: InputDecorator(
               decoration: InputDecoration(
                 errorText: errorText,
+                helperText: errorText == null ? helper : null,
                 suffixIcon: const Icon(Icons.arrow_drop_down),
                 border: const OutlineInputBorder(),
                 isDense: true,

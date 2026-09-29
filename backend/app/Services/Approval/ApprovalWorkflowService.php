@@ -6,6 +6,7 @@ use App\Models\ApprovalRecord;
 use App\Models\ApprovalWorkflow;
 use App\Models\ApprovalWorkflowStep;
 use App\Models\Employee;
+use App\Models\Expense;
 use App\Models\LeaveRequest;
 use App\Models\OvertimeRequest;
 use App\Models\User;
@@ -15,13 +16,15 @@ use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
 /**
- * The configurable approval engine, shared by leave and overtime.
+ * The configurable approval engine, shared by leave, overtime and expenses.
  *
  * Nothing in this class names a role, a person or a chain. It reads whatever
  * `approval_workflows` says, copies it into `approval_records` when a request
  * is submitted, and walks that copy forwards. "Employee -> Supervisor ->
  * Project Manager -> HR" and "Employee -> HR" are therefore two rows of data,
- * not two code paths — which is the whole point of F.
+ * not two code paths — which is the whole point of F. The third subject,
+ * an expense claim, arrives as a third row of data and no new code at all:
+ * every method below takes whichever subject was handed to it.
  *
  * The three rules that make it safe:
  *
@@ -84,14 +87,14 @@ final class ApprovalWorkflowService
      * @return string self::ADVANCED when somebody now holds it, self::COMPLETED
      *                when every step resolved to nobody (all skipped)
      */
-    public function start(LeaveRequest|OvertimeRequest $subject, ?int $workflowId = null): string
+    public function start(LeaveRequest|OvertimeRequest|Expense $subject, ?int $workflowId = null): string
     {
         $subjectType = $this->subjectType($subject);
 
         return DB::transaction(function () use ($subject, $subjectType, $workflowId) {
             // Two vocabularies, and they are not interchangeable.
             // `approval_workflows.subject_type` selects a *definition* — the
-            // API validates it as `leave` or `overtime` — while
+            // API validates it as `leave`, `overtime` or `expense` — while
             // `approval_records.subject_type` names the row the record hangs
             // off. Handing the record's vocabulary to forSubject() made every
             // lookup miss, and the symptom appeared three layers away as
@@ -142,7 +145,7 @@ final class ApprovalWorkflowService
      * caller get a clean 403 before any work happens rather than halfway
      * through a write.
      */
-    public function actorMatchesCurrent(LeaveRequest|OvertimeRequest $subject, User $actor): bool
+    public function actorMatchesCurrent(LeaveRequest|OvertimeRequest|Expense $subject, User $actor): bool
     {
         // Self-approval first, and for the same reason it is first in
         // authorize(): it holds however the step happens to resolve, so the
@@ -160,7 +163,7 @@ final class ApprovalWorkflowService
     /**
      * The step currently holding this subject, if any.
      */
-    public function current(LeaveRequest|OvertimeRequest $subject): ?ApprovalRecord
+    public function current(LeaveRequest|OvertimeRequest|Expense $subject): ?ApprovalRecord
     {
         return ApprovalRecord::query()
             ->forSubject($this->subjectType($subject), $subject->getKey())
@@ -172,7 +175,7 @@ final class ApprovalWorkflowService
     /**
      * @return Collection<int, ApprovalRecord>
      */
-    public function history(LeaveRequest|OvertimeRequest $subject): Collection
+    public function history(LeaveRequest|OvertimeRequest|Expense $subject): Collection
     {
         return ApprovalRecord::query()
             ->forSubject($this->subjectType($subject), $subject->getKey())
@@ -186,7 +189,7 @@ final class ApprovalWorkflowService
      * @return string self::ADVANCED (still waiting on somebody) or
      *                self::COMPLETED (this was the last step)
      */
-    public function approve(LeaveRequest|OvertimeRequest $subject, User $actor, string $remarks = ''): string
+    public function approve(LeaveRequest|OvertimeRequest|Expense $subject, User $actor, string $remarks = ''): string
     {
         return DB::transaction(function () use ($subject, $actor, $remarks) {
             $record = $this->currentForUpdate($subject);
@@ -209,7 +212,7 @@ final class ApprovalWorkflowService
      *
      * @return string always self::STOPPED
      */
-    public function reject(LeaveRequest|OvertimeRequest $subject, User $actor, string $remarks = ''): string
+    public function reject(LeaveRequest|OvertimeRequest|Expense $subject, User $actor, string $remarks = ''): string
     {
         DB::transaction(function () use ($subject, $actor, $remarks) {
             $record = $this->currentForUpdate($subject);
@@ -236,7 +239,7 @@ final class ApprovalWorkflowService
      * there is no approver to record and the self-approval rule has nothing
      * to say about it.
      */
-    public function abandon(LeaveRequest|OvertimeRequest $subject): void
+    public function abandon(LeaveRequest|OvertimeRequest|Expense $subject): void
     {
         $this->close($subject, ApprovalRecord::STATUS_SKIPPED);
     }
@@ -247,7 +250,7 @@ final class ApprovalWorkflowService
      * Find the first `waiting` step that can actually be answered, opening it
      * and skipping any ahead of it that cannot.
      */
-    private function advance(LeaveRequest|OvertimeRequest $subject): string
+    private function advance(LeaveRequest|OvertimeRequest|Expense $subject): string
     {
         $subjectType = $this->subjectType($subject);
 
@@ -293,7 +296,7 @@ final class ApprovalWorkflowService
     /**
      * Every open step becomes `$status`, and the subject stops waiting.
      */
-    private function close(LeaveRequest|OvertimeRequest $subject, string $status): void
+    private function close(LeaveRequest|OvertimeRequest|Expense $subject, string $status): void
     {
         ApprovalRecord::query()
             ->forSubject($this->subjectType($subject), $subject->getKey())
@@ -310,7 +313,7 @@ final class ApprovalWorkflowService
     /**
      * Read the current step under a row lock.
      */
-    private function currentForUpdate(LeaveRequest|OvertimeRequest $subject): ApprovalRecord
+    private function currentForUpdate(LeaveRequest|OvertimeRequest|Expense $subject): ApprovalRecord
     {
         $record = ApprovalRecord::query()
             ->forSubject($this->subjectType($subject), $subject->getKey())
@@ -334,7 +337,7 @@ final class ApprovalWorkflowService
      * Is the actor the person this step is waiting on?
      */
     private function authorize(
-        LeaveRequest|OvertimeRequest $subject,
+        LeaveRequest|OvertimeRequest|Expense $subject,
         ApprovalRecord $record,
         User $actor,
         string $action,
@@ -380,7 +383,7 @@ final class ApprovalWorkflowService
      * better than parking every request forever on a link that can never be
      * answered.
      */
-    private function isResolvable(ApprovalRecord $record, LeaveRequest|OvertimeRequest $subject): bool
+    private function isResolvable(ApprovalRecord $record, LeaveRequest|OvertimeRequest|Expense $subject): bool
     {
         return match ($record->approver_type) {
             ApprovalWorkflowStep::TYPE_REPORTING_MANAGER => $record->approver_employee_id !== null,
@@ -392,11 +395,12 @@ final class ApprovalWorkflowService
         };
     }
 
-    private function subjectType(LeaveRequest|OvertimeRequest $subject): string
+    private function subjectType(LeaveRequest|OvertimeRequest|Expense $subject): string
     {
         return match (true) {
             $subject instanceof LeaveRequest => ApprovalRecord::TYPE_LEAVE,
             $subject instanceof OvertimeRequest => ApprovalRecord::TYPE_OVERTIME,
+            $subject instanceof Expense => ApprovalRecord::TYPE_EXPENSE,
             default => throw new \InvalidArgumentException('Unsupported approval subject.'),
         };
     }
@@ -407,14 +411,16 @@ final class ApprovalWorkflowService
      * Deliberately a second method rather than a second value inside
      * subjectType(): one method returning two vocabularies depending on the
      * caller's intent is exactly how the two drifted apart in the first
-     * place. `approval_workflows.subject_type` is `leave` / `overtime`;
-     * `approval_records.subject_type` is `leave_request` / `overtime_request`.
+     * place. `approval_workflows.subject_type` is `leave` / `overtime` /
+     * `expense`; `approval_records.subject_type` is `leave_request` /
+     * `overtime_request` / `expense`.
      */
-    private function workflowSubjectType(LeaveRequest|OvertimeRequest $subject): string
+    private function workflowSubjectType(LeaveRequest|OvertimeRequest|Expense $subject): string
     {
         return match (true) {
             $subject instanceof LeaveRequest => ApprovalWorkflow::SUBJECT_LEAVE,
             $subject instanceof OvertimeRequest => ApprovalWorkflow::SUBJECT_OVERTIME,
+            $subject instanceof Expense => ApprovalWorkflow::SUBJECT_EXPENSE,
             default => throw new \InvalidArgumentException('Unsupported approval subject.'),
         };
     }

@@ -29,7 +29,9 @@ class ApprovalWorkflow extends Model
 
     public const SUBJECT_OVERTIME = 'overtime';
 
-    public const SUBJECTS = [self::SUBJECT_LEAVE, self::SUBJECT_OVERTIME];
+    public const SUBJECT_EXPENSE = 'expense';
+
+    public const SUBJECTS = [self::SUBJECT_LEAVE, self::SUBJECT_OVERTIME, self::SUBJECT_EXPENSE];
 
     public const STATUS_ACTIVE = 'active';
 

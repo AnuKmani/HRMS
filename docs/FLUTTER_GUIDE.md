@@ -1,17 +1,20 @@
 # Flutter Guide
 
-> **Status:** Phase 8 — the organisation, auth and attendance slices plus
-> `leave/`, `holidays/`, `timesheet/`, `overtime/`, `site_reports/` and now
+> **Status:** Phase 9 — the organisation, auth and attendance slices plus
+> `leave/`, `holidays/`, `timesheet/`, `overtime/`, `site_reports/`,
 > **`payroll/`, `loans/` and `salary_certificates/`** (the ledger, the run
 > report and its ladder, salary slips handed to the OS viewer, a loan
-> schedule, and a certificate that is asked for, decided and exported), all
-> in the same `data / domain / presentation` shape. `dart format .` clean,
-> `flutter analyze` clean, `flutter test` **378 passed**. This guide explains
-> the concepts and patterns the app uses, written for someone who knows
-> PHP/Laravel but is new to Flutter/Dart. Sections that were written as a plan
-> in earlier phases — the offline queue, the location and camera permission
-> flows, the approval chain, the module permission gates — are now describing
-> shipped code, and say so.
+> schedule, and a certificate that is asked for, decided and exported), and
+> now **`expenses/`** (a claim filed against a date, a category, a place and
+> a project, receipts from the camera, the same approval engine as leave,
+> and money kept as a decimal string from the API to the screen), all
+> in the same `data / domain / presentation` shape. `dart format .` clean
+> (216 files), `flutter analyze` clean, `flutter test` **454 passed**. This
+> guide explains the concepts and patterns the app uses, written for someone
+> who knows PHP/Laravel but is new to Flutter/Dart. Sections that were
+> written as a plan in earlier phases — the offline queue, the location and
+> camera permission flows, the approval chain, the module permission gates —
+> are now describing shipped code, and say so.
 
 ---
 
@@ -536,6 +539,18 @@ with its own sign, so the routes that would have offered an edit simply do
 not exist. GoRouter will 404 them the same way Laravel 404s an unregistered
 path — the absence *is* the rule.
 
+**Phase 9 route table (4 routes):**
+
+| Path | Screen | Notes |
+|---|---|---|
+| `/expenses` | list | draws `NoPermission` and never builds `expenseListProvider` without `expenses.view`; the claim FAB additionally needs `expenses.create` |
+| `/expenses/new` | form | **declared before `/expenses/:id`** — GoRouter matches in declaration order, so the word `new` is read as a literal path instead of arriving at `idOf()` as an id `int.parse` would choke on. Needs `expenses.create`; without it the form draws *"You may not raise an expense claim."* |
+| `/expenses/:id` | detail | gates on `canViewExpenses` *before* the fetch (`NoPermission` rather than a spinner that ends in a refusal); carries the chain, the receipts and the seven transitions |
+| `/expenses/:id/edit` | form | the same form with `expenseId != null`; `initState` gates its load on `expenses.update`, the same permission its `build` checks, so a claim the session may not correct is never downloaded |
+
+`app_router.dart` now holds **58 `GoRoute` entries** — 54 at `8d0e9c2`, plus
+these four.
+
 **Screens navigate with `context.go(...)`, not `context.pop()`.** After a
 save, a detail screen must re-run `initState` to fetch what was just written;
 `pop()` would return to a stale detail still holding the pre-edit model.
@@ -629,6 +644,12 @@ the timekeeping half: `canViewLeaveRequests`, `canCreateLeaveRequests`,
 `canCreateOvertime`, `canApproveOvertime` — every one of them a **getter over
 the same list**, so a permission renamed server-side breaks one line here and
 shows up as a single failing test rather than as scattered string literals.
+Phase 9 added the expense seven the same way: `canViewExpenses`,
+`canCreateExpenses`, `canUpdateExpenses`, `canApproveExpenses`,
+`canManageExpenses`, `canViewExpenseReceipts` — and `canWriteExpenses`, the
+one **derived** getter (`canCreateExpenses || canUpdateExpenses`), so the
+form asks a single question instead of repeating an `||` at both of its
+call sites.
 
 Four properties it is built to hold, each of them under test:
 
@@ -893,6 +914,135 @@ two models and two controllers rather than one of each — the alternative is
 a model with a nullable field for every key the other family has, and a
 `kind:` switch in every screen.
 
+### 12.1 `features/expenses/` — the folder, the screens, the wiring (Phase 9 ✅)
+
+Ten files under the three layers the tree above draws:
+
+```
+mobile/lib/features/expenses/
+├── domain/
+│   ├── expense.dart                 # the claim: status, draft/chain helpers, decimal-string amount
+│   ├── expense_category.dart        # name + the two rules (requires receipt, ceiling)
+│   ├── expense_receipt.dart         # metadata only — never bytes, never a storage path
+│   └── expense_repository.dart      # the contract, shaped like leave and overtime
+├── data/
+│   └── api_expense_repository.dart  # expenseRepositoryProvider — the Dio implementation
+└── presentation/
+    ├── expenses_controller.dart     # expenseListProvider + expenseCategoriesPickerProvider
+    ├── expense_list_screen.dart
+    ├── expense_detail_screen.dart
+    ├── expense_form_screen.dart
+    └── expense_receipt_capture_sheet.dart
+```
+
+**What each one is for:**
+
+| File | Responsibility |
+|---|---|
+| `expense.dart` | The claim. `status` and `isDraft` kept apart from the approval chain, `amount` as a decimal **String**, `needsReceipt` / `receiptLabel` / `statusLabel` read off the row rather than re-derived by a screen |
+| `expense_category.dart` | The two rules a claim must satisfy (`requires_receipt`, `maximum_amount`) plus `ruleSummary`, the sentence the form prints under the picker |
+| `expense_receipt.dart` | Name, MIME, size, `isImage` / `isPdf` — and `canPreview`, because only an image may be drawn inline. **No path, no URL**: the only way back in is the id |
+| `expense_repository.dart` | The contract: `list` · `find` · `create` · `update` · `submit` · `approve` · `reject` · `cancel` · `categories` · `addReceipts` · `receipt` · `removeReceipt`. Same shape as leave and overtime on purpose — expenses run through the *same* approval engine. `reject(id, {required String remarks})` is stricter than its siblings because the server answers `422` without a reason, so the rule lives in the type instead of being rediscovered as a red field. Seven named transition methods, no stringly-typed `act(action)` |
+| `api_expense_repository.dart` | `expenseRepositoryProvider` over `ApiClient`. `categories()` returns a plain `List<ExpenseCategory>` because `GET /expense-categories` is not paginated; `addReceipts` posts **one** multipart key `receipts` carrying a `List<MultipartFile>` (dio's `ListFormat.multi` → a PHP array), filenames `receipt-1.jpg`, `receipt-2.jpg`, … |
+| `expenses_controller.dart` | `expenseListProvider` (a `PagedListController` whose filters are *query parameters* — the server owns the scoping and the totals) and `expenseCategoriesPickerProvider`, whose `fetch` wraps the unpaginated list into a single-page `PageResult` so a "Load more" tile can never appear under four rows |
+| `expense_list_screen.dart` | The list: `NoPermission` before the controller is built without `expenses.view`, a status filter, the claim FAB behind `expenses.create`, and rows drawn with `Money.format` |
+| `expense_detail_screen.dart` | One claim: the amount, the chain, the receipts and every action, each gated on the permission **and** the state — approve / reject only for `canApproveExpenses && isAwaitingDecision`, edit and submit only while draft, cancel only while `isOpen && !canApprove`, receipts added and removed only while draft — and every transition followed by a re-fetch from the server |
+| `expense_form_screen.dart` | Create (`expenses.create`) or correct a draft (`expenses.update`). Deliberately carries **no** status, approval step or employee field, and draws the server's `errors` under the matching inputs |
+| `expense_receipt_capture_sheet.dart` | The shared `CameraCaptureSheet` in this feature's words: back camera, preview, retake, and the description says out loud who will see the slip. Returns the raw JPEG bytes — or `null` if the person backed out |
+
+**Wiring around it:**
+
+- **The home door** — `features/home/home_screen.dart` gains **Expenses**:
+  `Icons.receipt_long_outlined`, label `Expenses`, subtitle *Claims, receipts
+  and approvals*, path `/expenses`, gated on `expenses.view`, placed after
+  Overtime — a different question from overtime's: not "how long did you
+  work?" but "what did you spend, and who signed it off?".
+- **Four routes** — `/expenses`, `/expenses/new`, `/expenses/:id`,
+  `/expenses/:id/edit`, with `/expenses/new` declared **before**
+  `/expenses/:id` (§9).
+- **`RemotePickerField` grows an optional `helper`** —
+  `core/presentation/remote_picker.dart` renders it as `helperText` **only
+  when `errorText == null`**, so a hint never competes with a refusal for the
+  two lines under an input.
+- **`core/data/approval_step.dart` fixes a name it was always missing** —
+  `_personName` now reads `full_name` first and falls back to `name`.
+  `resolved_approver` arrives as an `EmployeeBriefResource`, which spells it
+  `full_name`, so every resolved approver in leave, overtime *and* expenses
+  previously fell through to the generic phrase. One line, three modules.
+- **Receipt capture adds no package** — the sheet runs the existing
+  `CameraCaptureSheet` through `documentCameraProvider` (the same back lens
+  the sick certificate uses). No `file_picker`, no second camera package.
+- **Receipts are read by id, never by URL** — `receipt()` returns bytes
+  through the policy-checked route; images go to an `Image.memory` dialog and
+  PDFs to `pdfOpenerProvider`, which Phase 8 lifted into `core/`.
+
+**The harness these tests stand on:** `test/support/phase9.dart` joins
+`fakes.dart`, `phase4.dart`, `attendance.dart`, `phase6.dart`,
+`site_reports.dart` and `phase8.dart` — `ScriptedExpenses` (records
+`lastTransition` / `lastRemarks` / `lastCreated`, the receipt calls and
+`categoryRows`; the lifecycle verbs are recorded rather than modelled, and
+receipts are the exception because receipt *state* is what two of the tests
+are about), `scopedPhase9(...)` with exactly the permissions under test,
+`phase9Router(...)`, the fixtures `expenseRow` / `expenseCategory` /
+`expenseReceipt`, and re-exports of `advance`, `useTallScreen`,
+`forbidden403`, `notFound404` and `unreachable` from `phase4` so a Phase 9
+test needs one import. Reading a receipt resolves to a **real 1×1 PNG**, so
+the dialog's `Image.memory` decodes instead of failing for a reason unrelated
+to the flow under test.
+
+**The keys those tests drive** — each a `ValueKey` on the widget itself, so a
+finder names the control rather than hunting for its label:
+`expense-status-filter`, `claim-expense`,
+`expense-row-{id}`, `receipt-{id}`, `view-receipt-{id}`, `remove-receipt-{id}`,
+`add-receipt`, `submit-expense`, `edit-expense`, `approve-expense`,
+`reject-expense`, `cancel-expense`, `expense-banner`, `expense-loading`,
+`expense-error`, `expense-form-banner`, `expense-date`, `expense-category`,
+`expense-category-rules`, `expense-amount`, `expense-currency`,
+`expense-description`, `expense-site`, `expense-project`, `save-expense`,
+`receipt-required`.
+
+### 12.2 Money, category rules and the validation boundary (Phase 9 ✅)
+
+**Money is a decimal `String` from the API to the eye.** `Expense.amount`
+is `DECIMAL(12,2)` on the server and arrives as text; `Money.format(value,
+currency:)` is the only printer, and the **domain layer never imports
+presentation** — `expense.dart` knows nothing about `money.dart`. The form
+field is a `LabeledTextField` whose `controller.text` is sent on as
+`'amount': _amount.text.trim()`, not a `double` form field:
+
+| Aspect | Text field holding the string | A `double` field (`double.parse`, `toStringAsFixed`) |
+|---|---|---|
+| What is stored | exactly what the person typed, and exactly what the server sent | a binary approximation of it |
+| Rounding | none — the server already settled the figure | re-rounds on the way in *and* out |
+| Two screens showing one claim | always agree to the cent | disagree the first time a `.005` lands or `system.currency` changes |
+
+**The category rules are a line of text derived from the row, never a rule in
+the form.** `_selectedCategory` reads the picker's row by id and falls back to
+the claim's own copy of the category (so a draft opened on a slow connection
+still says *Needs a receipt*), and `ruleSummary` is printed under the picker
+under the key `expense-category-rules` only when it is non-empty. Nothing in
+the form knows what `requires_receipt` or `maximum_amount` *means*: the API
+re-reads both on create, update and submit, so a ceiling changed on the server
+tonight is what tomorrow's claim is checked against — a hard-coded copy would
+be a rule that stops being true the day the backend changes it.
+
+**The form does not mirror the server's validation** — the house convention
+`fields.dart` exists for. On save:
+
+- `failure.isValidation` (422) → the envelope's `errors` map is dropped onto
+  the matching field's `errorText` (`expense_date`,
+  `expense_category_id`, `amount`, `currency`, `description`, `site_id`,
+  `project_id`) — one line under the input, in the server's own words;
+- anything else → the banner under `expense-form-banner`, with the API's
+  message when it has one;
+- a `403` additionally sets `_forbidden`, which disables **Save**: retrying a
+  refusal the session cannot lift would only earn a second one.
+
+And the gate that precedes all of it runs **twice on purpose**: the form's
+`initState` fetches a draft only under `canUpdateExpenses`, the same
+permission its `build` checks — so a claim the session may not edit is never
+downloaded first and refused a moment later.
+
 ---
 
 ## 13. Running the app
@@ -1040,8 +1190,15 @@ flutter build appbundle         # build an AAB for Play Store
 | Totals-only session never builds a list provider (`currentPayrollQuery()`) | ✅ Phase 8 |
 | Home tiles for the four money doors, each gated on its own permission | ✅ Phase 8 |
 | Router: **33 routes** (Phase 8 added 10 — `/payroll`, `/payroll/:id`, `/salary-slips`, four loan paths, three certificate paths) · no edit or delete path exists for a payroll row | ✅ Phase 8 |
+| `features/expenses/` — 4 domain files · `expenseRepositoryProvider` · `expenseListProvider` + `expenseCategoriesPickerProvider` · list · detail · form · receipt capture sheet (**10 files**, 3 layers) | ✅ Phase 9 |
+| PermissionScope: `canViewExpenses` · `canCreateExpenses` · `canUpdateExpenses` · `canApproveExpenses` · `canManageExpenses` · `canViewExpenseReceipts` (+ derived `canWriteExpenses`) · home door **Expenses** (`Icons.receipt_long_outlined`, `expenses.view`, after Overtime) | ✅ Phase 9 |
+| Router: **58 `GoRoute` entries** — Phase 9 adds 4: `/expenses`, `/expenses/new` (**before** `/expenses/:id`), `/expenses/:id`, `/expenses/:id/edit` | ✅ Phase 9 |
+| `RemotePickerField.helper` (drawn as `helperText` only while `errorText == null`) · `approval_step._personName` reads `full_name` first — resolved approvers in leave, overtime *and* expenses show a name instead of the generic phrase | ✅ Phase 9 |
+| Receipt capture through the existing `CameraCaptureSheet` / `documentCameraProvider` — **no new file-handling package** · one multipart key `receipts` carrying a `List<MultipartFile>` (`ListFormat.multi` → PHP array), filenames `receipt-1.jpg`, `receipt-2.jpg`, … | ✅ Phase 9 |
+| Harness `test/support/phase9.dart` — `ScriptedExpenses` · `scopedPhase9(...)` · `phase9Router(...)` · `expenseRow` / `expenseCategory` / `expenseReceipt` · re-exports from `phase4` | ✅ Phase 9 |
 | `dart format .` | ✅ clean (8 files reflowed in Phase 7) |
 | `flutter analyze` | ✅ clean |
 | `flutter test` | ✅ **378 passed** (303 before Phase 8, +74 in `test/features/{payroll,loans,salary_certificates}/` + `money_test` + the route and home tests, +1 for a partly deducted installment) |
+| **Phase 9 validation summary** — `dart format .` **clean** (216 files) · `flutter analyze` **clean** · `flutter test` **454 passed** (378 before Phase 9, **+76** in `test/features/expenses/` + `test/features/home/home_phase9_test.dart` + `test/app_phase9_routes_test.dart`) | ✅ Phase 9 |
 | Local database (Drift) + relational offline cache | ⬜ Not started — Phase 5 proved the queue does not need it (§10); revisit when a module is genuinely relational |
 | Shared widgets under `core/widgets/` | ⬜ The list and form widgets live in `core/presentation/` today; the split is worth it once a second, differently-shaped widget set appears |

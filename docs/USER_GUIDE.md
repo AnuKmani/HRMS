@@ -1,12 +1,14 @@
 # User Guide
 
-> **Status:** Phase 8 — sign-in, the organisation screens, GPS attendance with
+> **Status:** Phase 9 — sign-in, the organisation screens, GPS attendance with
 > site visits, **leave, the holiday calendar, timesheets and overtime**, the
 > **site activity reports and the official daily site report (with its PDF)**,
-> and now **payroll: the ledger, salary slips, loans and salary certificates**
-> exist and are usable. This guide describes the workflows each role will have
-> once the corresponding phase ships. Sections are marked with the phase that
-> delivers them; ✅ means it is in the app today.
+> **payroll: the ledger, salary slips, loans and salary certificates**, and now
+> **expense claims: filling one in, the receipt from the camera, the two-step
+> approval chain and the filters that find an old claim** exist and are usable.
+> This guide describes the workflows each role will have once the corresponding
+> phase ships. Sections are marked with the phase that delivers them; ✅ means
+> it is in the app today.
 
 ---
 
@@ -300,14 +302,116 @@ fill in:
 your own site is closed. Only HR can add or retire one — there is no delete,
 because a day the year's leave maths already used cannot be quietly erased.
 
-### 3.6 Expenses ⬜ Phase 9
+### 3.6 Expenses ✅ Phase 9
 
-1. Open **Expenses** → **New**
-2. Choose date, project, site, category and amount
-3. Add a description and a photo of the receipt
-4. Submit
+An **expense claim** is money you have already spent on the company's behalf —
+a taxi to the site, materials bought on the road, a meal during a delivery —
+filed with the date, the reason and the **receipt** that proves it. Nothing is
+reimbursed until two people have signed it off: **your supervisor**, then
+**Finance / HR**. Writing the claim is yours; deciding it is theirs.
 
-Track status: *Pending → Approved / Rejected*.
+**Filling one in:**
+
+1. Open **Expenses** on the home screen (the door is drawn for `expenses.view`)
+   → tap **+**
+2. **Date spent** — the money has gone out already, so a future date is refused
+3. **Category** — chosen from the list your company has set up. The moment you
+   pick one, its rules appear in a line under the picker: *Needs a receipt*,
+   *Up to 1000.00*. That line is read from the category itself, so it is the
+   rule rather than a copy of it that could drift
+4. **Amount** and **Currency** — a plain figure and the three-letter code it
+   was charged in; the currency starts at `INR`
+5. **What it was for** — required, in a sentence an approver can act on
+6. **Site** and **Project** — both optional; if you pick a site, the form
+   reminds you the site has to belong to the project you chose
+7. **Save as draft** — you land straight on the claim you just made
+
+There is deliberately no *status*, no *approval step* and no *employee* field.
+A new claim is always a draft, the workflow decides who signs it, and it is
+filed for whoever is signed in — you are never asked to declare your own name
+or where in a process you have not started.
+
+**Attaching the receipt.** On the claim, tap **Photograph a receipt**: the
+**back** camera opens, you take the slip, and the frame is sent as it was
+taken — no file manager, no second app. Receipts can be added and removed
+**only while the claim is a draft**. Tapping one opens it — a photograph in a
+picture, a PDF in your phone's viewer. There is no link to copy or forward: a
+receipt is opened by its id, through the same permission that already governs
+the claim. If the category needs a receipt and there is none, the claim says
+so on the screen while you are still filling it in.
+
+**Submitting.** **Submit** starts the approval chain, and from that moment the
+claim is no longer editable — the chain, not the form, owns what happens next.
+
+**Watching the chain.** The claim draws its two steps, in order:
+
+1. **Your supervisor** — the line manager the claim is routed to
+2. **Finance / HR** — the back office that pays
+
+Approving one step does **not** approve the claim: it only moves the chain to
+the next person, who finds it waiting in their queue.
+
+**What the approver sees.** The amount in figures, the date, the category,
+whose claim it is, the site and project, what it was for, how far the chain
+has come, and the receipts. Reading *somebody else's* receipts is a separate
+permission (`expenses.receipts.view`): a role can be shown the numbers on a
+claim without being handed every invoice behind it. Two buttons, each asking
+for a confirmation first:
+
+| Button | What it does |
+|---|---|
+| **Approve** | Signs your link of the chain and passes it on. Remarks optional |
+| **Reject** | Ends the claim. **Remarks are required** — the dialog will not let you refuse without saying why, and the claimant reads them |
+
+After the answer the screen re-reads the claim from the server, so the status,
+the chain and the receipt count you then see are the outcome, not what the
+button intended. **Nobody approves their own claim**, whatever their role
+permits elsewhere.
+
+**Cancelling.** A draft is yours to throw away, and a claim still waiting can
+be withdrawn — it leaves the chain and no money moves. While a claim is
+waiting *and it is yours to answer*, you are offered **Approve** / **Reject**
+instead of a cancel: the person holding the decision decides, they do not
+withdraw it. Once a claim is **Approved** or **Rejected**, the answer stands —
+there is no un-decide, the same as leave.
+
+**Statuses you will see:**
+
+| Status | Meaning |
+|---|---|
+| Draft | Saved, not submitted — yours to correct, add receipts to, or cancel |
+| Awaiting approval | In the chain; the claim shows who has it now |
+| Approved | Both steps signed |
+| Rejected | Refused, with the remarks that say why |
+| Cancelled | Withdrawn by you before anyone decided |
+
+**Finding an old claim.** The list shows every claim you may read — yours, and
+those your role is allowed to open — as the date and amount, the category,
+the person, the site or project, the status, and how many receipts are
+attached. The **Status** filter narrows it to *All statuses / Draft / Awaiting
+approval / Approved / Rejected / Cancelled*; pull to refresh, and **Load more**
+past the first page. The filter is a question put to the server rather than a
+trim of the rows in front of you, so the *remaining* count behind **Load more**
+describes the filter and not the page you happened to scroll to.
+
+> **Not built yet in this module (Phase 9):**
+>
+> - **No expense-category screen.** The app *reads* the categories your company
+>   has seeded — you may pick one, but nobody can add, rename or retire a
+>   category from the app.
+> - **Camera JPEG only.** A receipt is photographed as a JPEG. The app cannot
+>   capture or produce a PDF; a receipt that already exists as a PDF can be
+>   stored and opened, but not made here.
+> - **No currency conversion.** The amount is claimed in the currency typed —
+>   nothing converts it into another.
+> - **`INR` is a starting value, not a setting.** There is no settings screen
+>   to read your organisation's default currency from, so the field starts at
+>   `INR` and you change it per claim.
+> - **No notifications.** Nothing tells you that a claim is waiting, was
+>   approved or was refused (Phase 11); open the list to see where it stands.
+> - **No audit trail rows for expense decisions.** The chain and the remarks
+>   are the record of who said what; a separate audit-log entry per decision is
+>   not written yet.
 
 ### 3.7 Payslips, loans & salary certificates ✅ Phase 8
 
@@ -556,15 +660,15 @@ writes neither back.
 
 ## 10. Finance
 
-> ✅ Phase 8 (payroll summary, salary slips, loans — read-only) · ⬜ Phase 9 (expenses) · ✅ Phase 6 (payroll-preparation reads)
+> ✅ Phase 8 (payroll summary, salary slips, loans — read-only) · ✅ Phase 9 (expenses) · ✅ Phase 6 (payroll-preparation reads)
 
 - **Read the payroll summary** for any period — counts, gross, deductions,
   net. The summary has **no names in it**: this role sees the shape of a
   month, not the ledger behind it ✅ Phase 8
 - **Read and export salary slips** (`salary_slips.view` + `.manage`) ✅ Phase 8
 - **Read loans** — who owes what and what is left ✅ Phase 8
-- Review and approve **expenses** ⬜ Phase 9
-- Verify receipts ⬜ Phase 9
+- Review and approve **expenses** ✅ Phase 9
+- Verify receipts ✅ Phase 9
 - Access financial reports (payroll summary, expense report)
 - Read **leave balances, working days and approved overtime** without
   approving any of them — the view a payroll preparation needs ✅
@@ -713,6 +817,36 @@ The menu you see is built from your role's permissions. For example:
 | Management | The payroll **summary** through the Payroll door, and no rows behind it |
 | Super Admin | Everything |
 
+**Expense permissions ✅ Phase 9 — and who holds each:**
+
+| Permission | What it lets you do | Held by |
+|---|---|---|
+| `expenses.view` | Open **Expenses**: the list, a claim, and the home door | **10 roles** — Employee, Finance, HR Admin, HR Executive, Management, Payroll Admin, Project Manager, Site Engineer, Site Supervisor, Super Admin |
+| `expenses.create` | Raise a claim, submit it, cancel your own | **7 roles** — Employee, HR Admin, HR Executive, Project Manager, Site Engineer, Site Supervisor, Super Admin |
+| `expenses.update` | Correct a draft | **9 roles** — every `expenses.view` role except Management: Employee, Finance, HR Admin, HR Executive, Payroll Admin, Project Manager, Site Engineer, Site Supervisor, Super Admin |
+| `expenses.approve` | Approve or reject somebody else's claim | **7 roles** — Finance, HR Admin, HR Executive, Payroll Admin, Project Manager, Site Supervisor, Super Admin |
+| `expenses.manage` | The back office — and the grant the chain's second link ("Finance / HR") resolves to | **4 roles** — Finance, HR Admin, Payroll Admin, Super Admin |
+| `expenses.receipts.view` | Read the documents attached to a claim that is **not yours** | The same **7** as `expenses.approve` |
+
+**Reading money, and whose (✅ Phase 9):**
+
+- **Your own claims are always yours to read.** `expenses.view` is the coarse
+  door; *whose* claims appear behind it is the server's answer, not the app's —
+  you read yours, a supervisor reads the claims routed to them, and Finance,
+  HR and Payroll read the ones their scope covers.
+- **Evidence is a separate grant from the figures.** Your own receipts need
+  only `expenses.view`; somebody else's need `expenses.receipts.view`, which
+  Site Engineer deliberately does not hold — a role can be shown the numbers
+  on a claim without being handed every invoice behind it.
+- **Approving is a grant of its own.** `expenses.approve` is never implied by
+  `expenses.create` — the seed gives the two to different roles, so filing a
+  claim never arrives with the power to answer it.
+- **Filing and correcting are two different doors.** Payroll Admin holds
+  `expenses.update` but not `expenses.create` — the back office may correct a
+  line of spend it finds, not open a new one.
+- **Management holds the door and no decisions.** Among the six grants above
+  it holds `expenses.view` alone: claims may be read, never edited or answered.
+
 Four things worth knowing about the new modules:
 
 - **Holidays need no permission to read.** Everyone sees the calendar;
@@ -800,6 +934,6 @@ permission — contact your administrator.
 | **Salary slips (own, on demand)** | **8** | ✅ |
 | **Loans & salary advances** | **8** | ✅ |
 | **Salary certificate requests** | **8** | ✅ |
-| Expenses | 9 | ⬜ |
+| Expenses | 9 | ✅ |
 | Documents, training, assets | 10 | ⬜ |
 | Notifications, dashboards, reports | 11 | ⬜ |

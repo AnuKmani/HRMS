@@ -50,7 +50,13 @@ class RolePermissionSeeder extends Seeder
             'site_activity_reports.view',
             'daily_site_reports.view', 'daily_site_reports.pdf',
             'documents.view', 'documents.manage',
-            'expenses.view',
+            // Expenses: this role both files its own claims (`create` /
+            // `update` mirror `leave.create`) and is the back office for
+            // everybody else's — `.manage` is the permission EXP-STD's
+            // "Finance / HR" link resolves to, and `.approve` is what gets
+            // it past the route's coarse gate to reach that link.
+            'expenses.view', 'expenses.create', 'expenses.update',
+            'expenses.approve', 'expenses.manage', 'expenses.receipts.view',
             'settings.view', 'settings.manage',
             'roles.view',
             'users.view',
@@ -80,6 +86,12 @@ class RolePermissionSeeder extends Seeder
             'daily_site_reports.view', 'daily_site_reports.pdf',
             'documents.view', 'documents.manage',
             'settings.view',
+            // Files her own claims and is told who each one is waiting on,
+            // but is not the financial sign-off: `.manage` is withheld, so
+            // the last link of EXP-STD (`permission: expenses.manage`) is
+            // never hers to answer.
+            'expenses.view', 'expenses.create', 'expenses.update',
+            'expenses.approve', 'expenses.receipts.view',
             // Own loans and own certificate requests only. Deliberately no
             // `payroll.view`, `salary_slips.*` or `loans.approve`: this role
             // runs the roster without seeing what anyone is paid, exactly as
@@ -111,7 +123,16 @@ class RolePermissionSeeder extends Seeder
             'salary_slips.view', 'salary_slips.manage',
             'salary_certificates.view', 'salary_certificates.manage',
             'loans.view', 'loans.create', 'loans.approve', 'loans.manage',
-            'expenses.view', 'expenses.manage',
+            // A consumer of claims, not a filer of them — the same read-only
+            // stance this role takes on leave and timesheets. `.update` is
+            // not "may file a claim" (that is `.create`, withheld) but the
+            // counterpart of `.manage`: the policy lets a manager correct a
+            // draft, and the route has to let them reach it.
+            // `.approve` is for the last link of EXP-STD, which resolves
+            // `permission: expenses.manage` and is held by this role,
+            // HR Admin and Finance.
+            'expenses.view', 'expenses.update', 'expenses.approve',
+            'expenses.manage', 'expenses.receipts.view',
             'reports.view', 'reports.export',
             'documents.view',
             'settings.view',
@@ -135,7 +156,12 @@ class RolePermissionSeeder extends Seeder
             'daily_site_reports.view', 'daily_site_reports.create', 'daily_site_reports.update',
             'daily_site_reports.manage', 'daily_site_reports.pdf',
             'documents.view',
-            'expenses.view', 'expenses.approve',
+            // Files their own claims like anyone else, and acts on the
+            // supervisor link of a chain for the team they manage — never
+            // the financial sign-off, which `.manage` withholds from this
+            // role along with everything else payroll-shaped.
+            'expenses.view', 'expenses.create', 'expenses.update',
+            'expenses.approve', 'expenses.receipts.view',
             // A loan is about *their own* pay, not anyone else's, so the
             // self-service door opens here too. Nothing in `payroll.*` is
             // granted - see the spec's "no payroll visibility by default"
@@ -157,6 +183,10 @@ class RolePermissionSeeder extends Seeder
             'daily_site_reports.view', 'daily_site_reports.create', 'daily_site_reports.update',
             'daily_site_reports.pdf',
             'documents.view',
+            // Claims are self-service exactly like leave is: read the door,
+            // file your own, edit your own draft — never approve, because
+            // this role is not an approver step on any chain that ships.
+            'expenses.view', 'expenses.create', 'expenses.update',
             'loans.view', 'loans.create',
         ],
 
@@ -182,6 +212,14 @@ class RolePermissionSeeder extends Seeder
             'daily_site_reports.view', 'daily_site_reports.create', 'daily_site_reports.update',
             'daily_site_reports.pdf',
             'documents.view',
+            // As above, plus `.approve`: a supervisor is the
+            // `reporting_manager` link of EXP-STD, so they need the coarse
+            // gate on POST /expenses/{id}/approve to even reach the policy
+            // that asks whether they are *this* claim's current approver.
+            // `.receipts.view` follows, because approving a claim without
+            // being able to open the evidence behind it is not approval.
+            'expenses.view', 'expenses.create', 'expenses.update',
+            'expenses.approve', 'expenses.receipts.view',
             'loans.view', 'loans.create',
         ],
 
@@ -205,7 +243,16 @@ class RolePermissionSeeder extends Seeder
             'leave.view', 'leave.balance.view',
             'timesheets.view',
             'overtime.view',
-            'expenses.view', 'expenses.approve', 'expenses.manage',
+            // The consumer, and the sign-off: `.manage` is the permission
+            // EXP-STD's "Finance / HR" link resolves to, `.approve` is the
+            // route gate in front of it, `.update` is the counterpart that
+            // lets the same policy right reach the endpoint, and
+            // `.receipts.view` is what makes the evidence behind a claim
+            // openable to the people paying it. Deliberately no
+            // `.create`: this role does not file claims of its own, the
+            // way it does not file leave either.
+            'expenses.view', 'expenses.update', 'expenses.approve',
+            'expenses.manage', 'expenses.receipts.view',
             'reports.view', 'reports.export',
             'documents.view',
             'audit.view',
@@ -234,6 +281,11 @@ class RolePermissionSeeder extends Seeder
             'site_activity_reports.view',
             'daily_site_reports.view', 'daily_site_reports.pdf',
             'documents.view',
+            // Deliberately `.view` and nothing else. Management reads
+            // expense records but does not file them, does not approve them
+            // and does not open the receipts attached to them — read-only is
+            // the whole of this role's access to the module, and Visibility
+            // narrows even that read to its own rows.
             'expenses.view',
             'audit.view',
         ],
@@ -269,6 +321,15 @@ class RolePermissionSeeder extends Seeder
             'site_activity_reports.create',
             'site_activity_reports.update',
             'documents.view',
+            // Their own claims, and nothing else. `expenses.view` is the
+            // coarse gate that lets GET /expenses through at all —
+            // Visibility then narrows every row to their own, because this
+            // role holds neither `expenses.manage` nor `expenses.approve`.
+            // `.create` / `.update` are filing and correcting a draft of
+            // their own; `.approve` is deliberately absent, because nobody
+            // signs off on their own spend. Their own receipts read back
+            // through ownership, so `expenses.receipts.view` is not needed.
+            'expenses.view', 'expenses.create', 'expenses.update',
             // Their own pay, their own loans, their own certificates - the
             // three doors an employee needs to answer "what am I paid?" for
             // themselves. `payroll.view` is granted for exactly the same

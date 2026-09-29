@@ -1,7 +1,8 @@
 # Security
 
-> **Status:** Phase 8 — authentication, rate limiting, the password policy, a
-> **70-permission** catalogue, row-level policies (22 of them), GPS attendance
+> **Status:** Phase 9 — authentication, rate limiting, the password policy, a
+> **73-permission** catalogue, row-level policies (22 at Phase 8, plus
+> `ExpensePolicy`), GPS attendance
 > controls (server-authoritative geofence, private selfie storage, location and
 > camera permissions), server-side selfie sanitisation (§4.3), the approval and
 > leave controls (no self-approval, current-step-only decisions, private
@@ -9,15 +10,21 @@
 > authorship and derived project on every report, private re-encoded report
 > photographs behind their own policy (§4.5), a server-rendered PDF that is
 > never stored (§4.6), and a submit-time GPS reading the server validates
-> rather than trusts — and now the **payroll vertical slice**: a one-way money
+> rather than trusts — the **payroll vertical slice**: a one-way money
 > ladder with `payroll.lock` held by one role, salary figures that are
 > `DECIMAL` and formatted in exactly one place, a loan schedule that can be
 > taken only once and never below the configurable **net-salary floor**,
 > carry-forward of any repayment that would not fit, and salary slips and
 > certificates rendered on demand with nothing stored and nothing to link to
-> (§4.7). Transport hardening and audit
-> logging remain phased ahead (§5, §8). Individual controls are marked with
-> their phase below.
+> (§4.7) — and now the **expense vertical slice**: three new permissions
+> (**73 in all, 364 grants**), `expenses.manage` held by four roles rather
+> than granted broadly, an `ExpensePolicy` that fails closed to your own
+> claims, five statuses (`draft → pending → approved | rejected | cancelled`)
+> reachable only through `ExpenseService`, a figure a client sends treated as
+> a suggestion and re-validated on the server (§6), and receipt files on
+> private storage whose path never leaves the API (§4.8). Transport hardening
+> and audit logging remain phased ahead (§5, §8). Individual controls are
+> marked with their phase below.
 
 ---
 
@@ -98,8 +105,8 @@ Two layers, both mandatory:
 
 ### 3.1 Permission layer (`spatie/laravel-permission`)
 
-**Implemented in Phase 2 ✅, extended in Phases 4–8** — `spatie/laravel-permission`
-**^6.25**, 10 roles, **70 permissions**, **332 grants**. Phase 4 added
+**Implemented in Phase 2 ✅, extended in Phases 4–9** — `spatie/laravel-permission`
+**^6.25**, 10 roles, **73 permissions**, **364 grants**. Phase 4 added
 `employees.salary.view`; Phase 5 granted the existing `attendance.view` to the
 `Employee` role so a person can read back the day they recorded; Phase 6 added 11
 (`approvals.view/manage`, `leave.balance.view/manage`, `holidays.manage`,
@@ -110,7 +117,11 @@ Two layers, both mandatory:
 (`loans.{view,create,approve,manage}`, `salary_slips.{view,manage}`,
 `salary_certificates.{view,manage}`, and the three payroll verbs that
 `payroll.view`/`payroll.manage` could not express — `payroll.process`,
-`payroll.lock`, `payroll.summary.view`).
+`payroll.lock`, `payroll.summary.view`); **Phase 9 added 3**
+(`expenses.create`, `expenses.update`, `expenses.receipts.view` — the three
+verbs the pre-existing `expenses.view`/`expenses.approve`/`expenses.manage`
+could not express), taking the catalogue **70 → 73** and the grant map
+**332 → 364**.
 
 > **Version pin matters:** v7/v8 of this package require PHP `^8.3`. This environment
 > runs **PHP 8.2.4**, so Composer correctly resolves to **6.25.0** (supports Laravel
@@ -146,6 +157,7 @@ assignments.view      assignments.manage
 reports.view          reports.export
 documents.view        documents.manage
 expenses.view         expenses.approve     expenses.manage
+expenses.create       expenses.update      expenses.receipts.view
 settings.view         settings.manage
 roles.view            roles.manage
 users.view            users.manage
@@ -218,6 +230,43 @@ Route::middleware(['auth:sanctum', 'permission:payroll.manage'])
 Verified by `RbacTest`: an authorized user gets `200`, a user with the wrong role gets
 `403`, and an unauthenticated caller gets `401` — before any controller code runs.
 
+### 3.1a Expense permissions — ✅ Phase 9
+
+Three verbs join the catalogue on top of the three that already existed:
+`expenses.view`, `expenses.approve` and `expenses.manage` were Phase 2
+inventory; **Phase 9 added `expenses.create`, `expenses.update` and
+`expenses.receipts.view`**, for **73 permissions / 364 grants** in all.
+
+| Permission | Roles holding it (of 10) |
+|---|---|
+| `expenses.view` | Employee, Finance, HR Admin, HR Executive, Management, Payroll Admin, Project Manager, Site Engineer, Site Supervisor, Super Admin — **10** |
+| `expenses.create` | Employee, HR Admin, HR Executive, Project Manager, Site Engineer, Site Supervisor, Super Admin — **7** |
+| `expenses.update` | every `expenses.view` role except Management — **9** |
+| `expenses.approve` | Finance, HR Admin, HR Executive, Payroll Admin, Project Manager, Site Supervisor, Super Admin — **7** |
+| `expenses.manage` | Finance, HR Admin, Payroll Admin, Super Admin — **4** |
+| `expenses.receipts.view` | the same seven as `expenses.approve` |
+
+Two edges of that matrix are deliberate:
+
+- **`expenses.manage` is not granted broadly.** Four roles only. It is the
+  back-office verb — push somebody else's claim through, withdraw it, correct
+  a draft, attach or remove evidence — and the permission EXP-STD's second
+  link resolves (`permission: expenses.manage`), so holding it means "I may
+  answer the finance link", not "I may read every claim" (that is
+  `expenses.view` narrowed by the policy, below).
+- **Project Manager may approve its own scope but is excluded from the
+  `permission: expenses.manage` link.** It sits in the seven-role
+  `expenses.approve` row, so a Project Manager holding the chain's current
+  step can sign it; it is absent from the four-role manage row, so the same
+  person can never satisfy a step written as `permission: expenses.manage`.
+  Management, at the other edge, is read-only: it holds `expenses.view` and
+  deliberately not `create` or `update`.
+
+The split between `expenses.view` and `expenses.receipts.view` is the same
+one §4.6 draws for `.pdf`: being shown the numbers of a claim and being
+handed the invoice behind it are different acts, so they are different
+grants.
+
 ### 3.2 Resource layer (Policies)
 
 Permissions answer *"may this role do X?"*. Policies answer *"may this user do X to
@@ -243,6 +292,7 @@ Permissions answer *"may this role do X?"*. Policies answer *"may this user do X
 | `TimesheetPolicy` | list/read with `timesheets.view` under the shared visibility scope; **no `update`, no approval ability** |
 | `OvertimeRequestPolicy` | list/read, create, edit a draft, `submit`, `cancel`, `approve`/`reject` |
 | `ApprovalWorkflowPolicy` | read (`approvals.view`) / configure (`approvals.manage`) |
+| `ExpensePolicy` | list/read (row-scoped), create, edit/submit/cancel a claim, `approve`/`reject`, and the receipt trio `viewReceipt` / `storeReceipt` / `deleteReceipt` |
 
 `EmployeePolicy::view` is the reason `GET /employees/{id}` carries **no**
 `permission:` middleware: an ordinary employee holding no `*.view` permission
@@ -311,7 +361,7 @@ Three rules the Phase 6 policies encode:
 — you may file for a request you may already read, and only while it can
 still accept one. The upload itself is bounded by §4.2.
 
-**Status:** ✅ Permission layer live (Phase 2) · ✅ Permission-gated routes since Phase 3 · ✅ Policies for the Phase 4 modules (Phase 4) · ✅ Attendance + site-visit policies (Phase 5) · ✅ Leave / balance / leave-type / holiday / timesheet / overtime / approval-workflow policies (Phase 6) · ✅ **Site activity report + daily site report policies with `App\Support\Visibility` row scoping (Phase 7)** · ✅ **Payroll / allowance / payroll-adjustment / loan / salary-certificate policies (Phase 8)** · ⬜ Employee-document and expense policies in their own phases
+**Status:** ✅ Permission layer live (Phase 2) · ✅ Permission-gated routes since Phase 3 · ✅ Policies for the Phase 4 modules (Phase 4) · ✅ Attendance + site-visit policies (Phase 5) · ✅ Leave / balance / leave-type / holiday / timesheet / overtime / approval-workflow policies (Phase 6) · ✅ **Site activity report + daily site report policies with `App\Support\Visibility` row scoping (Phase 7)** · ✅ **Payroll / allowance / payroll-adjustment / loan / salary-certificate policies (Phase 8)** · ✅ **Expense + expense-receipt policies (`ExpensePolicy`, Phase 9)** · ⬜ Employee-document policies in their own phase
 
 > **Scope note:** permissions are a *coarse gate*. Row scoping belongs to the
 > policy, and for the modules that exist today that split is wired: every Phase
@@ -327,6 +377,45 @@ still accept one. The upload itself is bounded by §4.2.
 > is what proves it: a listed supervisor who runs no site gets their own rows
 > and nobody else's.
 
+### 3.2a Expense policies — ✅ Phase 9
+
+`ExpensePolicy` answers the same two questions every policy here answers —
+*who* and never *state* — with three groups of rule:
+
+- **Filing.** `viewAny` needs `expenses.view` and the rows are narrowed by
+  `Visibility::expenseIsVisible`; `create` needs `expenses.create` **and** an
+  employee record; `update`, `submit` and `cancel` are "yours, or anybody's
+  with `expenses.manage`". Whether a claim may still be edited, submitted or
+  withdrawn is `ExpenseService`'s `409` naming the state — the policy never
+  hands "This action is unauthorized" to what is really "Only a draft claim
+  can be edited."
+- **Deciding.** `approve` — and `reject`, which reuses it — needs all four of:
+  `expenses.approve`; the claim actually `pending` (**not** merely undecided —
+  a decided claim is a `403` here and a `409` at the service); **not the
+  caller's own claim**, whoever the chain resolved to; and
+  `ApprovalWorkflowService::actorMatchesCurrent`, so the caller is the
+  resolved approver of the *current* link. A supervisor's scope comes from
+  `Visibility::expenseIsVisible` / `directReportIds`, which is why a Site
+  Supervisor holding the grant is still refused on a claim whose line manager
+  is somebody else — same role, same permission, one step to answer, not
+  theirs. A refusal, additionally, demands a reason: `ActOnExpenseRequest`
+  makes `remarks` required server-side, and Flutter mirrors it in
+  `reject(id, {required String remarks})`, so an empty rejection never
+  reaches the chain.
+- **Evidence.** `viewReceipt` first requires the receipt to belong to the
+  claim being named, then answers "own claim, or `expenses.receipts.view`
+  **and** read access to that claim". `storeReceipt`/`deleteReceipt` mirror
+  `update` — your own draft, or anybody's with `expenses.manage` — leaving
+  the draft-only question to the service's `409`.
+
+Reading fails closed to *your own*, exactly as payroll and loans do and
+deliberately unlike leave and overtime: a claim against the company's money
+gets the tighter answer (`Visibility::mayViewOthersExpenses()`), so
+`expenses.view` alone is "my claims", never "everybody's".
+
+**Status:** ✅ **Expense + expense-receipt policies live (Phase 9)** — one
+policy file, ten abilities, row scope from `App\Support\Visibility`.
+
 ---
 
 ## 4. File Storage Security
@@ -341,7 +430,8 @@ backend/storage/app/private/
 ├── attendance-selfies/{employeeId}/{uuid}.{jpg|png|webp}   ← Phase 5
 ├── documents/employees/
 ├── documents/payroll/
-└── reports/
+├── reports/
+└── expense-receipts/{expenseId}/{uuid}.{jpg|png|webp|pdf}  ← Phase 9
 ```
 
 `storage/app/private` has no `/storage/...` URL and no directory listing, so
@@ -420,7 +510,7 @@ denied when it should be, but the fact of the read is not persisted.
 
 **Status:** ✅ Phase 5 (selfie) · ✅ selfie sanitisation (this pass) ·
 ✅ certificates (§4.4) · ✅ **report photographs (§4.5) and the report PDF
-(§4.6)** · ⬜ Phase 9 (employee documents) · ⬜ audit/security phase
+(§4.6)** · ✅ **expense receipts (§4.8)** · ⬜ Phase 9 (employee documents) · ⬜ audit/security phase
 
 ### 4.4 Certificates — ✅ Phase 6 (medical documents)
 
@@ -516,6 +606,37 @@ the one line a log file should never contain.
 
 **Audit logging is still not implemented** for these reads — §8/§13.
 
+### 4.8 Expense receipts — ✅ Phase 9
+
+Evidence behind a claim for money gets the certificate's shape (§4.4) rather
+than the selfie's: validated, never re-encoded, on the private disk,
+reachable only through its own policy-checked route.
+
+| Layer | What it does | Why it exists |
+|---|---|---|
+| `StoreExpenseReceiptsRequest` | `mimes` + `mimetypes` + `max` read from `HRMS_EXPENSE_RECEIPT_MAX_KB` (5120 KB) **plus** the shared `CertificateContent` content rule; 1–6 files per batch | JPEG/PNG/PDF validated on MIME, extension, size **and** content — `mimes` and `mimetypes` both read the *name*, so three kilobytes of HTML named `note.pdf` passes both and is refused by the content rule underneath them |
+| `ExpenseReceiptStore` | the **only writer**; mints `expense-receipts/{expenseId}/{uuid}.{ext}` on the `local` disk and re-runs the same accept-check before writing | The client's filename — and anything path-like inside it — is discarded, so `../../evil.php` cannot be expressed even if validation were bypassed; a storage layer that trusts a validation layer is waiting for an upload bug |
+| `ExpenseReceiptResource` | `id, expense_id, original_name, mime_type, size_bytes, is_image, is_pdf, url, uploaded_by, created_at` — and nothing else | **No storage path and no file URL ever leaves the API.** `url` is the id-based route `/api/v1/expenses/{e}/receipts/{r}`, not a link to a file; `uploaded_by` is the **user** id, not an employee row |
+| The read route | `GET /api/v1/expenses/{expense}/receipts/{receipt}` behind `ExpensePolicy::viewReceipt`, `Cache-Control: no-store`, `Content-Disposition: attachment` | The bytes are fetched through that policy-checked route — own claim, or `expenses.receipts.view` *and* read access to the claim — and served as a download a browser does not render inline next to somebody else's session |
+| Ceilings | 5120 KB per file, 6 per request, **10 per claim** | A claim is a folder with a lid: the byte ceiling bounds one request, the count bounds what a single claim can end up carrying |
+| Database | row metadata only — **no file bytes in any column** | The row is a note about a file; storing the file would put the disclosure question in a place no policy visits |
+| Logging | no path, no filename and no receipt content in any log line | Same rule as salary (§4.7): a receipt is a named person's invoice, and "who uploaded what" belongs in the audit phase (§8), not in a log file today |
+
+Two things this section is careful **not** to say: there is no public URL
+and no signed URL (a signed URL is a bearer secret with a lifetime, and it
+would put the storage layout into a link that outlives the permission that
+issued it), and nothing is re-encoded — unlike a selfie, a receipt must stay
+the document it was, because a re-encoded PDF stops opening. What *is*
+stripped is the client's filename, the one piece of metadata this app itself
+creates.
+
+Receipts are never committed to Git: they live under
+`backend/storage/app/private/`, and the root `.gitignore` ignores
+`/backend/storage/app/private/*` outright, alongside everything in §9.
+
+**Audit logging is still not implemented** for reads of these files —
+§8/§13.
+
 ---
 
 ## 5. Transport Security
@@ -544,6 +665,7 @@ the one line a log file should never contain.
 | A report naming its own author | No `employee_id` or `created_by` key is read from any Phase 7 request; both are taken from the bearer token. `project_id` is accepted only when it owns the stated `site_id`, and the service writes `$site->project_id` anyway |
 | A report un-filing itself | There is no `status` key in any report body. `draft → submitted` is a route, and editing a filed report answers `409` |
 | A fix that cannot exist | `latitude`/`longitude`/`gps_accuracy` are all-or-nothing, `Geo::isValidCoordinate` rejects `(0,0)` and non-finite values, and the ceiling reuses `hrms.attendance.max_gps_accuracy_metres` |
+| An expense figure, currency, date or category ceiling taken on trust | `StoreExpenseRequest` re-validates `amount` (`numeric`, `> 0`, `<= 99999999.99`), `currency` (`size:3`, alpha) and `expense_date` (`before_or_equal:today`), and the service re-reads the category's `maximum_amount`; `employee_id` and `status` are **`prohibited`**, so "file one for a colleague" answers `422` rather than being quietly ignored |
 
 **Status:** ✅ Auth endpoints since Phase 3 (`LoginRequest`, `ChangePasswordRequest`,
 `PasswordResetRequest`), mass assignment closed on every model · ✅ Phase 4 write
@@ -564,6 +686,8 @@ concerns)** ·
 `Store/UpdatePayrollAdjustmentRequest`, `ActOnPayrollAdjustment`,
 `Store/UpdateLoanRequest`, `ActOnLoan`, `Store/ActOnSalaryCertificateRequest`
 — eleven in all)** ·
+✅ **Phase 9 writes (`StoreExpenseRequest`, `UpdateExpenseRequest`,
+`ActOnExpenseRequest`, `StoreExpenseReceiptsRequest` — four in all)** ·
 ⬜ one per write endpoint as later modules land
 
 The Phase 7 set is worth naming for one habit it establishes: **the update
@@ -589,6 +713,21 @@ a field nobody should be able to assert.
 cannot be pointed at a different person or place by an edit.
 `StoreEmployeeRequest` rejects `photo_path` and `user_id` outright — neither
 is a client-supplied field.
+
+**Server-side money validation — ✅ Phase 9.** The figure a client sends is
+a suggestion. `StoreExpenseRequest` re-validates amount, currency and date,
+and the category ceiling is re-read from `expense_categories` on create, on
+update **and again at submit** — so lowering a ceiling after a draft was
+written still refuses that draft's amount (`422` on `amount`, status left
+`draft`) rather than grandfathering what was typed when the rule was looser.
+Money is a decimal string end to end: `DECIMAL(12,2)` and
+`App\Support\Money`, never a float or a double, and `100.999` lands as
+`'101.00'` because the column, not the payload, is the record. Identity and
+lifecycle stay on the server too: the claimant always comes from the
+authenticated user, and `employee_id` and `status` are **`prohibited`** in
+`StoreExpenseRequest` — a `422` with an `errors` map, not a silently dropped
+key the client believes it set. Nothing in the slice writes a financial
+figure or a receipt's contents to a log line (§4.7's rule, applied).
 
 ---
 
@@ -634,6 +773,17 @@ none of them is a device in a field) and by the one-way ladder, which makes
 a repeat call cost `updated: 0` rather than a second recalculation. That is
 the shape the general API limiter should eventually take: a config line in
 `config/rate_limiting.php`, not a permanent refusal.
+
+**Phase 9 added no limiter either — deliberately.** None of the 13 new
+`expense` routes carries a `throttle:` (verified: the only limiters on
+`routes/api.php` remain `login`, `password_reset` and `attendance`), and
+every one is behind `auth:sanctum` + a permission + `ExpensePolicy`. The one
+resource a client can actually consume is the upload, and it is bounded
+structurally: 5120 KB per file, 6 per request, 10 per claim (§4.8). The
+decision routes are bounded by *who may call them* — `expenses.approve` is
+held by seven roles, `expenses.manage` by four — and by the state machine,
+where a repeated approve costs a `403` and a second write never happens
+(§3.1a, §3.2a).
 
 On breach → `429` in the standard envelope with `Retry-After`, rendered by the
 exception handler rather than by a per-limiter `Limit::response()` callback, so
@@ -722,6 +872,20 @@ columns are *attribution*, not an audit trail — they tell you who last
 touched a row, not who changed what across time — and the distinction is
 recorded here rather than blurred by shipping a table that only half the
 writes visit.
+
+**Phase 9 added a fourth, and refused to fake it, too.** "Expenses —
+approval / rejection" sits in the table above and no activity row is written
+when a claim is submitted, approved, refused or cancelled. What the slice
+*did* leave is the same one-call-deep structure: every transition runs inside
+a named `ExpenseService` method wrapped in a DB transaction, each decision is
+already durable in `approval_records` (who, which step, when, with what
+remark) for `ApprovalRecord::TYPE_EXPENSE`, and each row stamps
+`submitted_at` / `approved_at` / `rejected_at` / `cancelled_at` plus
+`final_approved_by`. Those columns are attribution, not an audit trail — and
+no financial figure and no receipt content is logged anywhere in the slice
+(§4.8) — so the append-only *who-changed-it* log and the read trail stay in
+the dedicated audit/security phase (§13) rather than being half-shipped
+here.
 
 ---
 
@@ -890,7 +1054,7 @@ Enforced by `Password::min(8)->letters()->numbers()` on both
 HR Admin, HR Executive, Project Manager, Site Engineer, Site Supervisor and
 Management, and by neither Payroll Admin, Finance nor `Employee`; 8 new permissions (59 total / 278 grants); submit-time GPS with a `(0,0)`/non-finite/accuracy-ceiling check; **deliberately no new rate limiter (§7)**. **Not delivered: report audit rows — still outstanding (§8)** |
 | 8 | **Payroll, loans & salary documents** — 36 routes, each behind `permission:` **and** a policy; a one-way money ladder (`draft → calculated → reviewed → processed → locked`) with no reverse and no delete, so no permission authorises a capability the services refuse; `payroll.lock` held by **Payroll Admin alone**, `payroll.process` by three roles, `payroll.summary.view` returning totals with **no names**; every figure `DECIMAL(12,2)` and printed by one formatter (§5 of ARCHITECTURE), no float column anywhere; salary-slip and certificate PDFs rendered on demand behind `no-store` with **no stored file, no path and no URL** (§4.7); loan schedule minted at approval with a `payroll_id` on every installment it takes, so a run cannot take a payment twice; `employee_id` required on create and prohibited on update; salary never present in an employee resource or a log line; 11 new permissions (**70 total / 332 grants**), 5 new policies (22 total), 3 new settings (16 total); **deliberately no new rate limiter (§7)**. **Not delivered: payroll and salary-document audit rows — still outstanding (§8), and the UAE/statutory overtime rate is a generic multiplier, not a validated statutory configuration** |
-| 9 | Expenses — workflow approval, receipt files on private storage, own-only salary access |
+| 9 | **Expense claims & receipts** — 13 new routes under `expense`, each behind `permission:` **and** `ExpensePolicy`; the claimant always from the authenticated user, with `employee_id` and `status` **`prohibited`** in `StoreExpenseRequest` (`422`, never silently ignored); statuses `draft → pending → approved \| rejected \| cancelled` reachable only through `ExpenseService`, every transition in a DB transaction, an illegal transition `409` and a field failure `422` with an `errors` map; money a decimal string end to end (`DECIMAL(12,2)`, `App\Support\Money`), amount `numeric`, `> 0`, `<= 99999999.99`, re-validated at the request **and** against the category ceiling at create, update and submit; the site must belong to the named project *and* to somewhere the claimant is placed; approval chain `ApprovalWorkflow::SUBJECT_EXPENSE` with seeded `EXP-STD` (step 1 `reporting_manager`, step 2 `permission: expenses.manage`), no self-approval, current-link-only, one decision per link; receipts on private storage at `expense-receipts/{expenseId}/{uuid}.{ext}` behind `viewReceipt`, MIME/extension/size/content validated, **no storage path and no file URL in any response** (`url` is the id-based route), 5120 KB and 10 per claim, `ExpenseReceiptStore` the only writer; 3 new permissions (**73 total / 364 grants**) and 1 new policy; **deliberately no new rate limiter (§7)**. **Not delivered: expense decision audit rows — still outstanding (§8)** |
 | 10 | Employee documents, onboarding, training, assets; daily-report approval (`approved_at` is created and reserved) |
 | 11 | Notifications/FCM, dashboards, exports — planned |
 | 12 | Full security audit, penetration-style test pass, deployment hardening |

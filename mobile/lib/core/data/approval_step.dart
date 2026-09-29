@@ -99,7 +99,11 @@ class ApprovalStep {
 
 String? _personName(Object? raw) {
   if (raw is Map<String, dynamic>) {
-    final name = raw['name'];
+    // `full_name` first: `resolved_approver` is an `EmployeeBriefResource`,
+    // and a brief spells it that way. Reading only `name` found nothing
+    // there, so every resolved approver fell through to the generic phrase
+    // below — the one part of the chain a claimant actually wanted answered.
+    final name = raw['full_name'] ?? raw['name'];
     if (name is String && name.isNotEmpty) return name;
   }
   return null;

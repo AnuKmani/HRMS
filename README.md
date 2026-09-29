@@ -188,7 +188,7 @@ Access is controlled by **roles** *and* **granular permissions**. Hiding a butto
 
 Example permissions: `employees.view`, `employees.create`, `attendance.manage`, `leave.approve`, `payroll.manage`, `sites.manage`, `audit.view`.
 
-**Implemented:** **70 permissions** (332 role grants), all named
+**Implemented:** **73 permissions** (364 role grants), all named
 `resource.action`, seeded by `RoleSeeder` + `PermissionSeeder` +
 `RolePermissionSeeder`. Super Admin holds every permission; each other role
 is an explicit allow-list, so anything absent is denied.
@@ -199,7 +199,10 @@ and retired `leave.request` in favour of `leave.create`; Phase 7 added the
 eight site-report permissions; **Phase 8 added eleven** —
 `loans.{view,create,approve,manage}`, `salary_slips.{view,manage}`,
 `salary_certificates.{view,manage}` and the three payroll verbs
-`payroll.process`, `payroll.lock`, `payroll.summary.view`.
+`payroll.process`, `payroll.lock`, `payroll.summary.view`; **Phase 9 added
+three** — `expenses.create`, `expenses.update` and `expenses.receipts.view`
+(the other three `expenses.*` gates, `view`, `approve` and `manage`, already
+existed), taking the catalogue to 73 and the grants to 364.
 See [`docs/SECURITY.md`](docs/SECURITY.md) §3.1 for the full catalogue and the
 middleware used to enforce it server-side.
 
@@ -559,7 +562,7 @@ through `AttendanceStatusCalculator`, `WorkingTimeCalculator`,
 >    can, and are passed through unclamped on purpose: they describe work
 >    that was or was not done.
 >
-> **Still deliberately not built:** expenses, employee documents, onboarding,
+> **Still deliberately not built:** employee documents, onboarding,
 > training, assets, FCM notifications and full audit logging — plus
 > statutory (UAE) overtime configuration **and any statutory reading of the
 > net-salary floor**, which must be validated before production.
@@ -599,6 +602,59 @@ route, a permission or a policy.
 > production), and audit logging — every payroll/loan mutation already runs
 > through a service method, which is where that log will attach.
 
+### ✅ Phase 9 — Expense management (COMPLETE)
+
+The claims half of the money story: an employee files what they spent
+against a project and a site, attaches the receipt, and the claim runs the
+**same approval engine as leave and overtime** on a new `expense` subject —
+step 1 the reporting manager, step 2 Finance/HR. Money is a **decimal string
+end to end** (`DECIMAL(12,2)`, `App\Support\Money`, `Money::round()`), never a
+float, and nothing here computes payroll: a claim records what was spent, it
+does not price it.
+
+**Backend**
+
+| Deliverable | Status |
+|---|---|
+| **3 migrations · 44 total · 51 tables · all `Ran`** — `expense_categories`, `expenses`, `expense_receipts` | ✅ |
+| **6 seeded categories** (`ExpenseCategorySeeder`) carrying the two rules a claim must honour — `requires_receipt` and `maximum_amount` (null = no ceiling) — read by the form *and* re-checked by `ExpenseService` on create, update and submit, so a screen that never showed the rule cannot get past it | ✅ |
+| `ExpenseService` is the only writer of status: `draft → pending → approved \| rejected \| cancelled`, each of submit / approve / reject / cancel inside a DB transaction and **no direct status writes anywhere**; field failures → **422** with an `errors` map, illegal transitions → **409** with a `message` that names the state | ✅ |
+| Identity is never a field — `employee_id` and `status` are **prohibited** in `StoreExpenseRequest`; the claimant comes from the bearer token, and site↔project consistency plus the claimant's posting/assignment are enforced server-side (`Visibility::mayClaimExpenseAt()`) | ✅ |
+| Workflow: `ApprovalWorkflow::SUBJECT_EXPENSE` + `ApprovalRecord::TYPE_EXPENSE`, `ApprovalWorkflowService` union widened to `LeaveRequest\|OvertimeRequest\|Expense`, seeded **EXP-STD** — step 1 "Standard expense approval" (`reporting_manager`), step 2 "Finance / HR" (`permission: expenses.manage`) | ✅ |
+| Rejection requires `remarks` — server-side in `ActOnExpenseRequest`, mirrored by Flutter's `reject(id, {required String remarks})` — and the remark is stored on the refused approval record, where the employee reads it back | ✅ |
+| Receipts: child table `expense_receipts`, private storage `expense-receipts/{expenseId}/{uuid}.{ext}`, MIME/extension/size/content validated, max **5120 KB** (`HRMS_EXPENSE_RECEIPT_MAX_KB`), **10 per claim**. The API exposes only `ExpenseReceiptResource` — **no storage path, no file URL**; `url` is the id-based read route, and `uploaded_by` is the **user** id | ✅ |
+| Config: `config/hrms.php` → `expense_receipt_directory` (`HRMS_EXPENSE_RECEIPT_DIRECTORY`) and `expense_receipt_max_kilobytes` (`HRMS_EXPENSE_RECEIPT_MAX_KB`) | ✅ |
+| Routes: **13 new — 153 definitions / 158 registered**; `expenses/summary` declared before `expenses/{expense}` (the Phase 7 ordering rule); receipt routes gated coarsely by `expenses.view` with the fine rule in `ExpensePolicy::viewReceipt` (own claim, or `expenses.receipts.view` + read access to that claim) | ✅ |
+| History & filtering: `GET /expenses` paginates and narrows by `status`, `employee_id`, `project_id`, `site_id`, `expense_category_id` and an inclusive date window, row-scoped by `Visibility` (an Employee reads their own claims and no others); `GET /expenses/summary` answers by-status, by-category and by-project totals — a queue screen, not analytics | ✅ |
+| Permissions: **3 new → 73 total, 364 grants** — `expenses.create`, `expenses.update`, `expenses.receipts.view`; `expenses.view`, `expenses.approve`, `expenses.manage` already existed. 17 settings · 4 approval workflows (EXP-STD added) | ✅ |
+| Tests: backend **499 passed (3251 assertions)** — 30 new (`ExpenseTest` 20 + `ExpenseReceiptTest` 10) on `hrms_testing` · `composer validate` valid · `vendor\bin\pint --test` **PASS** (375 files) | ✅ |
+
+**Flutter**
+
+| Deliverable | Status |
+|---|---|
+| `mobile/lib/features/expenses/` — `domain/` · `data/` · `presentation/`: `expense.dart`, `expense_category.dart`, `expense_receipt.dart`, `expense_repository.dart`, `api_expense_repository.dart`, `expenses_controller.dart` | ✅ |
+| Screens: `expense_list_screen` (status filter), `expense_detail_screen` (history, chain, decide), `expense_form_screen` (no employee-id field, category rules shown before submit), `expense_receipt_capture_sheet` (camera) | ✅ |
+| 4 new routes — `/expenses`, `/expenses/new`, `/expenses/:id`, `/expenses/:id/edit` → **58 `GoRoute` entries**; a Home door **Expenses** (`Icons.receipt_long_outlined`, "Claims, receipts and approvals", `/expenses`) gated on `expenses.view` | ✅ |
+| Tests: **454 passed** (+76 over the 378 baseline) · `dart format .` clean (216 files) · `flutter analyze` clean | ✅ |
+
+> **What Phase 9 does not do:**
+>
+> - **No expense-category CRUD.** `GET /expense-categories` is read-only and
+>   the six rows are seeded — a category is configuration an operator adds,
+>   not a module of its own.
+> - **No PDF capture from the app.** The camera files a JPEG; a PDF receipt
+>   can be uploaded and viewed, but nothing in the app produces one.
+> - **No currency conversion**, and `currency` is a required three-letter
+>   text field prefilled `INR` because there is no settings endpoint for the
+>   app to read a default from.
+> - **No audit logging of expense decisions.** The service layer is
+>   audit-ready — every decision is already a method call — but writes no
+>   audit rows yet.
+> - **No FCM notifications** on submission, approval or rejection.
+> - Employee documents, onboarding, training and assets remain Phase 10's
+>   scope, as they were before.
+
 ### Planned Phases
 
 | Phase | Scope | Status |
@@ -612,8 +668,8 @@ route, a permission or a policy.
 | **7** | Site activity reports & daily site reports (PDF) | ✅ Done |
 | **8** | Payroll, salary slips, certificates, loans | ✅ Done |
 | **8h** | Payroll financial-safety hardening — net-salary floor, partial/carry-forward repayments | ✅ Done |
-| **9** | Expenses: workflow approval + private receipts | ⬜ Next |
-| **10** | Documents + expiry, onboarding, training, assets | ⬜ |
+| **9** | Expenses: workflow approval + private receipts | ✅ Done |
+| **10** | Documents + expiry, onboarding, training, assets | ⬜ Next |
 | **11** | FCM notifications, dashboards, reports & exports | ⬜ |
 | **12** | Testing, security audit, deployment, backups | ⬜ |
 

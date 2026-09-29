@@ -1,10 +1,12 @@
 # Architecture
 
-> **Status:** Phase 8 — RBAC, authentication, the business slices through
+> **Status:** Phase 9 — RBAC, authentication, the business slices through
 > attendance and leave, the site vertical slice (activity reports, the
-> official daily report and its on-demand PDF) and now **the payroll vertical
-> slice** (ledger, calculation, loans and salary documents) are implemented
-> and documented as built. Sections marked ⬜ are planned but not yet built.
+> official daily report and its on-demand PDF), the payroll vertical slice
+> (ledger, calculation, loans and salary documents) and now **the expense
+> vertical slice** (claims, private receipts, the approval engine reused for a
+> third subject) are implemented and documented as built. Sections marked ⬜
+> are planned but not yet built.
 
 ---
 
@@ -152,6 +154,17 @@ The rule the whole family obeys: **a controller never does arithmetic.** It
 authorizes, calls one service method, and returns a resource — which is what
 lets the same calculation serve a run, a recalculation and a summary without
 any of the three disagreeing about a number.
+
+**Implemented in Phase 9 ✅** — `app/Services/Expense/` is the smaller
+sibling, and it obeys the same rule:
+
+| Service | Owns |
+|---|---|
+| `ExpenseService` | Every write to `expenses` and `expense_receipts`, each transition in its own `DB::transaction`: create / update a draft, submit (which re-reads the category, the placement and the receipt folder, then starts the chain), approve / reject (settling only on the last link), cancel, and the receipt pair. Field-level failures are `ValidationException` keyed to the field the form is drawing; illegal **state** is `abort(409)` naming the state — "Only a draft claim can be edited", never a 403 that would say "unauthorized" about a caller who is allowed to try. It also holds `MAX_RECEIPTS` (10) and is the only writer of `status` |
+| `ExpenseReceiptStore` | The private files: mints `expense-receipts/{expenseId}/{uuid}.{ext}` on the `local` disk, re-checks the type and size the FormRequest already checked, streams one back with `no-store`, and deletes on removal. No path ever enters a response — `ExpenseReceiptResource` reports `original_name`, `mime_type` and `size_bytes` instead |
+
+The controller stays as thin as the payroll one: it authorizes, calls one
+service method, and returns a resource.
 
 ### 3.4 Standard response envelope
 
@@ -438,13 +451,46 @@ caller is `403`.** The new one: **nothing here recalculates a locked row** —
 service refuses again, because a payroll number that moves after it has been
 handed out is worse than a wrong one that stays put.
 
+**Implemented in Phase 9 ✅** — the twenty-third policy, `ExpensePolicy`,
+13 routes, and the same two-layer split pointed at money:
+
+| Route group | Gate |
+|---|---|
+| `GET /expenses`, `GET /expenses/summary`, `GET /expenses/{id}` | `permission:expenses.view` **then** `expensesFor()` / `ExpensePolicy::view` |
+| `GET /expense-categories` | `permission:expenses.view` — read-only by design; there is no POST/PUT/DELETE on categories |
+| `POST /expenses` | `permission:expenses.create` **then** `create` |
+| `PUT /expenses/{id}` | `permission:expenses.update` **then** `update` (own draft, or `expenses.manage`) |
+| `POST /expenses/{id}/submit`, `.../cancel` | `permission:expenses.create` **then** `submit` / `cancel` |
+| `POST /expenses/{id}/approve`, `.../reject` | `permission:expenses.approve` **then** `approve` / `reject` — pending, not your own, and you must be the resolved approver of the *current* link |
+| `POST /expenses/{id}/receipts`, `GET` / `DELETE .../receipts/{receipt}` | `permission:expenses.view` **then** `storeReceipt` / `viewReceipt` / `deleteReceipt` |
+
+The receipt routes are gated coarsely by `expenses.view` on purpose: the
+door has to admit the person who filed the claim, and the fine rule is
+`ExpensePolicy::viewReceipt()` — own claim, or `expenses.receipts.view` *and*
+read access to that claim. Being shown a list of claims and being handed the
+invoice behind one are different acts, so they are different permissions.
+
+`Visibility` gained the expense helpers in the same shape as the families
+before it: `expensesFor()` scopes the list, `expenseIsVisible()` is its
+row-level twin so a `show` cannot answer "yes" to a claim the index hid,
+`mayViewOthersExpenses()` fails **closed** (a scoped role, `expenses.manage`
+or `expenses.approve` — deliberately *not* `employees.view`, because minutes
+are defensible to open and money is not), `mayClaimExpenseAt()` answers
+"may you book against this site?" on create, update and submit, and the
+private `directReportIds(User)` keeps the line manager's own reports in view.
+Management, holding only `expenses.view`, therefore reads its own claims and
+nobody else's; an Employee's list is their own plus nothing; a Project
+Manager's is their workforce plus the claims they are the
+`reporting_manager` of — because EXP-STD's first link is a person, and
+somebody has to be able to read what they are about to sign.
+
 #### Roles and permissions
 
 | | |
 |---|---|
 | Roles | 10 — Super Admin, HR Admin, HR Executive, Payroll Admin, Project Manager, Site Engineer, Site Supervisor, Finance, Management, Employee |
-| Permissions | **70**, all named `resource.action` (lowercase) |
-| Grants | **332** rows in `role_has_permissions` |
+| Permissions | **73**, all named `resource.action` (lowercase) |
+| Grants | **364** rows in `role_has_permissions` |
 | Seeders | `RoleSeeder` → `PermissionSeeder` → `RolePermissionSeeder` (order matters) |
 
 Permission catalogue lives in one place — `PermissionSeeder::PERMISSIONS`, grouped by
@@ -473,7 +519,7 @@ shifts       shifts.view | .manage
 assignments  assignments.view | .manage
 reports      reports.view | .export
 documents    documents.view | .manage
-expenses     expenses.view | .approve | .manage
+expenses     expenses.view | .create | .update | .approve | .manage | .receipts.view
 settings     settings.view | .manage
 roles        roles.view | .manage
 users        users.view | .manage
@@ -521,11 +567,30 @@ their own employment is not an administrative act; deciding one is
 `LoanPolicy::approve()` refuses a self-approval on top of the coarse gate —
 the two answers differ on purpose, `403` for *who* and `409` for *state*.
 
+Phase 9 added three to the `expenses` line above — `expenses.create`,
+`expenses.update` and `expenses.receipts.view` — leaving the three that
+already existed (`expenses.view`, `expenses.approve`, `expenses.manage`)
+untouched: **73 permissions / 364 grants** now. Two asymmetries are
+deliberate, both visible in `RolePermissionSeeder`. First, **`.create` is
+narrower than `.update`**: filing a claim goes to the seven roles expected
+to file their own (Employee, HR Admin, HR Executive, Project Manager, Site
+Engineer, Site Supervisor, Super Admin), while `.update` reaches nine —
+Finance and Payroll Admin may correct a draft as the counterpart of the
+`.manage` they already hold, without being handed a door they would never
+use, because neither role files claims of its own. Second,
+**`.receipts.view` is its own grant rather than a rider on `.view`**, held
+by the seven who may read a claim they did not file: seeing a list of
+claims and being handed the invoice behind one are different acts. Employee
+is deliberately not among them — your own receipts read back through
+ownership — and Site Engineer is excluded with it. `ExpensePolicy` then
+asks the row-level question on top of each of the three, and nobody may
+approve their own claim whatever the chain says.
+
 **Super Admin** holds `['*']` — every permission, resolved from the catalogue at seed
 time rather than hard-coded, so a newly added permission is granted automatically.
 Every other role is an explicit allow-list: anything absent is **denied**. The mapping
 is `RolePermissionSeeder::MAP`, and `RbacTest` asserts both directions (Super Admin has
-all 70; `Employee` is denied `payroll.manage`, `payroll.process`, `payroll.lock`, `employees.delete`, `attendance.manage`,
+all 73; `Employee` is denied `payroll.manage`, `payroll.process`, `payroll.lock`, `employees.delete`, `attendance.manage`,
 `leave.approve`, `audit.view`).
 
 `employees.salary.view` — added in Phase 4 — is the one permission that is *not*
@@ -533,6 +598,83 @@ implied by its module: `employees.view` opens the roster, three segments more
 are required before a payroll figure may be drawn. Held by HR Admin, Payroll
 Admin, Finance (and Super Admin through `*`); deliberately withheld from HR
 Executive, who maintains the roster without seeing what anyone is paid.
+
+### 3.7 Phase 9 ✅ — Expense management
+
+Thirteen routes behind one controller, four FormRequests, two services, one
+policy — and no new engine. Every hard question a claim raises (who may read
+it, who signs it, what the chain looks like, what a receipt is) was answered
+somewhere in Phases 6–8; this slice reuses those answers instead of writing
+a second copy of them. The route gates and the row-scoping are in §3.6; what
+follows is how the slice itself is put together.
+
+**The controller is thin.** `Api\V1\ExpenseController` authorizes, calls one
+service method and returns a resource — nothing else. Its class docblock
+states the rule: *the only controller that writes an expense claim, and it
+writes none of it*. It owns two reads that are deliberately not CRUD:
+`GET /expense-categories` (the pickable list plus each category's two rules —
+there is **no POST/PUT/DELETE**, because a category is configuration and
+adding one is a row, not an endpoint) and `GET /expenses/summary` (four
+totals — by status, by category, by project, over a date range — scoped
+through the same `expensesFor()` as the list, because a summary that
+answered wider than the list would be the same hole wearing a different hat).
+
+**The service is the state machine.** `ExpenseService` wraps every mutation
+in a `DB::transaction` — create, update, submit, approve, reject, cancel,
+attach receipts, remove one — and is the only writer of `status`. Two error
+vocabularies, kept apart for the same reason as everywhere else:
+
+- **A field is wrong → `ValidationException` (422 keyed to the field)** —
+  the category's ceiling, "you may only claim against a project or site you
+  are assigned to", "that site does not belong to the selected project", a
+  category that demands evidence receiving a claim with none.
+- **The state is wrong → `abort(409)` naming the state** — "Only a draft
+  claim can be edited. Cancel it and file a new one." Never a 403, which
+  would tell a caller who *is* allowed to try that they are not allowed.
+
+Money travels as decimal strings through `App\Support\Money`, is rounded
+with `Money::round()` before it reaches the column, and no money figure is
+stored or handed back to a client as a float (**§5.13**).
+
+#### The four FormRequests
+
+| Request | Endpoint | What it owns |
+|---|---|---|
+| `StoreExpenseRequest` | `POST /expenses` | The claim's shape: a date no later than today (a future date is a plan, not an expense), an **active** category, `amount > 0` bounded by the `DECIMAL(12,2)` column, a three-letter currency, and the cross-field rule no `exists:` can express — a site must belong to the project named. `employee_id` and `status` are **`prohibited`, not ignored**: a payload that names a colleague or sets a status must fail loudly rather than be quietly believed |
+| `UpdateExpenseRequest` | `PUT /expenses/{id}` | The same rules with everything `sometimes`, because an update names what changed rather than everything that is true; `employee_id` stays prohibited. Whether *this row* may still be edited is the service's 409, not a rule here |
+| `ActOnExpenseRequest` | `…/submit`, `…/approve`, `…/reject`, `…/cancel` | One body for all four transitions: optional `remarks`, **required on reject only** — a refusal with no reason is a decision nobody can learn from, and the remark lands on the approval record that was refused, not on the claim. `authorize()` asks the policy *before* validation runs, so an out-of-chain approver is told the claim is none of their business before their body is examined |
+| `StoreExpenseReceiptsRequest` | `POST /expenses/{id}/receipts` | One batch of 1–6 files: `mimes` + `mimetypes` + the configured byte ceiling + `CertificateContent` (the bytes are what they claim to be), with `authorize()` → `ExpensePolicy::storeReceipt` — your own draft, or anybody's with `expenses.manage`. Six per request is about one request's weight; the 10-per-claim ceiling is `ExpenseService`'s |
+
+**`ExpensePolicy` answers "who", never "state".** Four groups of question:
+the employee files, edits, submits and withdraws their own and may never
+approve one (checked here *and* in the engine); an approver may act only
+while the claim is pending, is not their own, and they are the resolved
+approver of the current link; `expenses.manage` may push, withdraw and
+correct without becoming an approver; and reading fails closed to your own.
+`viewReceipt()` is the one rule that goes a step further than the claim that
+carries it — own claim, or `expenses.receipts.view` *and* read access to
+that claim. State questions are deliberately absent: refusing a non-draft
+here would hand the caller "unauthorized" for what is really "already
+submitted".
+
+**The approval workflow is reused, not hard-coded.** `ApprovalWorkflow`
+gained `SUBJECT_EXPENSE = 'expense'`, `ApprovalRecord` gained
+`TYPE_EXPENSE = 'expense'` plus an `expense()` accessor, and
+`ApprovalWorkflowService` widened its union from `LeaveRequest|OvertimeRequest`
+to `LeaveRequest|OvertimeRequest|Expense` on every public method — that is
+the entire integration. The engine still knows nothing about claims: it
+walks steps, resolves reporting-manager / role / permission links, refuses
+self-approval, freezes the chain at submit and advances
+`current_approval_step`. `ExpenseService` decides only *when* a chain starts
+(submit), *when* it is settled (the last link) and *when* it is abandoned
+(cancel of a pending claim) — it never decides who approves, because that is
+data in `approval_workflows`. The chain itself is the seeded `EXP-STD`
+default for the subject: Supervisor (`reporting_manager`) → Finance / HR
+(`permission: expenses.manage`), two links because money has a shorter
+question than absence does. Everything Phase 6 proved — the chain is frozen
+at submit, a later edit to the definition cannot re-route a claim in flight,
+self-approval is impossible at the engine rather than at the route — holds
+for expenses without a line of it being rewritten.
 
 ---
 
@@ -677,7 +819,9 @@ mobile/lib/
 │   │                                   #    summary, and the salary-slip list
 │   ├── loans/                          # ← Phase 8, three-layer: schedule, progress,
 │   │                                   #    approve / reject with remarks
-│   └── salary_certificates/            # ← Phase 8, three-layer: ask, decide, PDF
+│   ├── salary_certificates/            # ← Phase 8, three-layer: ask, decide, PDF
+│   └── expenses/                       # ← Phase 9, three-layer: claim list, form,
+│                                       #    detail + approval timeline, receipt capture
 └── main.dart
 ```
 
@@ -1007,6 +1151,23 @@ There are deliberately two vocabularies:
 `overtime_request`). Conflating them would make "which definition" and
 "which row" answerable by the same string and therefore neither.
 
+**Phase 9 ✅ — a third of each, and nothing else changed.**
+`ApprovalWorkflow::SUBJECT_EXPENSE = 'expense'` adds the third subject (the
+seeded `EXP-STD` is its default definition), and
+`ApprovalRecord::TYPE_EXPENSE = 'expense'` adds the third record, with an
+`expense()` accessor beside `leaveRequest()` and `overtimeRequest()`. The
+record keeps the bare noun while the other two are singularised table names
+because the two vocabularies are two questions, not one — "which definition"
+and "which row" must not collapse into each other, whichever shape either
+takes. `ApprovalWorkflowService` widened its parameter union to
+`LeaveRequest|OvertimeRequest|Expense` and grew only two `match` arms
+(`subjectType()`, `workflowSubjectType()`); every other line of the engine —
+freeze at submit, skip unresolvable steps, close behind a refusal, refuse
+self-approval — is the Phase 6 code running unchanged for a third subject.
+`ExpenseService` is the caller that decides *when* the chain starts and
+settles; who approves it is still data in `approval_workflows`, never a fact
+about expenses.
+
 ---
 
 ### 5.11 A report's author and its project are derived, never asserted (Phase 7)
@@ -1201,3 +1362,4 @@ The following are explicitly **out of scope** unless later requested:
 | Phase 7 | Site activity reports and daily site reports — 7 migrations (**41 tables total**), `SiteActivityReportService` / `DailySiteReportService` (author and project derived, `draft → submitted` only, one official report per site-day), `StoresPrivateImages`/`ReportPhotoStore` on the fail-closed `SelfieSanitizer`, `DailySiteReportPdf` on demand with dompdf (**§5.12**), 2 policies + `Visibility` row scoping, 8 permissions (**59 total / 278 grants**), 18 routes (104 definitions / 109 registered); Flutter `features/site_reports/` with GPS, repeatable rows, camera photos and local drafts, **303 tests** |
 | Phase 8 | **Payroll, loans and salary documents** — 7 migrations (**48 tables total**), `App\Support\Money` (**§5.13**), `PayrollCalculationService` outside any controller (attendance → overtime → LOP → allowances → adjustments → loans, all reusing the Phase 5/6 calculators), a one-way `draft → calculated → reviewed → processed → locked` ladder with a `payroll_id` on every installment it takes, on-demand salary-slip and certificate PDFs with no stored file, 5 policies (22 total), 11 permissions (**70 total / 332 grants**), 3 `payroll.*` settings (16 total), 36 routes (**140 definitions / 145 registered**); Flutter `features/{payroll,loans,salary_certificates}` + `core/presentation/{money,pdf_opener}.dart`, **377 tests** |
 | Post-Phase 8 payroll hardening | **Financial safety** — negative `net_salary` can no longer come from a repayment (**§5.14**): `loan_installments.deducted_amount` (1 migration, **48 tables / 41 migrations**) + `partially_deducted`, `RepaymentAllocation` carrying scheduled / before / now / left, `payroll.minimum_net_salary` setting (4 `payroll.*`, **17 total**), carry-forward read `due_date ≤ period end ∧ status ∈ {pending, partially_deducted}` with per-run provenance on `payroll_items`, `LoanInstallmentResource` wired into `LoanResource` (`remaining_amount` on the schedule and `next_installment`); no UAE statutory rule and no audit logging added — both deferred, services ready for it; `PayrollRepaymentTest` (11), backend **469 tests / 2915 assertions**, Flutter **378 tests** |
+| Phase 9 | **Expense management** — 3 migrations (**51 tables / 44 migrations**: `expense_categories`, `expenses`, `expense_receipts`), `ExpenseService` (every mutation in a transaction; field errors as `ValidationException`, illegal state as `409` naming the state) + `ExpenseReceiptStore` (private `expense-receipts/{expenseId}/{uuid}.{ext}`, config `hrms.storage.expense_receipt_{directory,max_kilobytes}`), a thin `ExpenseController`, 4 FormRequests (`StoreExpense`, `UpdateExpense`, `ActOnExpense`, `StoreExpenseReceipts`), `ExpensePolicy` (11 abilities, including `viewReceipt`), `Visibility::{expensesFor, expenseIsVisible, mayViewOthersExpenses, mayClaimExpenseAt}` + a private `directReportIds()`, and the Phase 6 approval engine reused for a third subject (`ApprovalWorkflow::SUBJECT_EXPENSE`, `ApprovalRecord::TYPE_EXPENSE`, union widened to `LeaveRequest\|OvertimeRequest\|Expense`, seeded `EXP-STD`) — 3 permissions (**73 total / 364 grants**), 6 seeded categories, 4 workflows / 9 steps (17 settings unchanged), 13 routes (**153 definitions / 158 registered**), Flutter `features/expenses/` (list, form, detail, receipt capture); backend **499 tests / 3251 assertions** (Phase 9: `ExpenseTest` 20 + `ExpenseReceiptTest` 10) |

@@ -228,6 +228,42 @@ class PermissionScope {
   bool get canApproveLoans => can('loans.approve');
 
   bool get canManageLoans => can('loans.manage');
+
+  /* --------------------------------------------------------- expenses */
+
+  /// Reading expense claims. The list, the detail screen, the summary and
+  /// the receipts all sit behind this one coarse door — *whose* claims are
+  /// then narrowed by `Visibility::expensesFor()`, which is the server's
+  /// answer and not this one.
+  bool get canViewExpenses => can('expenses.view');
+
+  /// Filing a claim of your own, and submitting or cancelling one.
+  bool get canCreateExpenses => can('expenses.create');
+
+  /// Correcting a draft. Separate from [canCreateExpenses] because the seed
+  /// gives an Employee both but gives Payroll Admin only this — the back
+  /// office can correct what it finds, not open a new line of spend.
+  bool get canUpdateExpenses => can('expenses.update');
+
+  /// Answering somebody else's claim. Never implied by
+  /// [canCreateExpenses]: nobody signs off on their own expense any more
+  /// than on their own loan, and the server refuses it in the same breath.
+  bool get canApproveExpenses => can('expenses.approve');
+
+  /// The back office — and the permission EXP-STD's "Finance / HR" link
+  /// resolves to. Deliberately absent from [canCreateExpenses].
+  bool get canManageExpenses => can('expenses.manage');
+
+  /// Reading the *documents* attached to claims that are not yours.
+  ///
+  /// Own receipts need only [canViewExpenses]: evidence you filed yourself
+  /// is not somebody else's secret. This is what a supervisor, finance or HR
+  /// needs on top, and the seeders withhold it from Site Engineer on purpose
+  /// so a role can read the numbers on a claim without being handed every
+  /// invoice behind it.
+  bool get canViewExpenseReceipts => can('expenses.receipts.view');
+
+  bool get canWriteExpenses => canCreateExpenses || canUpdateExpenses;
 }
 
 /// Recomputed whenever the session changes, so a permission revoked by a

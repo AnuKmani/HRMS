@@ -96,6 +96,17 @@ class HomeScreen extends ConsumerWidget {
           '/overtime',
           'Extra hours and their approvals',
         ),
+      // Phase 9. Money already spent, filed against a place and a project,
+      // with the receipts that prove it — a different door from overtime's
+      // because it is a different question: not "how long did you work?"
+      // but "what did you spend, and who signed it off?".
+      if (scope.canViewExpenses)
+        _Module(
+          'Expenses',
+          Icons.receipt_long_outlined,
+          '/expenses',
+          'Claims, receipts and approvals',
+        ),
       // Phase 7. The two report trees are separate doors because they are
       // separate questions: one is "what did I do today?", the other is
       // "what is the site's day, as a document?". Only the second is

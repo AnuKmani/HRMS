@@ -11,7 +11,7 @@ class ApprovalWorkflowSeeder extends Seeder
     /**
      * The approval chains shipped with the system.
      *
-     * Three, and each exists because it is a *different* answer rather than a
+     * Four, and each exists because it is a *different* answer rather than a
      * variation on one:
      *
      *   LEAVE-STD  Employee -> Supervisor -> Project Manager -> HR
@@ -31,6 +31,18 @@ class ApprovalWorkflowSeeder extends Seeder
      *              function, and `overtime.approve` is held by HR Admin,
      *              Payroll Admin and the managers — exactly the set that
      *              should be able to make extra minutes payable.
+     *
+     *   EXP-STD    Employee -> Supervisor -> Finance / HR
+     *              Two links rather than three, because money has a shorter
+     *              question than absence does: did the line manager accept
+     *              that this was spent, and does the back office accept that
+     *              it was spent on the company? The second link is a
+     *              *permission* step (`expenses.manage` — HR Admin, Payroll
+     *              Admin, Finance) rather than a role, so a deployment that
+     *              renames its finance team still has a chain that works, and
+     *              Project Manager — who holds `expenses.approve` for the
+     *              supervisor links of other chains but no `expenses.manage` —
+     *              cannot sign off the payment.
      *
      * The Supervisor step is `reporting_manager`, resolved from the subject's
      * own employee at submit time, so it is a person rather than a title.
@@ -75,6 +87,17 @@ class ApprovalWorkflowSeeder extends Seeder
                 ['sequence' => 1, 'name' => 'Supervisor', 'approver_type' => ApprovalWorkflowStep::TYPE_REPORTING_MANAGER],
                 ['sequence' => 2, 'name' => 'Project Manager', 'approver_type' => ApprovalWorkflowStep::TYPE_ROLE, 'approver_role' => 'Project Manager'],
                 ['sequence' => 3, 'name' => 'HR / Payroll', 'approver_type' => ApprovalWorkflowStep::TYPE_PERMISSION, 'approver_permission' => 'overtime.approve'],
+            ],
+        ],
+        [
+            'code' => 'EXP-STD',
+            'name' => 'Standard expense approval',
+            'subject_type' => ApprovalWorkflow::SUBJECT_EXPENSE,
+            'is_default' => true,
+            'description' => 'Supervisor, then whoever holds expenses.manage — Finance or HR.',
+            'steps' => [
+                ['sequence' => 1, 'name' => 'Supervisor', 'approver_type' => ApprovalWorkflowStep::TYPE_REPORTING_MANAGER],
+                ['sequence' => 2, 'name' => 'Finance / HR', 'approver_type' => ApprovalWorkflowStep::TYPE_PERMISSION, 'approver_permission' => 'expenses.manage'],
             ],
         ],
     ];

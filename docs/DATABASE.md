@@ -1,20 +1,21 @@
 # Database Design
 
-> **Status:** Phase 8 — core schema, GPS attendance and site movement, the two
-> report families, and now the payroll vertical slice. Laravel's base tables
-> plus 10 Phase 2 migrations, the Phase 3 `users.status` column, the two
-> Phase 5 migrations, the nine Phase 6 migrations, the seven Phase 7
-> migrations, the seven Phase 8 migrations and the repayment-floor
-> migration that adds `loan_installments.deducted_amount` all exist:
-> `settings`,
+> **Status:** Phase 9 — core schema, GPS attendance and site movement, the two
+> report families, the payroll vertical slice and now the expense vertical
+> slice. Laravel's base tables plus 10 Phase 2 migrations, the Phase 3
+> `users.status` column, the two Phase 5 migrations, the nine Phase 6
+> migrations, the seven Phase 7 migrations, the seven Phase 8 migrations, the
+> repayment-floor migration that adds `loan_installments.deducted_amount`
+> and the three Phase 9 expense migrations all exist: `settings`,
 > `departments`, `designations`, `shifts`, `projects`, `employees`, `sites`,
 > `employee_site_assignments`, `attendances`, `site_visits`, the
 > leave/timesheet/overtime/holiday tables, **the seven site-report tables
-> (§2.9)** and **the seven payroll tables (§2.7)**, plus the
-> `spatie/laravel-permission` RBAC tables — **48 tables across 41
-> migrations**. Tables for later phases (`expenses`, `employee_documents`, …)
-> are **design only** and have not been created. `hrms_testing` mirrors this
-> schema for the test suite.
+> (§2.9)**, **the seven payroll tables (§2.7)** and **the three expense
+> tables (§2.10)**, plus the `spatie/laravel-permission` RBAC tables — **51
+> tables across 44 migrations** (Phase 8 closed at 48 tables across 41
+> migrations; Phase 9 adds three of each). Tables for later phases
+> (`employee_documents`, `trainings`, …) are **design only** and have not
+> been created. `hrms_testing` mirrors this schema for the test suite.
 
 **DBMS:** MariaDB 10.4.28 (XAMPP)
 **Charset:** `utf8mb4` / collation `utf8mb4_unicode_ci`
@@ -382,10 +383,11 @@ extend, skip or postpone a deadline.
 
 ### 2.7 Payroll & Finance — Phase 8 ✅ (payroll only)
 
-Seven tables. The three that are not payroll-shaped — `expenses`,
-`expense_receipts` — are still design only, and there is **no `salary_slips`
-table at all**: a slip is a `payrolls` row rendered to PDF on demand, so
-there is no stored file to go stale and no path to leak.
+Seven tables. The two that were never payroll-shaped — `expenses`,
+`expense_receipts` — are no longer design only: Phase 9 builds them, and
+they now have a section of their own (**§2.10**). There is also **no
+`salary_slips` table at all**: a slip is a `payrolls` row rendered to PDF on
+demand, so there is no stored file to go stale and no path to leak.
 
 | Table | Purpose |
 |---|---|
@@ -513,6 +515,159 @@ schema change on a table already holding reports.
 
 ---
 
+### 2.10 Expenses — Phase 9 ✅
+
+Three tables, three migrations. An expense claim is an employee's word about
+money spent, waiting to become somebody else's money paid out, so the shape
+deliberately mirrors `leave_requests` / `overtime_requests`: the approval
+columns are the same columns because the same engine writes them.
+
+| Table | Purpose |
+|---|---|
+| `expense_categories` | The configurable half of a claim: `name`, `code` (**UNIQUE** — the stable handle a seeder and a report key off, and the reason re-seeding updates a row instead of adding a second "Travel"), `description`, `status`, `requires_receipt`, `maximum_amount`. **There is no category CRUD endpoint**: `GET /expense-categories` is read-only, so adding a category is a row, not a deploy |
+| `expenses` | One claim: employee (derived from the session), category, optional project / site, `expense_date`, `amount DECIMAL(12,2)`, `currency`, `description`, `status`, `current_approval_step`, the four lifecycle timestamps, `final_approved_by` |
+| `expense_receipts` | One row per file of evidence — facts about a *private* file only: `path`, `original_name`, `mime_type`, `size_bytes`, `uploaded_by`. Never a URL, never a disk name in a response, never the bytes |
+
+#### `expense_categories` shape — as built
+
+```
+expense_categories
+  id
+  name                  VARCHAR(100)
+  code                  VARCHAR(30) UNIQUE   ← seeder lookup key, report handle
+  description           VARCHAR(500) NULL
+  status                VARCHAR(20) DEFAULT 'active' INDEX   active | inactive
+  requires_receipt      TINYINT(1) DEFAULT 0   ← per category, not global
+  maximum_amount        DECIMAL(12,2) NULL      ← NULL = no ceiling, not 0
+  created_at / updated_at
+```
+
+`requires_receipt` is per category because both halves of the argument are
+true of the same system: a taxi fare needs paper, a per-diem allowance does
+not, and one boolean cannot answer both. `maximum_amount` is nullable on
+purpose — "no ceiling" is a real answer and `0` would read as "nothing may
+be claimed".
+
+**Six rows are seeded** by `ExpenseCategorySeeder` (registered in
+`DatabaseSeeder`, keyed on `code` so it is safe to re-run):
+
+| Code | Name | `requires_receipt` | `maximum_amount` |
+|---|---|---|---|
+| `TRAVEL` | Travel | yes | `NULL` — no ceiling |
+| `TRANSPORT` | Transport | yes | `NULL` — no ceiling |
+| `SITE` | Site Expense | yes | `NULL` — no ceiling |
+| `FOOD` | Food | **no** | `1000.00` — the one worked example of a ceiling |
+| `ACCOMMODATION` | Accommodation | yes | `NULL` — no ceiling |
+| `OTHER` | Other | **no** | `NULL` — no ceiling |
+
+The ceiling on Food is a sample, not a policy this application has an
+opinion about: it is a row an operator is expected to change. Every rule in
+the table is read back by `ExpenseService` at create, update **and** submit
+time, so an operator retiring a category or lowering a ceiling takes effect
+on the next write rather than on the next deploy.
+
+#### `expenses` shape — as built
+
+```
+expenses
+  id
+  employee_id            FK → employees             RESTRICT  ← session, never payload
+  expense_category_id    FK → expense_categories    RESTRICT
+  project_id             FK → projects              RESTRICT  NULL
+  site_id                FK → sites                 RESTRICT  NULL
+  expense_date           DATE
+  amount                 DECIMAL(12,2)
+  currency               VARCHAR(3)
+  description            VARCHAR(500)
+  status                 VARCHAR(20) DEFAULT 'draft' INDEX
+                                    draft | pending | approved | rejected | cancelled
+  current_approval_step  SMALLINT UNSIGNED NULL     ← the step waiting right now
+  approval_workflow_id   FK → approval_workflows    SET NULL  NULL
+  submitted_at           DATETIME NULL
+  approved_at            DATETIME NULL
+  rejected_at            DATETIME NULL
+  cancelled_at           DATETIME NULL
+  final_approved_by      FK → users                 SET NULL  NULL
+  created_at / updated_at
+  INDEX (employee_id, expense_date)        exp_emp_date_idx
+  INDEX (expense_category_id, status)      exp_cat_status_idx
+  INDEX (project_id, expense_date)         exp_project_date_idx
+  INDEX (site_id, expense_date)            exp_site_date_idx
+```
+
+- **`employee_id` is derived from the authenticated session** and is never
+  read from the payload — "claim on behalf of a colleague" is not a feature
+  this system has.
+- **`project_id` / `site_id` stay nullable** (a taxi home after a late shift
+  has no site) and are `restrictOnDelete` rather than `nullOnDelete`: a claim
+  that silently loses the site it was booked against stops being auditable.
+- **The approval columns mirror `leave_requests` and `overtime_requests`**
+  because `ApprovalWorkflowService` writes all three: `current_approval_step`
+  is the sequence number of the step waiting now (`NULL` when none is), the
+  chain itself lives in `approval_records`, and the definition is frozen into
+  those rows at submit — editing EXP-STD later never re-routes a claim
+  already in flight.
+- **`final_approved_by`, not `approved_by`**: approval here is the *last*
+  link of a chain, not the only one. Who acted on each individual step is
+  `approval_records.acted_by`.
+- **Status is written by `ExpenseService` alone.** There is no endpoint that
+  sets an arbitrary status, because `approved` means "the chain was walked
+  end to end and every step said yes".
+
+#### `expense_receipts` shape — as built
+
+```
+expense_receipts
+  id
+  expense_id            FK → expenses  CASCADE   ← a receipt cannot outlive its claim
+  path                  VARCHAR(500)   private disk name: expense-receipts/{id}/{uuid}.{ext}
+  original_name         VARCHAR(255) NULL        ← data for a list to read, never opened with
+  mime_type             VARCHAR(100)
+  size_bytes            INT UNSIGNED
+  uploaded_by           FK → users     SET NULL  NULL
+  created_at / updated_at
+```
+
+`path` is minted by `ExpenseReceiptStore` from a UUID, never from the
+client's filename, under `storage/app/private/expense-receipts/`
+(`hrms.storage.expense_receipt_directory`, env
+`HRMS_EXPENSE_RECEIPT_DIRECTORY`, default `expense-receipts`). No API
+response ever echoes it: the only way to the bytes is
+`GET /expenses/{expense}/receipts/{receipt}`, behind `ExpensePolicy`.
+`expense_id` cascades because a receipt is meaningless without its claim —
+and expenses themselves have **no delete endpoint**, so the lifecycle ends
+at `cancelled` or `rejected` and history stays readable.
+
+**Money and status conventions, exactly as everywhere else in this schema:**
+`amount` and `maximum_amount` are `DECIMAL(12,2)`, values travel as decimal
+strings end to end through `App\Support\Money` and `Money::round()`, and no
+money figure is stored, summed or handed back to a client as a float — there
+is no `FLOAT`/`DOUBLE` money column in the schema. `status` is `string(20)`
+with constants on the model — a vocabulary, not a MySQL `ENUM`.
+
+**Receipt limits** are configuration, not code:
+`hrms.storage.expense_receipt_max_kilobytes` (env
+`HRMS_EXPENSE_RECEIPT_MAX_KB`, default `5120`) caps a single file, six per
+request batch, and `ExpenseService::MAX_RECEIPTS` caps a claim at **10**.
+Accepted types are PDF, JPEG, PNG and WebP, validated on the request and
+re-checked in the storage layer.
+
+**EXP-STD.** `ApprovalWorkflowSeeder` adds a fourth workflow row,
+`EXP-STD` (`subject_type = expense`, the default for the subject), with its
+two links:
+
+```
+1  Supervisor       reporting_manager   ← resolved from the claimant's own employee row
+2  Finance / HR     permission          ← expenses.manage (HR Admin, Payroll Admin, Finance)
+```
+
+The second link is a *permission* step rather than a role so a deployment
+that renames its finance team still has a chain that works — and Project
+Manager, who holds `expenses.approve` but not `expenses.manage`, cannot sign
+off the payment.
+
+---
+
 ## 3. Relationship Summary
 
 **Implemented (Phase 2) — solid lines exist in the database today:**
@@ -624,11 +779,29 @@ the answer to "where did this line come from?", not an ownership edge, and a
 polymorphic pair cannot carry one without a constraint the schema would never
 check.
 
-**Still designed but not yet created (Phases 9–12):**
+**Built in Phase 9 (see §2.10):**
 
 ```
 employees ──*── expenses *── expense_receipts
-           ├──*── employee_documents
+                      │
+                      ├──*── expense_categories
+                      ├──*── projects / sites          (both nullable, RESTRICT)
+                      ├──*── approval_workflows        (nullable, SET NULL)
+                      └── * ── approval_records        polymorphic → expense
+```
+
+`expenses` takes the same three edges `leave_requests` does, for the same
+reasons: `RESTRICT` toward the employee, the category, the project and the
+site, because a claim that outlives what it was booked against is still a
+claim; `SET NULL` toward the workflow and the final approver, because a
+retired definition must not take a settled claim's history with it. The
+receipt table is the second and last `cascadeOnDelete` in the schema after
+the report photos — a receipt cannot outlive the claim it is evidence for.
+
+**Still designed but not yet created (Phases 10–12):**
+
+```
+employees ──*── employee_documents
            ├──*── employee_trainings *── trainings
            ├──*── asset_assignments *── assets
            └──*── notifications
@@ -667,6 +840,8 @@ for the two to disagree.
 | Payroll period | **UNIQUE** `payrolls (employee_id, payroll_year, payroll_month)` + `(payroll_year, payroll_month, status)` |
 | Loan schedule | **UNIQUE** `loan_installments (loan_id, sequence)` + `(status, due_date)` — the second one answers "what still owes?" now that a row can be `pending` with an overdue due date or `partially_deducted` with a remainder |
 | Run / period lookups | `payrolls`, `allowances`, `payroll_adjustments` on their own period columns |
+| Expense claims | `expenses (employee_id, expense_date)` · `(expense_category_id, status)` · `(project_id, expense_date)` · `(site_id, expense_date)` — "my claims", "what is pending in this category", and the two date-range views a project or a site asks for, plus the indexed `status` default |
+| Expense category pickers | **UNIQUE** `expense_categories (code)` + `(status)` — the active list a claim form draws, and the key a re-seed looks a row up by |
 
 **N+1 prevention:** all list endpoints eager-load their relations via `with()`, and are
 verified with `DB::enableQueryLog()` during testing.
@@ -681,11 +856,12 @@ All counts below are **live and verified** against `hrms_laravel` after
 | Seeded | Count | Seeder |
 |---|---|---|
 | Roles | 10 | `RoleSeeder` |
-| Permissions | **70** | `PermissionSeeder` |
-| Role → permission grants | **332** | `RolePermissionSeeder` |
+| Permissions | **73** | `PermissionSeeder` |
+| Role → permission grants | **364** | `RolePermissionSeeder` |
 | Settings | **17** | `SettingSeeder` |
-| Approval workflows | 3 — `LEAVE-STD` (default for leave, 3 steps), `LEAVE-FAST` (1 step), `OT-STD` (default for overtime, 3 steps) | `ApprovalWorkflowSeeder` |
-| Approval workflow steps | 7 — reporting manager → role → role / permission | `ApprovalWorkflowSeeder` |
+| Approval workflows | 4 — `LEAVE-STD` (default for leave, 3 steps), `LEAVE-FAST` (1 step), `OT-STD` (default for overtime, 3 steps), `EXP-STD` (default for expense, 2 steps) | `ApprovalWorkflowSeeder` |
+| Approval workflow steps | 9 — reporting manager → role → role / permission; `EXP-STD` adds reporting manager → permission (`expenses.manage`) | `ApprovalWorkflowSeeder` |
+| Expense categories | 6 — `TRAVEL`, `TRANSPORT`, `SITE`, `ACCOMMODATION` (receipt required), `FOOD` (sample ceiling `1000.00`, no receipt), `OTHER` (no receipt) | `ExpenseCategorySeeder` |
 | Leave types | 5 — `AL` Annual, `SL` Sick (certificate, 2-day deadline), `EL` Emergency, `UL` Unpaid (may go negative), `OTH` Other | `LeaveTypeSeeder` |
 | Shifts | 4 — General, Morning, Evening, Night | `DevelopmentDataSeeder` |
 | Departments | 4 *(development sample)* | `DevelopmentDataSeeder` |
@@ -702,12 +878,48 @@ added 11 → 70** (`loans.{view,create,approve,manage}`,
 `salary_slips.{view,manage}`, `salary_certificates.{view,manage}` and the
 three payroll grants that were missing — `payroll.process`, `payroll.lock`,
 `payroll.summary.view`; `payroll.view` and `payroll.manage` already existed).
+**Phase 9 added 3 → 73**: `expenses.create`, `expenses.update` and
+`expenses.receipts.view` — the other three expense grants
+(`expenses.view`, `expenses.approve`, `expenses.manage`) already existed at
+Phase 8 and were already in the catalogue.
 Phase 5 added no permission but granted the existing `attendance.view` to
-`Employee`. Grants grew 168 → 236 → 278 → **332** (the number is rows in
-`role_has_permissions`, so Super Admin's `['*']` counts as all 70).
+`Employee`. Grants grew 168 → 236 → 278 → **332** → **364** (Phase 9 adds
+32: the expense family reaching ten roles at `expenses.view`). The number is
+rows in `role_has_permissions`, so Super Admin's `['*']` counts as all 73.
 `PermissionSeeder::flat()` is the single source of truth and `RbacTest`
 asserts the seeded count matches it exactly, so this number cannot drift
 silently.
+
+**The full expense matrix — all six grants, role by role** (counts verified
+against `role_has_permissions`):
+
+| Permission | Roles | Held by |
+|---|---|---|
+| `expenses.view` | **10** | Employee, Finance, HR Admin, HR Executive, Management, Payroll Admin, Project Manager, Site Engineer, Site Supervisor, Super Admin — every role, because a list endpoint is no use to a role that cannot open it |
+| `expenses.create` | **7** | Employee, HR Admin, HR Executive, Project Manager, Site Engineer, Site Supervisor, Super Admin |
+| `expenses.update` | **9** | Employee, Finance, HR Admin, HR Executive, Payroll Admin, Project Manager, Site Engineer, Site Supervisor, Super Admin |
+| `expenses.approve` | **7** | Finance, HR Admin, HR Executive, Payroll Admin, Project Manager, Site Supervisor, Super Admin |
+| `expenses.manage` | **4** | Finance, HR Admin, Payroll Admin, Super Admin |
+| `expenses.receipts.view` | **7** | Finance, HR Admin, HR Executive, Payroll Admin, Project Manager, Site Supervisor, Super Admin |
+
+**Who holds the Phase 9 three.** `expenses.create` reaches seven roles —
+Employee, HR Admin, HR Executive, Project Manager, Site Engineer, Site
+Supervisor, Super Admin: every role that is expected to file a claim of its
+own, and nobody else. Finance, Payroll Admin and Management
+deliberately do not get it, the way they do not get `leave.create`.
+`expenses.update` widens to nine (adds Finance and Payroll Admin) because
+"edit" covers two different acts: correcting your own draft, and the
+back-office counterpart of `expenses.manage` — Payroll Admin and Finance are
+consumers of claims rather than filers of them, so they hold `.update`
+without `.create`. `expenses.receipts.view` goes to seven (Finance, HR
+Admin, HR Executive, Payroll Admin, Project Manager, Site Supervisor, Super
+Admin): everybody who may read a claim they did not file, because being
+shown a list of claims and being handed the invoice behind one are different
+acts. **Site Engineer is the deliberate exclusion** — they file and edit
+their own claims but have no `expenses.approve` and no `.receipts.view`, and
+Employee reads their own receipts through ownership instead of the grant.
+`expenses.manage` stays with its four (Finance, HR Admin, Payroll Admin,
+Super Admin) and is the permission `EXP-STD`'s last link resolves to.
 
 **Who holds the Phase 8 eleven.** `payroll.view` reaches Super Admin, HR
 Admin, Payroll Admin, Finance, Management **and Employee** — the last of
@@ -758,7 +970,7 @@ touching anything else — they are `firstOrCreate` / `syncPermissions` only.
 > employees, users, salaries or assignments. Every row it writes is labelled
 > *"Development sample data."* in its `description`.
 >
-> All seven seeders are **idempotent** (`firstOrCreate` / `updateOrCreate`), so
+> All eight seeders are **idempotent** (`firstOrCreate` / `updateOrCreate`), so
 > `php artisan db:seed` can be re-run safely without duplicating rows.
 
 ---
@@ -839,9 +1051,24 @@ After Phase 7: **41 tables**, **33 migrations** (3 framework, 1 Sanctum,
 | 35 | `2026_09_29_140007_create_salary_certificate_requests_table` | `salary_certificate_requests` | No document column. The PDF is rendered from this row on demand, so `generated_at` is the only trace and there is no file to expire or path to leak |
 | 36 | `2026_09_29_140008_add_deducted_amount_to_loan_installments_table` | *(adds a column)* | `loan_installments.deducted_amount DECIMAL(12,2) DEFAULT 0` — how much of a scheduled installment pay has actually taken. A repayment that would push net salary below `payroll.minimum_net_salary` takes only the part that fits and leaves the rest outstanding, which a schema with one all-or-nothing status could not say. The backfill sets `deducted_amount = amount` on every row already `deducted`, so a pre-existing full repayment cannot look untouched and be collected twice |
 
-**48 tables** total in `hrms_laravel`, across **41 migrations** (3 framework,
+**48 tables** in `hrms_laravel` at the close of Phase 8, across **41
+migrations** (3 framework,
 1 Sanctum, 10 Phase 2, 1 Phase 3, 2 Phase 5, 9 Phase 6, 7 Phase 7, 7 Phase 8,
 1 repayment floor).
+
+### Phase 9 migrations (all `Ran`)
+
+| # | Migration | Creates | Why it looks like this |
+|---|---|---|---|
+| 37 | `2026_09_29_150001_create_expense_categories_table` | `expense_categories` | **UNIQUE `code`** is what lets the seeder re-run without duplicating a category it already wrote, and what a report keys off when a name is reworded. `requires_receipt` is per category, `maximum_amount` is `DECIMAL(12,2)` and **nullable — `NULL` means "no ceiling", which is not `0`**. `status` defaults to `active` and is indexed: retiring a category must be one row, not one deploy |
+| 38 | `2026_09_29_150002_create_expenses_table` | `expenses` | The approval columns copied from `leave_requests` / `overtime_requests`, because `ApprovalWorkflowService` writes all three: `current_approval_step` + a nullable `approval_workflow_id` + the four lifecycle timestamps. `final_approved_by` rather than `approved_by`, because approval is the last link of a chain. `employee_id` is `RESTRICT` and derived from the session; `project_id`/`site_id` are nullable `RESTRICT` so a claim cannot silently lose the place it was booked against; **`amount DECIMAL(12,2)`**, and four `(…, expense_date)` / `(…, status)` composites for the list, the summary and the two date-range views |
+| 39 | `2026_09_29_150003_create_expense_receipts_table` | `expense_receipts` | Facts about a **private** file and nothing else: `path` is a server-minted name under `expense-receipts/{expenseId}/`, never a URL; `original_name` is data for a list to read, never something anything opens with. `cascadeOnDelete` on `expense_id` — a receipt cannot outlive the claim it is evidence for — and `SET NULL` on `uploaded_by` |
+
+**51 tables** total in `hrms_laravel`, across **44 migrations** (3 framework,
+1 Sanctum, 10 Phase 2, 1 Phase 3, 2 Phase 5, 9 Phase 6, 7 Phase 7, 7 Phase 8,
+1 repayment floor, 3 Phase 9). The Phase 8 close was **48 tables / 41
+migrations**; Phase 9 adds exactly three of each, and no earlier migration
+was touched.
 
 ### Why two foreign keys are "deferred"
 
@@ -882,6 +1109,10 @@ by a cascade.**
 | `site_activity_report_photos` → `site_activity_reports` | **CASCADE** | A photograph is evidence *of* a report; it has no meaning alone. The only cascade in the schema that removes a record somebody wrote. |
 | `daily_site_report_photos` / `_manpower` / `_materials` / `_equipment` → `daily_site_reports` | **CASCADE** | Child rows of one document, removed with it. |
 | `site_activity_reports` / `daily_site_reports` → `employees` / `users` / `projects` / `sites` | **RESTRICT** | A site-day that has been reported on is what makes a site or project historical. |
+| `expenses` → `employees` / `expense_categories` / `projects` / `sites` | **RESTRICT** | A claim against money spent cannot outlive the person, the category or the place it was spent at. `project_id`/`site_id` are nullable but still `RESTRICT`: losing a site silently would break the audit trail. |
+| `expenses.approval_workflow_id` → `approval_workflows` · `expenses.final_approved_by` → `users` | `SET NULL` | Configuration and people both change; the claim and its materialised chain in `approval_records` stay readable either way. |
+| `expense_receipts.expense_id` → `expenses` | **CASCADE** | Evidence cannot outlive the claim it is evidence for. Expenses themselves have no delete endpoint, so in practice nothing reaches the cascade. |
+| `expense_receipts.uploaded_by` → `users` | `SET NULL` | Who attached a file is provenance, not ownership of it. |
 
 **Soft deletes** (`deleted_at`) are used on master data where recoverability
 matters: `departments`, `designations`, `employees`, `projects`, `sites`, `shifts`.
@@ -948,6 +1179,10 @@ and retracting one is what `status` and a later approval step are for.
 | `loan_installments` | **UNIQUE** `(loan_id, sequence)` — `li_loan_seq_uk` | A schedule cannot grow a second "payment 4" |
 | `loan_installments` | `(status, due_date)` · `(payroll_id)` | What is due next, and what each run has already taken |
 | `salary_certificate_requests` | `(employee_id, status)` | "My requests", and the pending queue a desk works through |
+| `expense_categories` | **UNIQUE** `(code)` · `(status)` | Re-seeding updates a row instead of adding a second "Travel", and the claim form asks for the active ones |
+| `expenses` | `(employee_id, expense_date)` — `exp_emp_date_idx` · `(expense_category_id, status)` — `exp_cat_status_idx` | "My claims", and "what is pending in this category" |
+| `expenses` | `(project_id, expense_date)` — `exp_project_date_idx` · `(site_id, expense_date)` — `exp_site_date_idx` · `(status)` | The two date-range views a project or a site asks for, plus the status filter the list and the summary both apply |
+| `expense_receipts` | `(expense_id)` (the FK) | One claim's evidence in order; receipts are never listed on their own |
 
 Composite indexes were chosen for the two filters that appear together most
 often in HR reports: *department × status* and *site × start date*. The two
@@ -964,7 +1199,8 @@ verified with `DB::enableQueryLog()` during testing.
 > The Phase 5 tables (`attendances`, `site_visits`) are documented in full in
 > §2.4 above, alongside their design reasons. The Phase 7 report tables are
 > documented in full in **§2.9** — and, column by column, in the docblocks of
-> their own migrations.
+> their own migrations. The three Phase 9 expense tables are documented in
+> full in **§2.10**.
 
 ```
 settings
@@ -1071,14 +1307,18 @@ assert the exact vocabulary:
 
 `audit_logs`, `notifications`, `notification_preferences`, `employee_documents`,
 `employee_onboarding`, `trainings`, `employee_trainings`, `assets`,
-`asset_assignments`, `expenses`, `expense_receipts`, `device_tokens`.
+`asset_assignments`, `device_tokens`.
 
 **Phase 8 built seven of these** (`payrolls`, `payroll_items`, `allowances`,
 `payroll_adjustments`, `loans`, `loan_installments`,
 `salary_certificate_requests`) and deliberately did **not** build a
 `salary_slips` table: a slip is a `payrolls` row rendered to PDF on demand, so
-there is no stored document to expire, cache or leak. `expenses` and
-`expense_receipts` remain design only for Phase 9.
+there is no stored document to expire, cache or leak.
+
+**Phase 9 built `expenses` and `expense_receipts`** — the two that had been
+sitting on this list since Phase 2 — together with `expense_categories`,
+which was designed alongside them and seeded with six rows. All three are
+documented in **§2.10**. Everything still named above remains design only.
 
 > **Deliberately absent:** `leave_documents` — a medical certificate is a file
 > on the private disk with its metadata on `leave_requests` (§2.6).

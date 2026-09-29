@@ -7,6 +7,7 @@ use App\Models\Attendance;
 use App\Models\DailySiteReport;
 use App\Models\Employee;
 use App\Models\EmployeeSiteAssignment;
+use App\Models\Expense;
 use App\Models\Holiday;
 use App\Models\LeaveRequest;
 use App\Models\Loan;
@@ -621,6 +622,185 @@ final class Visibility
             $record->site_id,
             true,
         );
+    }
+
+    /* ------------------------------------------------------------- expenses */
+
+    /**
+     * May this user read somebody *else's* expense claim?
+     *
+     * The same three ways in as attendance, leave and overtime — a scoped
+     * role, `*.manage`, `*.approve` — because a claim sits in front of the
+     * same readers for the same reasons: the person who filed it, the line
+     * manager who signs it, and the back office that pays it.
+     *
+     * Deliberately *not* open on `employees.view` the way leave and
+     * overtime are. `mayViewOthersOvertime()` lets anybody who may read the
+     * staff directory read the company's overtime; that is defensible for
+     * minutes and wrong for money. A claim is a demand on the company's
+     * funds, so the question "may you see other people's?" gets the answer
+     * payroll and loans get: only if you have something to do with them.
+     * Management, holding just `expenses.view`, therefore reads its own
+     * claims and nobody else's — read-only access, as specified.
+     */
+    public static function mayViewOthersExpenses(User $user): bool
+    {
+        if (! $user->can('expenses.view')) {
+            return false;
+        }
+
+        if (self::attendanceIsScopedFor($user)) {
+            return true;
+        }
+
+        return $user->can('expenses.manage') || $user->can('expenses.approve');
+    }
+
+    /**
+     * @param  Builder<Expense>  $query
+     * @return Builder<Expense>
+     */
+    public static function expensesFor(Builder $query, User $user)
+    {
+        $reports = self::directReportIds($user);
+
+        if (! self::mayViewOthersExpenses($user)) {
+            // Fails closed, and to `0` rather than a raw false for the same
+            // reason attendanceFor() does it: indexable, and honest about
+            // what it means when the account has no employee record. The
+            // direct reports stay in, for the reason given on
+            // expenseIsVisible(): you cannot be asked to read what you sign.
+            return $query->where(function ($q) use ($user, $reports) {
+                $q->where('expenses.employee_id', $user->employee?->id ?? 0);
+
+                if ($reports->isNotEmpty()) {
+                    $q->orWhereIn('expenses.employee_id', $reports);
+                }
+            });
+        }
+
+        if (! self::attendanceIsScopedFor($user)) {
+            return $query;
+        }
+
+        // Two ways in, and the pair has to agree with expenseIsVisible() or
+        // one of them is not a boundary at all: the workforce scope, and
+        // being the reporting manager of whoever filed it.
+        //
+        // The second clause is not a courtesy. EXP-STD's *first link* is
+        // `reporting_manager`, so a claim's own line manager is handed that
+        // claim to approve whether or not they supervise its site — and a
+        // supervisor who may sign but may not open has been given a decision
+        // to make with the document hidden.
+        return $query->where(function ($q) use ($user, $reports) {
+            // employeesFor() narrows on `employees.*`, so the scope has to be
+            // expressed as a sub-query against that table rather than run
+            // against `expenses`, where those columns do not exist.
+            $q->whereHas('employee', fn ($inner) => self::employeesFor($inner, $user));
+
+            if ($reports->isNotEmpty()) {
+                $q->orWhereIn('expenses.employee_id', $reports);
+            }
+        });
+    }
+
+    /**
+     * The row-level twin of expensesFor(), so a `show` cannot answer "yes"
+     * to a claim the index deliberately hid.
+     */
+    public static function expenseIsVisible(User $user, Expense $expense): bool
+    {
+        if ($user->employee?->id === $expense->employee_id) {
+            return true;
+        }
+
+        // Their reporting manager — the person EXP-STD will put its first
+        // link in front of. Asked before mayViewOthersExpenses() because it
+        // is not a claim about the reader's role, it is a fact about this
+        // particular claim: somebody has to be able to read what they are
+        // about to sign, and in this system that somebody is named on the
+        // employee row rather than granted by a permission.
+        if ($user->employee !== null
+            && $expense->employee?->reporting_manager_id === $user->employee->id) {
+            return true;
+        }
+
+        if (! self::mayViewOthersExpenses($user)) {
+            return false;
+        }
+
+        if (! self::attendanceIsScopedFor($user)) {
+            return true;
+        }
+
+        return self::personRowIsVisible(
+            $user,
+            $expense->employee_id,
+            $expense->project_id,
+            $expense->site_id,
+            true,
+        );
+    }
+
+    /**
+     * May this user book a claim against this project / site at all?
+     *
+     * Asked on create, on update and again at submit, because the site a
+     * claim points at is the one thing a client sends that says *where*
+     * money was supposedly spent — and "you may only claim where you are
+     * placed" is worthless if it is checked once against the first draft.
+     *
+     * Four ways in, and no fifth:
+     *  - nothing claimed against anything (neither id given) needs no
+     *    posting: a taxi home after a late shift belongs to nobody's site;
+     *  - `expenses.manage`, the explicit back-office grant, which is what
+     *    lets HR book a claim on behalf of a project they never stand on;
+     *  - the site is one of theirs — an active posting, their primary site,
+     *    or a site they manage or supervise (attachedSiteIds);
+     *  - the project is one they personally run (scopedProjectIds), or one
+     *    they are actively posted to, or their primary project — a
+     *    Project Manager is on every site of a project by definition and
+     *    on none of them by posting.
+     *
+     * Deliberately does NOT fall open for roles that are unscoped, exactly
+     * as mayReportAt() does not: the class's general convention (an
+     * unlisted role reads what its permission admits) is right for reading
+     * and wrong for filing, because there is no permission-only answer to
+     * "is this their site?".
+     */
+    public static function mayClaimExpenseAt(User $user, ?int $projectId, ?int $siteId): bool
+    {
+        if ($projectId === null && $siteId === null) {
+            return true;
+        }
+
+        if ($user->can('expenses.manage')) {
+            return true;
+        }
+
+        if ($siteId !== null && self::attachedSiteIds($user)->contains($siteId)) {
+            return true;
+        }
+
+        if ($projectId !== null && self::scopedProjectIds($user)->contains($projectId)) {
+            return true;
+        }
+
+        $employee = $user->employee;
+
+        if ($employee === null || $projectId === null) {
+            return false;
+        }
+
+        if ($employee->primary_project_id === $projectId) {
+            return true;
+        }
+
+        return EmployeeSiteAssignment::query()
+            ->where('employee_id', $employee->id)
+            ->where('project_id', $projectId)
+            ->where('status', EmployeeSiteAssignment::STATUS_ACTIVE)
+            ->exists();
     }
 
     /**
@@ -1262,6 +1442,28 @@ final class Visibility
 
         return self::scopedProjectIds($user)->contains($employee->primary_project_id)
             || self::scopedSiteIds($user)->contains($employee->primary_site_id);
+    }
+
+    /**
+     * The employees this user is named `reporting_manager_id` for.
+     *
+     * Split out because the same set has to be read by the list and by the
+     * single-record check — a helper that is inlined twice is a helper that
+     * drifts twice.
+     *
+     * @return Collection<int, int>
+     */
+    private static function directReportIds(User $user): Collection
+    {
+        $employeeId = $user->employee?->id;
+
+        if ($employeeId === null) {
+            return collect();
+        }
+
+        return Employee::query()
+            ->where('reporting_manager_id', $employeeId)
+            ->pluck('id');
     }
 
     /**

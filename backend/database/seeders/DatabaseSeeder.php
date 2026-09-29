@@ -24,6 +24,9 @@ class DatabaseSeeder extends Seeder
             // chain has to exist by the time the type is written.
             ApprovalWorkflowSeeder::class,
             LeaveTypeSeeder::class,
+            // Categories before anything that might reference one — an
+            // expense row cannot exist without a category to name.
+            ExpenseCategorySeeder::class,
             DevelopmentDataSeeder::class,
         ]);
     }

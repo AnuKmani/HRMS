@@ -200,6 +200,28 @@ return [
         'report_photo_directory' => (string) env('HRMS_REPORT_PHOTO_DIRECTORY', 'site-report-photos'),
 
         'report_photo_max_kilobytes' => (int) env('HRMS_REPORT_PHOTO_MAX_KB', 5120),
+
+        /*
+        | Receipts on expense claims (Phase 9).
+        |
+        | The same rules as a medical certificate — private disk, no
+        | public URL, server-minted filename, read back only through the
+        | claim's own policy — because a receipt is a document in exactly
+        | the same sense: somebody's invoice or card slip, filed against a
+        | named person's claim for money. Nothing is re-encoded either. A
+        | PDF has to stay a PDF or it stops being a document anybody can
+        | open, and stripping image metadata would mean parsing formats
+        | this app has no library for. What IS dropped is the client's
+        | filename, which is the one piece of metadata the app itself
+        | creates and the one that carries path-like rubbish.
+        |
+        | A directory and a ceiling of their own rather than reusing the
+        | certificate's: an operator who raises the scan limit for medical
+        | notes should not silently raise the receipt limit too.
+        */
+        'expense_receipt_directory' => (string) env('HRMS_EXPENSE_RECEIPT_DIRECTORY', 'expense-receipts'),
+
+        'expense_receipt_max_kilobytes' => (int) env('HRMS_EXPENSE_RECEIPT_MAX_KB', 5120),
     ],
 
     /*

@@ -9,10 +9,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 /**
  * A materialised approval step: one row per (subject, sequence).
  *
- * The subject columns are polymorphic — a row belongs to either a leave
- * request or an overtime request — because a step cannot have two foreign
- * keys and a table per subject would mean a third copy of the same approval
- * logic. The constants below are the only strings allowed there.
+ * The subject columns are polymorphic — a row belongs to a leave request, an
+ * overtime request or an expense claim — because a step cannot have two
+ * foreign keys and a table per subject would mean a third copy of the same
+ * approval logic. The constants below are the only strings allowed there.
  *
  * `acted_by` is a User id: approvals are an act performed by a *session*, and
  * the employee behind that session is reachable through the user. Recording
@@ -27,7 +27,9 @@ class ApprovalRecord extends Model
 
     public const TYPE_OVERTIME = 'overtime_request';
 
-    public const TYPES = [self::TYPE_LEAVE, self::TYPE_OVERTIME];
+    public const TYPE_EXPENSE = 'expense';
+
+    public const TYPES = [self::TYPE_LEAVE, self::TYPE_OVERTIME, self::TYPE_EXPENSE];
 
     public const STATUS_WAITING = 'waiting';
 
@@ -86,11 +88,11 @@ class ApprovalRecord extends Model
     }
 
     /**
-     * The leave request this step belongs to, or null for an overtime step.
+     * The leave request this step belongs to, or null for any other subject.
      *
      * Manual rather than a polymorphic relation: Laravel's morph would need a
      * `subject_type` value it recognises and a matching `subject()` method on
-     * both parents, and there are exactly two subjects today.
+     * every parent, and there are three subjects today.
      */
     public function leaveRequest(): ?LeaveRequest
     {
@@ -103,6 +105,13 @@ class ApprovalRecord extends Model
     {
         return $this->subject_type === self::TYPE_OVERTIME
             ? OvertimeRequest::query()->find($this->subject_id)
+            : null;
+    }
+
+    public function expense(): ?Expense
+    {
+        return $this->subject_type === self::TYPE_EXPENSE
+            ? Expense::query()->find($this->subject_id)
             : null;
     }
 

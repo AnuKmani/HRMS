@@ -1,14 +1,16 @@
 # Testing
 
-> **Status:** Phase 8 — leave, certificates, LOP, holidays, timesheets,
+> **Status:** Phase 9 — leave, certificates, LOP, holidays, timesheets,
 > overtime, the site vertical slice (activity reports, the official daily
-> report, its photographs and its on-demand PDF) and now **the payroll
-> vertical slice** (ledger, calculation, loans and salary documents) are
-> covered end to end on top of Phases 1–7, plus the **payroll financial-
+> report, its photographs and its on-demand PDF), **the payroll
+> vertical slice** (ledger, calculation, loans and salary documents) and now
+> **the expense vertical slice** (claims, the approval chain, receipt files
+> and the three Flutter screens) are covered end to end on top of Phases 1–7,
+> plus the **payroll financial-
 > safety hardening** (a net-salary floor and partial repayments,
-> `PayrollRepaymentTest`). Backend **469 passed (2915
-> assertions)**, Flutter **378 passed**. This document defines the strategy
-> for the modules still to come (Phases 9–12).
+> `PayrollRepaymentTest`). Backend **499 passed (3251
+> assertions)**, Flutter **454 passed**. This document defines the strategy
+> for the modules still to come (Phases 10–12).
 
 ---
 
@@ -114,6 +116,14 @@ to contain **no** SQL, stack trace, model class or internal path.
 | Site Supervisor approves leave | `403` |
 | Project Manager views own project sites | `200` |
 | Unauthenticated request | `401` |
+| An employee approves (or rejects) their own expense claim, even when the chain resolves to them | `403` | ✅ Phase 9 (`ExpenseTest`) |
+| A supervisor signs a claim whose current link resolved to somebody else's line manager | `403` | ✅ Phase 9 (`ExpenseTest`) |
+| The same link answered a second time — duplicate approval prevention | `403` | ✅ Phase 9 (`ExpenseTest`) |
+| An employee reads a colleague's claim, summary or receipt | `403` | ✅ Phase 9 (`ExpenseTest`, `ExpenseReceiptTest`) |
+| A role without the grant files, edits or signs (Management, Finance, an ordinary Employee at the decision) | `403` | ✅ Phase 9 (`ExpenseTest`) |
+| Editing or re-submitting a submitted claim; cancelling a settled one; touching receipts after submit | `409` | ✅ Phase 9 (`ExpenseTest`, `ExpenseReceiptTest`) |
+| A client-sent `employee_id` or `status`; an amount of `0`, negative, non-numeric or over `99999999.99`; a site outside the named project or one this person is not placed at; a rejection with no `remarks` | `422` with an `errors` map | ✅ Phase 9 (`ExpenseTest`) |
+| A file that is not a receipt, an empty batch, an 11th receipt, or a receipt-requiring category submitted with no evidence | `422`, nothing written | ✅ Phase 9 (`ExpenseReceiptTest`) |
 
 > **Rule:** hiding a button is not authorization. Every denied action must return `403`
 > from the API regardless of what the UI shows.
@@ -514,6 +524,63 @@ are simply not party to.
 
 ---
 
+### 3.11 Expense management ✅ (Phase 9 — `ExpenseTest`, `ExpenseReceiptTest`)
+
+**30 tests** — `ExpenseTest` 20 and `ExpenseReceiptTest` 10. All on
+`hrms_testing`, both behind the shared `BuildsExpenses` concern (seeds the
+Role / Permission / RolePermission / Setting / ApprovalWorkflow /
+ExpenseCategory seeders **in that order**, and pins the clock with
+`travelTo('2026-09-28 09:00:00')`), so a claim dated `2026-09-25` is never
+"yesterday" depending on who runs the suite.
+
+**`ExpenseTest` — 20** (create, site/project consistency, the chain, scope,
+summary)
+
+| Test | Expectation |
+|---|---|
+| `test_a_claim_belongs_to_the_session_and_starts_as_a_draft` | `201` with `employee_id` from the token, `status=draft`, `is_draft`/`is_open`, no chain frozen until submit, `currency` normalised to `AED`, `amount` a decimal string `'150.00'`, `receipt_count: 0` |
+| `test_fields_the_client_does_not_own_are_refused_rather_than_ignored` | `employee_id` + `status` in the body → **`422` naming both**, and **no row written** — refused, never silently dropped |
+| `test_the_amount_the_date_and_the_description_are_validated_before_anything_is_written` | `0`, `-5.00`, `free`, `100000000.00` → `422` on `amount`; a future date and a garbage date → `422` on `expense_date`; empty `description` and a bad `currency` → `422`; zero rows throughout |
+| `test_money_is_rounded_to_the_column_and_not_left_to_a_float` | `100.999` arrives back as `'101.00'` **and** the stored column reads `'101.00'` — the column is the record |
+| `test_the_category_rules_are_read_from_the_table_and_enforced` | the seeded FOOD ceiling (1000.00) refuses 1500.00 on `amount`; a retired (`inactive`) category → `422` on `expense_category_id`; an unknown id → `422`; nothing written |
+| `test_the_ceiling_is_reread_at_every_step_so_a_draft_cannot_outrun_it` | lower the ceiling *after* the draft was filed → the edit **and** the submit each answer `422` on `amount`, and the claim stays `draft` |
+| `test_a_site_must_belong_to_the_project_named_and_to_somewhere_this_person_is_placed` | a site from another project → `422` on `site_id`; a site with no project named → `422` on `project_id`; a consistent pair writes |
+| `test_a_claim_may_only_be_booked_against_a_place_this_person_is_actually_at` | no posting at all → `422` on `site_id`; a primary posting admits; an active assignment admits; an **ended** assignment does not; `expenses.manage` may book anywhere |
+| `test_a_draft_can_be_edited_until_it_is_submitted_and_not_after` | `PUT` on a draft → `200`; submit → `pending`, `current_approval_step: 1`; `PUT` again → **`409`**; a second submit → **`409`** |
+| `test_the_chain_walks_supervisor_then_finance_and_only_the_current_link_may_sign` | Finance and HR — both holding `expenses.manage` — are refused at link 1 (`403`); the supervisor approves → step 2; Finance approves → `approved`, `approved_at` set, `final_approved_by` recorded, and **two `ApprovalRecord`s in order with who acted and what they said** |
+| `test_a_link_that_has_already_been_answered_cannot_be_answered_twice` | repeat `approve`/`reject` at the same link → `403` at both links; exactly **2** decided records however many times the call was repeated |
+| `test_nobody_approves_their_own_claim_even_when_the_chain_points_at_them` | the claimant is their own reporting manager → `approve` and `reject` both `403`, and the claim stays `pending` (the refusal blocked the act, not the claim) |
+| `test_a_supervisor_who_is_not_this_claims_line_manager_cannot_sign` | same role, same grant, one step to answer — not theirs → `403` |
+| `test_a_refusal_needs_a_reason_closes_the_chain_and_names_who_gave_it` | reject with no `remarks` → **`422` on `remarks`**; with one → `rejected`, `rejected_at`, an `ApprovalRecord` carrying actor and remark, the remaining link closed |
+| `test_a_claim_can_be_cancelled_while_it_is_open_and_never_after` | cancel a draft → `cancelled`; cancel twice → `409`; withdraw a pending claim → `cancelled` **and its chain cleared**; an approved claim → `409` |
+| `test_an_employee_reads_only_their_own_claims` | the list returns only their rows; a colleague's `show` → `403`; their own → `200` |
+| `test_the_line_manager_who_must_sign_can_read_what_they_are_being_asked_to_sign` | the reporting manager can read the claim **and the index agrees with the show**; another line manager, same role → `403` |
+| `test_roles_without_the_grant_cannot_reach_the_actions_that_need_it` | Management reads the list and the categories but `POST` → `403`; Finance files nothing (`403`); an Employee never approves at any link |
+| `test_the_summary_totals_only_what_this_user_may_read_and_honours_the_date_range` | `by_status` / `by_category` as decimal strings that add up, scoped to the reader; `from`/`to` is containment, not equality; a colleague with nothing reports `0.00` and `[]` |
+| `test_the_list_filters_by_status_employee_project_and_date` | status, project, site, date range, category and employee filters each narrow; an `employee_id` outside the caller's scope returns **nothing**, not everything |
+
+**`ExpenseReceiptTest` — 10** (private storage, separate receipt grant,
+validation, state)
+
+| Test | Expectation |
+|---|---|
+| `test_receipts_land_on_the_private_disk_under_a_name_the_client_never_chosen` | two files → two rows; `url` is the **id-based** `/api/v1/expenses/{e}/receipts/{r}`; **no `path` key and no `expense-receipts/` anywhere in the body**; the private disk holds only `expense-receipts/{id}/{uuid}.{ext}` with none of the client's names; the public disk is empty; `uploaded_by` is the **user** id |
+| `test_a_receipt_is_read_back_only_through_its_own_claims_route` | `200` with `Content-Disposition: attachment`, `Cache-Control: no-store`, `application/pdf`; an unknown claim → `404` (a path guess has nowhere to start) |
+| `test_an_employee_reads_their_own_receipts_and_never_a_colleagues` | a colleague holding `expenses.view` + `expenses.create` gets `403` on show, fetch and delete, and the row stays put; HR Admin, who may read the claim, fetches it `200` |
+| `test_the_receipts_grant_separates_reading_the_numbers_from_opening_the_document` | the Site Supervisor scoped to the site reads claim **and** receipt (`200`/`200`); the Site Engineer scoped to the same site reads the claim but is refused the document (`200`/`403`) — two permissions, two answers, one claim |
+| `test_a_receipt_belongs_to_one_claim_and_cannot_be_reached_through_another` | both claims are the caller's, so the `403` on fetch and delete is about the pairing alone; one row, one file remain |
+| `test_a_file_that_is_not_a_receipt_is_refused_and_nothing_is_written` | HTML wearing a `.pdf` name → `422`; a valid PDF named `.txt` → `422`; over the configured ceiling → `422`; an empty batch → `422` on `receipts` — **no rows and no files after any of them** |
+| `test_a_category_that_demands_evidence_will_not_submit_without_it` | TRANSPORT (`requires_receipt`) submits → **`422` on `receipts`, still `draft`**; OTHER submits with no receipt; upload one and the same claim submits → `pending` |
+| `test_receipts_can_only_be_changed_while_the_claim_is_a_draft` | after submit, an upload → `409` and a delete → `409`; still one row, one file |
+| `test_removing_a_receipt_takes_the_bytes_with_it` | delete → `200`, `receipt_count` drops, the **file leaves the disk**; deleting again → `404` |
+| `test_a_claim_carries_a_bounded_number_of_receipts` | 6 + 4 = 10 accepted across two batches; an eleventh → **`422`**, still 10 |
+
+**Deliberately not asserted here:** an audit row for any decision, and a
+notification — neither exists (SECURITY §8), so the tests assert the
+`approval_records` chain and the stamped columns instead.
+
+---
+
 ## 4. Scheduler / Job Tests
 
 | Job | Test |
@@ -586,7 +653,7 @@ it cannot be pointed at development data by mistake.
 
 ## 5. Flutter Test Matrix
 
-### 5.1 Unit ✅ (Phases 3–8)
+### 5.1 Unit ✅ (Phases 3–9)
 
 | Target | Tests | File |
 |---|---|---|
@@ -605,6 +672,7 @@ it cannot be pointed at development data by mistake.
 | `SiteActivityReport` / `DailySiteReport` | the author is parsed only when the server sends it and **no `employee_id` is ever read**; `hasUsableGps` requires all three keys, so a half-sent fix is *not* a location; status labels; `displayTotalManpower` preferring the rows a reader can add up; `ManpowerRow.category` accepted as free text; `quantityLabel`; `SiteReportPhoto.pathFor` building the private path from ids and **nothing else**; `photosFrom` refusing a payload that is not a list; `reportPdfFilename` → `daily-site-report-1-28092026` | `test/features/site_reports/domain/site_report_models_test.dart` (10) |
 | The two report repositories | the `{items, meta}` envelope; submit carrying exactly three GPS keys; a create body with **no `employee_id`, no `status` and no derived total**; a payload that is not an object **refused rather than guessed at**; the multipart batch as `photos[0]`… with a client-minted name; a bad upload shape refused; `reportable-sites` asked at its own path; daily submit with **no body**; and the PDF request using a verb that bypasses envelope decoding | `test/features/site_reports/data/api_site_reports_test.dart` (10) |
 | `Money` / `safePdfFilename` (Phase 8) | `30000.00` → `INR 30,000.00`; the currency code read **from the row** rather than a constant; `null`/`''` rendering as zero instead of crashing; **half away from zero** matching PHP's `round()` so the app and the PDF agree on `0.125`; a negative stays negative; `plain()` and `delta()` for a column of one currency and a signed change; and the filename helpers refusing anything a path could be made of while leaving an ordinary generated name intact | `test/core/presentation/money_test.dart` (10) |
+| **The expense slice — 7 Phase 9 files, 70 tests** | **domain**: an amount arrives as a decimal string and is **never parsed into a double**, a zero-padded figure survives the trip, only a draft may be edited/submitted/given receipts, a settled claim carries its decision, *open* vs settled, nothing awaiting a decision until submit, status labels that never spell `pending` at the user, receipt-count phrasing, the receipt requirement read off the claim's own copy with the category row as fallback, `full_name` read from the brief resource (absent rather than crashing), and the approval chain keeping its sequence and its approver; **categories**: the two rules as one line, no ceiling ≠ a ceiling of zero, a retired category not pickable, an absent status read as inactive; **receipts**: ids, labels, size and type with **no storage path**, an image drawn inline while a document is handed to the OS opener, a size in the unit a person compares, a nameless row still drawing; **repository**: a create body with **no `employee_id` and no `status`**, `PUT` on the claim's own path, the four transitions as four endpoints, `remarks` carried through reject and approve, receipts sent as one multipart `receipts` batch and read **by id, never through a URL**, categories read as a plain collection rather than a page, and 401/403 read as the server wrote them; **screens**: the lock before any request, the `expenses.create` / `update` / `approve` doors, the server's field errors drawn against the fields they name, and a receipt photographed, filed, opened by id and removed | `test/features/expenses/domain/expense_test.dart` (15) · `test/features/expenses/domain/expense_category_test.dart` (8) · `test/features/expenses/domain/expense_receipt_test.dart` (4) · `test/features/expenses/data/api_expense_repository_test.dart` (15) · `test/features/expenses/presentation/expense_list_screen_test.dart` (7) · `test/features/expenses/presentation/expense_form_screen_test.dart` (8) · `test/features/expenses/presentation/expense_detail_screen_test.dart` (13) |
 
 **Two non-obvious guarantees worth keeping under test:**
 
@@ -615,7 +683,7 @@ it cannot be pointed at development data by mistake.
   interceptor and the controller can notice. The sign-in form's own message
   must survive.
 
-### 5.2 Widget ✅ (Phases 3–8)
+### 5.2 Widget ✅ (Phases 3–9)
 
 | Screen | States verified |
 |---|---|
@@ -647,6 +715,7 @@ it cannot be pointed at development data by mistake.
 | Certificate form (5) | reading and asking are the same grant; no grant means nothing to draw; **only `purpose` and `request_date` in the body — never an `employee_id`**; a blank date meaning today; and the 422 landing on `purpose` |
 | Certificate detail (9) | the lock before any request; the facts and the decision on them; an approved row offering **one button, not a search**; **`can_issue` read as the server's whole answer** rather than re-derived from `status`; deciding only with `.manage`; approve/reject moving through the repository; reject refusing an empty reason; a refusal shown as written; and a decided request **read-only** |
 | Home / routes (6) | four Phase 8 doors drawn under their own grants and absent without them; **a `payroll.summary.view`-only reader offered the summary door and not the ledger**; every one of the ten new paths resolving to its own screen; a session with no pay grant refused at each; and `new` never mistaken for a row id |
+| Home / routes — ✅ Phase 9 (6) | the expense door appearing under `expenses.view` beside the other home doors, absent without that grant, and **withheld when the grant is a different permission** rather than any `*.view`; the four Phase 9 paths (`/expenses`, `/expenses/new`, `/expenses/7`, `/expenses/7/edit`) each resolving to its own screen; a session with no `expenses.*` grant refused at **every** door before any request is made (`You may not raise an expense claim.` / `You may not edit this draft.`); and `/expenses/new` never mistaken for a row id |
 
 > **Don't read `TextFormField.obscureText`** — it is not public. Read the
 > widget's own `TextField.obscureText` field instead.
@@ -757,6 +826,24 @@ guessed the caller's permissions), `RecordingPdfOpener`, `scopedPhase8(...)`,
 `phase8Router()`, the fixtures `payrollRow` / `payrollItem` / `loanRow` /
 `loanInstallment` / `certificateRow`, and re-exports of `expectQuery` and
 `pageOf`. It re-exports from `phase4` so a Phase 8 test needs one import.
+
+Phase 9 added `test/support/phase9.dart`: `ScriptedExpenses` (the seven
+lifecycle verbs recorded rather than modelled — `lastTransition`,
+`lastTransitionId`, `lastRemarks`, plus `lastCreated` for the create body,
+`categoryRows` for the whole category vocabulary `GET /expense-categories`
+returns in one response, and an `actionError`
+that fires once), whose receipt methods are the exception and really mutate
+state (`addReceipts` appends rows and bumps `receiptCalls` /
+`lastReceiptExpenseId` / `lastReceiptCount`, `removeReceipt` takes one away
+and records `lastRemovedReceiptId`, `receipt()` resolves to a **real 1×1
+PNG** so the detail screen's `Image.memory` decodes instead of failing for a
+reason unrelated to the flow), `scopedPhase9(...)` (permission scope +
+scripted repository + an **always-overridden** `documentCameraProvider`, so
+the receipt sheet never opens the real camera provider and parks on a
+platform channel nobody answers), `phase9Router(...)`, and the fixtures
+`expenseRow` / `expenseCategory` / `expenseReceipt`. It re-exports
+`advance`, `useTallScreen`, `forbidden403`, `notFound404` and `unreachable`
+from `phase4`, so a Phase 9 test needs exactly one import.
 
 **Three things learned the hard way, now under test:**
 
@@ -978,7 +1065,8 @@ flutter test --coverage               # coverage report at coverage/lcov.info
 > There is no device or backend behind any of these. The suites run against
 > fakes in `test/support/fakes.dart`, `test/support/phase4.dart`,
 > `test/support/attendance.dart`, `test/support/phase6.dart`,
-> `test/support/site_reports.dart` and `test/support/phase8.dart`, so they
+> `test/support/site_reports.dart`, `test/support/phase8.dart` and
+> `test/support/phase9.dart`, so they
 > stay green while a server is stopped — which is exactly when a regression
 > shows up.
 
@@ -1041,11 +1129,12 @@ A phase is complete only when:
 |---|---|
 | Test strategy (this document) | ✅ Written |
 | Development/testing database split (`hrms_laravel` vs `hrms_testing`) | ✅ Phase 2 safety cleanup |
-| Backend test suite | ✅ **469 passed (2915 assertions)** — 75 Phase 2 + 45 Phase 3 + 70 Phase 4 + 131 Phase 5 (incl. selfie hardening) + 62 Phase 6 (22 `LeaveRequestTest` · 11 `LeaveCertificateTest` · 13 `OvertimeTest` · 9 `TimesheetTest` · 7 `HolidayApiTest`) + **42 Phase 7** (19 `SiteActivityReportTest` · 15 `DailySiteReportTest` · 8 `DailySiteReportPdfTest`) + **44 Phase 8** (13 `PayrollTest` · 11 `LoanTest` · 9 `SalaryDocumentTest` · **11 `PayrollRepaymentTest`**) |
-| Flutter test suite | ✅ **378 passed** — 89 Phases 3–4 + 87 Phase 5 + 39 Phase 6 + 88 Phase 7 + **75 Phase 8** |
+| Backend test suite | ✅ **499 passed (3251 assertions)** — 75 Phase 2 + 45 Phase 3 + 70 Phase 4 + 131 Phase 5 (incl. selfie hardening) + 62 Phase 6 (22 `LeaveRequestTest` · 11 `LeaveCertificateTest` · 13 `OvertimeTest` · 9 `TimesheetTest` · 7 `HolidayApiTest`) + **42 Phase 7** (19 `SiteActivityReportTest` · 15 `DailySiteReportTest` · 8 `DailySiteReportPdfTest`) + **44 Phase 8** (13 `PayrollTest` · 11 `LoanTest` · 9 `SalaryDocumentTest` · **11 `PayrollRepaymentTest`**) + **30 Phase 9** (**20 `ExpenseTest`** · **10 `ExpenseReceiptTest`**) |
+| Flutter test suite | ✅ **454 passed** — 89 Phases 3–4 + 87 Phase 5 + 39 Phase 6 + 88 Phase 7 + **75 Phase 8** + **76 Phase 9** (70 expense · 6 home/routes) |
 | Phase 6 registration checks | ✅ `php artisan route:list` (86 route definitions at that point) · `php artisan schedule:list` shows `EnforceSickCertificateDeadlines` |
 | Phase 7 registration checks | ✅ `php artisan route:list` — **104 route definitions under `api/*`, 109 registered** (18 Phase 7) · `php artisan migrate:status` all `Ran` · `composer validate` valid · `vendor\bin\pint --test` clean |
 | Phase 8 registration checks | ✅ `php artisan route:list` — **140 route definitions under `api/*`, 145 registered** (36 Phase 8) · `php artisan migrate:status` all `Ran` (48 tables / 41 migrations) · `composer validate` valid · `vendor\bin\pint --test` clean · `dart format lib test` clean · `flutter analyze` clean |
+| Phase 9 registration checks | ✅ `php artisan route:list` — **153 route definitions under `api/*`, 158 registered** (13 new under `expense`) · `php artisan migrate:status` all `Ran` (**44** migrations) · `composer validate` valid · `vendor\bin\pint --test` **PASS (375 files)** · `dart format .` clean (**216 files**) · `flutter analyze` clean · `flutter test` **454 passed** · `php artisan test` **499 passed (3251 assertions)**, all on `hrms_testing` |
 | Payroll financial-safety hardening checks | ✅ `php artisan test` **469 passed** (all on `hrms_testing`, never `hrms_laravel`) · `php artisan migrate:status` all `Ran` · `composer validate` valid · `vendor\bin\pint --test` clean · `dart format .` clean · `flutter analyze` clean · `flutter test` **378 passed** |
 | `flutter analyze` / `pint --test` / `composer validate` clean | ✅ |
 | CI pipeline running tests on every commit | ⬜ |

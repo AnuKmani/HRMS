@@ -14,6 +14,9 @@ import '../../features/designations/presentation/designations_list_screen.dart';
 import '../../features/employees/presentation/employee_detail_screen.dart';
 import '../../features/employees/presentation/employee_form_screen.dart';
 import '../../features/employees/presentation/employees_list_screen.dart';
+import '../../features/expenses/presentation/expense_detail_screen.dart';
+import '../../features/expenses/presentation/expense_form_screen.dart';
+import '../../features/expenses/presentation/expense_list_screen.dart';
 import '../../features/home/home_screen.dart';
 import '../../features/holidays/presentation/holiday_form_screen.dart';
 import '../../features/holidays/presentation/holidays_list_screen.dart';
@@ -287,6 +290,29 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/overtime/:id/edit',
         builder: (context, state) =>
             OvertimeFormScreen(overtimeId: idOf(state)),
+      ),
+
+      /* ------------------------------------------------------- expenses */
+
+      // Phase 9. Same shape as overtime's four: `new` before `:id`, because
+      // go_router matches in declaration order and `/expenses/new` would
+      // otherwise be read as a claim whose id is the word "new".
+      GoRoute(
+        path: '/expenses',
+        builder: (context, state) => const ExpenseListScreen(),
+      ),
+      GoRoute(
+        path: '/expenses/new',
+        builder: (context, state) => const ExpenseFormScreen(),
+      ),
+      GoRoute(
+        path: '/expenses/:id',
+        builder: (context, state) =>
+            ExpenseDetailScreen(expenseId: idOf(state)),
+      ),
+      GoRoute(
+        path: '/expenses/:id/edit',
+        builder: (context, state) => ExpenseFormScreen(expenseId: idOf(state)),
       ),
 
       /* --------------------------------------------------- site reports */
