@@ -8,7 +8,10 @@ use App\Http\Controllers\Api\V1\ClientSettingsController;
 use App\Http\Controllers\Api\V1\DailySiteReportController;
 use App\Http\Controllers\Api\V1\DepartmentController;
 use App\Http\Controllers\Api\V1\DesignationController;
+use App\Http\Controllers\Api\V1\DocumentTypeController;
+use App\Http\Controllers\Api\V1\EmployeeBankAccountController;
 use App\Http\Controllers\Api\V1\EmployeeController;
+use App\Http\Controllers\Api\V1\EmployeeDocumentController;
 use App\Http\Controllers\Api\V1\EmployeeSiteAssignmentController;
 use App\Http\Controllers\Api\V1\ExpenseController;
 use App\Http\Controllers\Api\V1\HolidayController;
@@ -17,6 +20,7 @@ use App\Http\Controllers\Api\V1\LeaveRequestController;
 use App\Http\Controllers\Api\V1\LeaveTypeController;
 use App\Http\Controllers\Api\V1\LoanController;
 use App\Http\Controllers\Api\V1\MovementController;
+use App\Http\Controllers\Api\V1\OnboardingController;
 use App\Http\Controllers\Api\V1\OvertimeController;
 use App\Http\Controllers\Api\V1\PasswordResetController;
 use App\Http\Controllers\Api\V1\PayrollAdjustmentController;
@@ -722,5 +726,107 @@ Route::prefix('v1')->group(function () {
         Route::put('expenses/{expense}', [ExpenseController::class, 'update'])
             ->whereNumber('expense')
             ->middleware('permission:expenses.update');
+
+        /* ----------------------------------- Phase 10: documents, onboarding */
+
+        // Four coarse gates across the whole module, and the row-level
+        // answer always from EmployeeDocumentPolicy / EmployeeOnboardingPolicy
+        // rather than from the middleware:
+        //
+        //   `documents.view`        read the catalogue and the list; Visibility
+        //                           then narrows every row to your own unless
+        //                           `documents.manage` is held too.
+        //   `documents.create`      file — your own, or anybody's with
+        //                           `documents.manage` (Visibility's
+        //                           mayFileDocumentsFor, asked inside the
+        //                           FormRequest where the target is known).
+        //   `documents.update`      correct what is on file, again row-scoped.
+        //   `documents.verify`      the only route that changes an
+        //                           *accepted* state; refused for your own
+        //                           document in every case.
+        //   `documents.delete`      archive. Nothing is removed.
+        //   `documents.expiry.view` the cross-employee "what is about to
+        //                           lapse" report — its own permission
+        //                           because the question is about everybody.
+        //   `onboarding.view`       read the directory of where people stand.
+        //   `onboarding.manage`     move the stage, complete the record.
+        //
+        // `GET employees/{employee}/bank-account` and its PUT deliberately
+        // carry **no `permission:` middleware at all** — the same door
+        // `GET employees/{employee}` has — because EmployeePolicy has to be
+        // able to admit an employee reading *their own* account, and no
+        // shared middleware can say "yours, or two grants".
+
+        // --- document types --------------------------------------------
+        // Reference data for the upload form. Gated by `documents.view`
+        // rather than `employees.view`, so an ordinary employee can reach
+        // the picker they are meant to attach their own passport through.
+        Route::get('document-types', [DocumentTypeController::class, 'index'])
+            ->middleware('permission:documents.view');
+
+        // --- employee documents ----------------------------------------
+        // `expiring` before `{document}` — the Phase 7 ordering rule, and
+        // `whereNumber` on the dynamic half so a literal could not be
+        // swallowed by it either way round.
+        Route::get('employee-documents/expiring', [EmployeeDocumentController::class, 'expiring'])
+            ->middleware('permission:documents.expiry.view');
+
+        Route::get('employee-documents', [EmployeeDocumentController::class, 'index'])
+            ->middleware('permission:documents.view');
+
+        Route::post('employee-documents', [EmployeeDocumentController::class, 'store'])
+            ->middleware('permission:documents.create');
+
+        Route::post('employee-documents/{document}/verify', [EmployeeDocumentController::class, 'verify'])
+            ->whereNumber('document')
+            ->middleware('permission:documents.verify');
+
+        Route::post('employee-documents/{document}/reject', [EmployeeDocumentController::class, 'reject'])
+            ->whereNumber('document')
+            ->middleware('permission:documents.verify');
+
+        // The bytes, and the only route to them. `documents.view` is the
+        // coarse door; EmployeeDocumentPolicy::viewFile is the real one —
+        // the same row scope as the record beside it, because the file *is*
+        // the disclosure.
+        Route::get('employee-documents/{document}/file', [EmployeeDocumentController::class, 'file'])
+            ->whereNumber('document')
+            ->middleware('permission:documents.view');
+
+        Route::get('employee-documents/{document}', [EmployeeDocumentController::class, 'show'])
+            ->whereNumber('document')
+            ->middleware('permission:documents.view');
+
+        Route::put('employee-documents/{document}', [EmployeeDocumentController::class, 'update'])
+            ->whereNumber('document')
+            ->middleware('permission:documents.update');
+
+        Route::delete('employee-documents/{document}', [EmployeeDocumentController::class, 'destroy'])
+            ->whereNumber('document')
+            ->middleware('permission:documents.delete');
+
+        // --- onboarding -------------------------------------------------
+        // `{employee}` rather than `{onboarding}`: the question a caller
+        // asks is "where does she stand?", and EmployeeOnboardingPolicy is resolved
+        // from an EmployeeOnboarding the controller stages unsaved where none
+        // exists yet — a GET must not materialise a row.
+        Route::get('onboarding', [OnboardingController::class, 'index'])
+            ->middleware('permission:onboarding.view');
+
+        Route::get('onboarding/{employee}', [OnboardingController::class, 'show'])
+            ->middleware('permission:onboarding.view');
+
+        Route::put('onboarding/{employee}', [OnboardingController::class, 'update'])
+            ->middleware('permission:onboarding.manage');
+
+        Route::post('onboarding/{employee}/complete', [OnboardingController::class, 'complete'])
+            ->middleware('permission:onboarding.manage');
+
+        // --- bank account -----------------------------------------------
+        // Two routes, no coarse gate — see the block at the top of this
+        // section for why one cannot exist here.
+        Route::get('employees/{employee}/bank-account', [EmployeeBankAccountController::class, 'show']);
+
+        Route::put('employees/{employee}/bank-account', [EmployeeBankAccountController::class, 'update']);
     });
 });

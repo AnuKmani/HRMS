@@ -1,21 +1,24 @@
 # Database Design
 
-> **Status:** Phase 9 — core schema, GPS attendance and site movement, the two
-> report families, the payroll vertical slice and now the expense vertical
-> slice. Laravel's base tables plus 10 Phase 2 migrations, the Phase 3
-> `users.status` column, the two Phase 5 migrations, the nine Phase 6
-> migrations, the seven Phase 7 migrations, the seven Phase 8 migrations, the
-> repayment-floor migration that adds `loan_installments.deducted_amount`
-> and the three Phase 9 expense migrations all exist: `settings`,
+> **Status:** Phase 10 — core schema, GPS attendance and site movement, the
+> report families, the payroll vertical slice, the expense vertical slice and
+> now the employee-document and onboarding slice. Laravel's base tables plus
+> 10 Phase 2 migrations, the Phase 3 `users.status` column, the two Phase 5
+> migrations, the nine Phase 6 migrations, the seven Phase 7 migrations, the
+> seven Phase 8 migrations, the repayment-floor migration that adds
+> `loan_installments.deducted_amount`, the three Phase 9 expense migrations
+> and the five Phase 10 migrations all exist: `settings`,
 > `departments`, `designations`, `shifts`, `projects`, `employees`, `sites`,
 > `employee_site_assignments`, `attendances`, `site_visits`, the
 > leave/timesheet/overtime/holiday tables, **the seven site-report tables
-> (§2.9)**, **the seven payroll tables (§2.7)** and **the three expense
-> tables (§2.10)**, plus the `spatie/laravel-permission` RBAC tables — **51
-> tables across 44 migrations** (Phase 8 closed at 48 tables across 41
-> migrations; Phase 9 adds three of each). Tables for later phases
-> (`employee_documents`, `trainings`, …) are **design only** and have not
-> been created. `hrms_testing` mirrors this schema for the test suite.
+> (§2.9)**, **the seven payroll tables (§2.7)**, **the three expense
+> tables (§2.10)** and **the five document / onboarding tables (§2.11)**,
+> plus the `spatie/laravel-permission` RBAC tables — **56 tables across 49
+> migrations** (Phase 9 closed at 51 tables across 44 migrations; Phase 10
+> adds five of each). Tables for later phases (`trainings`,
+> `employee_trainings`, `assets`, `asset_assignments`, …) are **design only**
+> and have not been created — training and assets were cut out of Phase 10's
+> approved scope. `hrms_testing` mirrors this schema for the test suite.
 
 **DBMS:** MariaDB 10.4.28 (XAMPP)
 **Charset:** `utf8mb4` / collation `utf8mb4_unicode_ci`
@@ -666,6 +669,120 @@ that renames its finance team still has a chain that works — and Project
 Manager, who holds `expenses.approve` but not `expenses.manage`, cannot sign
 off the payment.
 
+### 2.11 Employee documents & onboarding — Phase 10 ✅
+
+Five tables, five migrations. The file is **configuration plus rows**: what a
+passport demands is a row in `document_types`, never a branch in a service,
+and whether a joiner is finished is a computed checklist rather than eight
+booleans bolted onto `employees`.
+
+| Table | Purpose |
+|---|---|
+| `document_types` | The configurable half of the file: `name`, `code` (**UNIQUE** — the seeder's lookup key *and* the handle an onboarding requirement matches on), `description`, `requires_document_number`, `requires_issue_date`, `requires_expiry_date`, `expiry_warning_days` (**null = fall back to `hrms.expiry.default_warning_days`**, not "never expires"), `status` |
+| `employee_documents` | One row per filed document: employee, document type, `document_number`, `issue_date`, `expiry_date`, the *private* file facts (`path`, `original_name`, `mime_type`, `size_bytes`), `status`, `notes`, `uploaded_by`, `verified_at`, `verified_by`, `expiry_notified_at` |
+| `onboarding_requirements` | One row per thing a joiner must produce: `code` (**UNIQUE**), `label`, `kind` (`document` \| `data` \| `bank`), nullable `document_type_id`, `columns` (comma list for `kind = data`), `mandatory`, `sort_order`, `status` |
+| `employee_onboarding` | One row per employee (**UNIQUE `employee_id`** — an onboarding is a state of a person, not an event): `status` (`draft`, `pending_documents`, `hr_review`, `completed`), `started_at`, `completed_at`, `completed_by`, `notes` |
+| `employee_bank_accounts` | The one sensitive family (**UNIQUE `employee_id`**, 1:1): `bank_name`, `account_holder_name`, `iban`, `account_number`, `swift_bic` — every money-adjacent column on an **`encrypted` cast**, reachable only through `GET\|PUT /employees/{employee}/bank-account`, and never present in `EmployeeResource` |
+
+#### `document_types` shape — as built
+
+```
+document_types
+  id
+  name                      VARCHAR(100)
+  code                      VARCHAR(40) UNIQUE   ← seeder key, checklist match
+  description               VARCHAR(500) NULL
+  requires_document_number  TINYINT(1) DEFAULT 0
+  requires_issue_date       TINYINT(1) DEFAULT 0
+  requires_expiry_date      TINYINT(1) DEFAULT 0
+  expiry_warning_days       INT NULL              ← NULL = config default
+  status                    VARCHAR(20) DEFAULT 'active' INDEX  active | inactive
+  created_at / updated_at
+```
+
+**Nine seeded types** (`DocumentTypeSeeder`): `PASSPORT` (180 days),
+`EMIRATES_ID` (90), `VISA` (90), `EMPLOYMENT_CONTRACT` (0),
+`LABOUR_DOCUMENTS` (60), `CERTIFICATE` (0), `MEDICAL_DOCUMENT` (30),
+`TRAINING_CERTIFICATE` (60), `OTHER` (0). The first three are the only ones
+that require a number, an issue date *and* an expiry — everything else asks
+for nothing it was not told to ask for, which is why adding a type is a row
+and not a deploy.
+
+#### `employee_documents` shape — as built
+
+```
+employee_documents
+  id
+  employee_id            FK employees        restrictOnDelete  ← a file cannot outlive its person's row silently
+  document_type_id       FK document_types   restrictOnDelete
+  document_number        VARCHAR(100) NULL
+  issue_date             DATE NULL
+  expiry_date            DATE NULL           ← NULL = this type never expires
+  path                   VARCHAR(500)        ← private disk, random name; never returned
+  original_name          VARCHAR(255)
+  mime_type              VARCHAR(100)
+  size_bytes             BIGINT
+  status                 VARCHAR(20)  pending | valid | expired | rejected | archived
+  notes                  TEXT NULL
+  uploaded_by            FK users
+  verified_at            TIMESTAMP NULL
+  verified_by            FK users NULL
+  expiry_notified_at     TIMESTAMP NULL      ← the scan's idempotency marker
+  created_at / updated_at
+  INDEX (employee_id, document_type_id, status)   ← the checklist's own query
+  INDEX (status, expiry_date)                    ← the nightly scan
+  INDEX (expiry_date)                            ← "expiring soon" across everyone
+```
+
+`status` is **stored**; `expiry_state` (`none`, `valid`, `expiring_soon`,
+`expired`) and `days_until_expiry` are **computed on the server** from
+`expiry_date` against the type's `expiry_warning_days` (or the config
+default) and shipped beside every row — no client derives them, and no
+client can disagree with the scan. Uploads always arrive `pending`; changing
+the file or any identifying field resets it to `pending` and clears
+`verified_at`/`verified_by`. `expiry_notified_at` is written by
+`ScanDocumentExpiries` and read by the next run, so a scan that fires twice
+in one window raises one event, not two.
+
+`restrictOnDelete` on both foreign keys is deliberate: an employment file is
+evidence about a person who was here, and a cascade would let one stray
+`DELETE` erase it. The only destructive verb exposed is `DELETE
+/employee-documents/{document}`, and it is refused for anything already
+verified — archive is the normal exit, and it removes a row from the *active
+list* without removing the row.
+
+#### `onboarding_requirements` shape — as built
+
+```
+onboarding_requirements
+  id
+  code               VARCHAR(40) UNIQUE   ← passport, emirates_id, visa, …
+  label              VARCHAR(100)
+  kind               VARCHAR(20)  document | data | bank
+  document_type_id   FK document_types NULL   ← set only for kind = document
+  columns            VARCHAR(500) NULL       ← comma list, kind = data only
+  mandatory          TINYINT(1) DEFAULT 1
+  sort_order         INT DEFAULT 0
+  status             VARCHAR(20) DEFAULT 'active' INDEX
+  created_at / updated_at
+```
+
+**Eight seeded requirements** (`OnboardingRequirementSeeder`), all mandatory:
+`personal_information` (`data` — the non-empty employee columns),
+`passport`, `emirates_id`, `visa`, `employment_contract` (each `document`,
+matched to its type **by `code`**, so a deployment that renames a label does
+not break the checklist), `bank_information` (`bank`), `employee_photo`
+(`document`), `certificates` (`document`). The seeder throws rather than
+writing a null `document_type_id` if the type it names is missing.
+
+A `document` requirement is satisfied by **any non-archived, unexpired,
+`valid` document of that type**; otherwise the newest non-archived row
+decides between `pending_verification`, `rejected`, `expired` and `missing`.
+`data` is satisfied by every named column being non-empty on `employees`;
+`bank` by a row in `employee_bank_accounts`. Completion is refused with
+**409 naming each outstanding requirement** — never a silent success and
+never a bare 403.
+
 ---
 
 ## 3. Relationship Summary
@@ -890,6 +1007,39 @@ rows in `role_has_permissions`, so Super Admin's `['*']` counts as all 73.
 asserts the seeded count matches it exactly, so this number cannot drift
 silently.
 
+**Phase 10 added 7 → 80**: six more `documents.*` verbs
+(`documents.create`, `documents.update`, `documents.verify`,
+`documents.delete`, `documents.expiry.view`, `documents.manage` —
+`documents.view` was already in the catalogue) plus the whole new
+`onboarding` group (`onboarding.view`, `onboarding.manage`). Grants grew
+364 → **401** (37 rows).
+
+**Who holds the Phase 10 nine** (counts verified against
+`role_has_permissions`):
+
+| Permission | Roles | Held by |
+|---|---|---|
+| `documents.view` | **10** | every role — an employee reading their own file is the base case, not a special case |
+| `documents.create` | **7** | Employee, HR Admin, HR Executive, Project Manager, Site Engineer, Site Supervisor, Super Admin |
+| `documents.update` | **7** | Employee, HR Admin, HR Executive, Project Manager, Site Engineer, Site Supervisor, Super Admin |
+| `documents.expiry.view` | **4** | HR Admin, HR Executive, Payroll Admin, Super Admin |
+| `documents.verify` | **3** | HR Admin, HR Executive, Super Admin |
+| `documents.delete` | **3** | HR Admin, HR Executive, Super Admin |
+| `documents.manage` | **3** | HR Admin, HR Executive, Super Admin |
+| `onboarding.view` | **10** | every role — an employee may see where they themselves stand |
+| `onboarding.manage` | **3** | HR Admin, HR Executive, Super Admin |
+
+**`documents.manage` is the row-scope gate, and three roles is the whole
+point.** It is what separates "I may read the directory" from "I may read
+*somebody else's* passport". Project Manager, Site Supervisor and Site
+Engineer hold `documents.view` + `create` + `update` and **not** `manage`,
+so supervising a person does not hand over their Emirates ID, visa, medical
+or contract — `Visibility::mayViewOthersDocuments()` requires **both**
+`documents.view` *and* `documents.manage`, and `employees.view` is
+deliberately not a third door in. Bank accounts are gated again on top, by
+`EmployeePolicy::viewBankAccount` / `updateBankAccount`, on their own routes
+with no `permission:` middleware at all.
+
 **The full expense matrix — all six grants, role by role** (counts verified
 against `role_has_permissions`):
 
@@ -1080,6 +1230,22 @@ migrations** (3 framework,
 1 repayment floor, 3 Phase 9). The Phase 8 close was **48 tables / 41
 migrations**; Phase 9 adds exactly three of each, and no earlier migration
 was touched.
+
+### Phase 10 migrations (all `Ran`)
+
+| # | Migration | Creates | Why it looks like this |
+|---|---|---|---|
+| 40 | `2026_09_30_100001_create_document_types_table` | `document_types` | **UNIQUE `code`** is both the seeder's lookup key and the handle an onboarding requirement matches on — which is why nothing in `EmployeeDocumentService` knows what a passport is. `expiry_warning_days` is **nullable, and `NULL` means "use `hrms.expiry.default_warning_days`"**, not "never warn": the two must not be confusable, or a misconfigured type silently stops reminding anybody. No `ENUM` on `status`, per the standing rule |
+| 41 | `2026_09_30_100002_create_employee_documents_table` | `employee_documents` | `restrictOnDelete` on **both** `employee_id` and `document_type_id` — an employment file is evidence about somebody who was here, and a cascade would let one stray `DELETE` erase it. `path` is a server-minted `employee-documents/{employeeId}/{uuid}.{ext}` and is **never** returned. `expiry_notified_at` is the nightly scan's idempotency marker: read by the next run, written after it raises its event, so a doubled schedule raises one event. Three indexes — `(employee_id, document_type_id, status)` is the checklist's own query, `(status, expiry_date)` is the scan's, `(expiry_date)` is "expiring soon across everyone" |
+| 42 | `2026_09_30_100003_create_onboarding_requirements_table` | `onboarding_requirements` | **UNIQUE `code`** so a requirement is matched to its document type by code rather than by a label somebody may reword. `kind` is a `string(20)` vocabulary (`document`, `data`, `bank`) with constants, not a MySQL `ENUM`; `columns` is a comma list read only when `kind = data`; `document_type_id` is nullable because two of the eight requirements are not documents at all |
+| 43 | `2026_09_30_100004_create_employee_onboarding_table` | `employee_onboarding` | **UNIQUE `employee_id`**: an onboarding is a state of a person, not an event, so a second row would make "where do they stand?" ambiguous. `status` defaults to `draft` and is indexed. The record is **created on first read** by `OnboardingService::materialise()`, which is why `GET /onboarding/{employee}` answers for somebody who was never explicitly onboarded |
+| 44 | `2026_09_30_100005_create_employee_bank_accounts_table` | `employee_bank_accounts` | **UNIQUE `employee_id`**, a 1:1 side table rather than columns on `employees`, so `EmployeeResource` *cannot* leak them by forgetting a `hidden()`. Every field (`bank_name`, `account_holder_name`, `iban`, `account_number`, `swift_bic`) sits on an **`encrypted` cast** — which is also why `APP_KEY` must not be rotated casually: see `docs/SECURITY.md` §4 |
+
+**56 tables** total in `hrms_laravel`, across **49 migrations** (3 framework,
+1 Sanctum, 10 Phase 2, 1 Phase 3, 2 Phase 5, 9 Phase 6, 7 Phase 7, 7 Phase 8,
+1 repayment floor, 3 Phase 9, 5 Phase 10). The Phase 9 close was **51 tables
+/ 44 migrations**; Phase 10 adds exactly five of each, and no earlier
+migration was touched.
 
 ### Why two foreign keys are "deferred"
 
@@ -1330,6 +1496,15 @@ there is no stored document to expire, cache or leak.
 sitting on this list since Phase 2 — together with `expense_categories`,
 which was designed alongside them and seeded with six rows. All three are
 documented in **§2.10**. Everything still named above remains design only.
+
+**Phase 10 built `employee_documents` and `employee_onboarding`** — both
+named on this list since Phase 2 — together with `document_types`,
+`onboarding_requirements` and `employee_bank_accounts`, which were designed
+alongside them (nine types, eight requirements). All five are documented in
+**§2.11**. `audit_logs`, `notifications`, `notification_preferences`,
+`trainings`, `employee_trainings`, `assets`, `asset_assignments` and
+`device_tokens` remain design only: **training and assets were cut out of
+Phase 10's approved scope**, and FCM is still unstarted.
 
 > **Deliberately absent:** `leave_documents` — a medical certificate is a file
 > on the private disk with its metadata on `leave_requests` (§2.6).

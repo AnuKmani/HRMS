@@ -1,16 +1,20 @@
 # Testing
 
-> **Status:** Phase 9 — leave, certificates, LOP, holidays, timesheets,
+> **Status:** Phase 10 — leave, certificates, LOP, holidays, timesheets,
 > overtime, the site vertical slice (activity reports, the official daily
 > report, its photographs and its on-demand PDF), **the payroll
-> vertical slice** (ledger, calculation, loans and salary documents) and now
+> vertical slice** (ledger, calculation, loans and salary documents) and
 > **the expense vertical slice** (claims, the approval chain, receipt files
 > and the three Flutter screens) are covered end to end on top of Phases 1–7,
 > plus the **payroll financial-
 > safety hardening** (a net-salary floor and partial repayments,
-> `PayrollRepaymentTest`). Backend **509 passed (3288
-> assertions)**, Flutter **465 passed**. This document defines the strategy
-> for the modules still to come (Phases 10–12).
+> `PayrollRepaymentTest`), and now **the employee-document and onboarding
+> slice** (filing, private storage, the server's expiry answer, the nightly
+> scan, the joiner checklist, the policy-only bank-account pair — 44 backend
+> tests and 86 Flutter tests of its own). Backend **553 passed (3674
+> assertions)**, Flutter **551 passed**. This document defines the strategy
+> for the modules still to come (Phases 11–12); training and assets were cut
+> from Phase 10's approved scope and are unscheduled.
 
 ---
 
@@ -491,6 +495,16 @@ happens when a repayment cannot be taken in full)
 | Expiring document within lead time | reminder job queued |
 | Expired document | status updated by scheduler |
 
+> **Where each row actually lives today.** Selfies: §3.3 (Phase 5) and
+> `SelfieSanitizer` hardening. Sick certificates: §3.5 (Phase 6).
+> Report photographs: §3.10 (Phase 7). Expense receipts: §3.11 (Phase 9).
+> **Employee documents and their expiry: §3.12 (Phase 10)** — 44 tests.
+> **There are no signed URLs**: every file is on the private `local` disk
+> behind an authenticated, policy-checked route (`GET /…/{id}/file`), so the
+> two "signed URL" rows above describe the shape a cloud migration would take
+> and are not part of any suite. A row's owner is `404` when the caller may
+> not see it, never a confirmable `403`.
+
 ### 3.9 Sites & Assignment
 
 | Test | Expectation |
@@ -579,6 +593,87 @@ validation, state)
 notification — neither exists (SECURITY §8), so the tests assert the
 `approval_records` chain and the stamped columns instead.
 
+### 3.12 Employee documents, expiry & onboarding ✅ (Phase 10 — `EmployeeDocumentTest`, `DocumentExpiryScanTest`, `OnboardingTest`, `EmployeeBankAccountTest`)
+
+**44 tests** — `EmployeeDocumentTest` 20, `OnboardingTest` 12,
+`DocumentExpiryScanTest` 6, `EmployeeBankAccountTest` 6. All on
+`hrms_testing`, three of the four behind the shared `BuildsDocuments`
+concern (seeds the Role / Permission / RolePermission / Setting /
+DocumentType / OnboardingRequirement seeders in that order, `Storage::fake('local')`
+in `setUp`, and `fileDocument()` attaches a real image unless the payload
+carries its own `file`). `buildsDocuments()` is the fixture factory;
+`EmployeeFactory` fills `phone`/`nationality` non-deterministically, so a
+`personal_information` assertion nulls them first.
+
+**`EmployeeDocumentTest` — 20** (filing, validation, scope, expiry,
+verification, archive, filters, catalogue)
+
+| Test | Expectation |
+|---|---|
+| `test_hr_files_a_colleagues_document_and_it_arrives_pending` | HR Admin `POST`s for another employee → `201`, `status=pending`, `uploaded_by` = the session's user, **no `path` key and no `employee-documents/` anywhere in the body**, `file_url` the id-based route |
+| `test_an_ordinary_person_files_their_own_and_nobody_elses` | an Employee files for themselves → `201`; for a colleague → **`403` naming the refusal** |
+| `test_the_door_is_the_door` | anonymous → `401`; a role without `documents.create` → `403` **before any row is written** |
+| `test_what_the_form_demands_comes_from_the_type_not_from_a_constant` | PASSPORT without number/issue/expiry → `422` on all three; CERTIFICATE with none of them → `201`; flipping the type's flags at runtime flips the demands |
+| `test_a_file_that_is_not_a_document_is_refused_and_nothing_is_written` | HTML wearing a `.pdf` name → `422`; a valid image named `.txt` → `422`; over `document_max_kilobytes` → `422` — **no rows and no files after any of them** |
+| `test_an_expiry_before_its_issue_date_is_refused` | `422` on `expiry_date`, nothing written |
+| `test_a_person_only_ever_sees_their_own_file` | the list returns only their rows; a colleague's `show` → `403`; a colleague's `/file` → **`404`** (a 403 would confirm the id) |
+| `test_the_file_itself_is_gated_the_same_way_as_the_row` | `viewFile` asks `view` first: HR Admin reads a managed row `200`, an Employee reading a colleague's file gets `404` and **the private disk still holds only its own** |
+| `test_expiry_is_reported_from_the_types_own_window` | type at 180 days and a neighbour at 30 both get `expiry_state` + `days_until_expiry` **computed against their own window**; a null `expiry_date` answers `none` |
+| `test_verification_records_who_signed_off_and_when` | verify → `200`, `status=valid`, `verified_at` set, `verified_by` the actor; a second verify → **`409`** |
+| `test_nobody_signs_off_on_their_own_paperwork` | the uploader verifying their own document → **`403`** even with `documents.verify` |
+| `test_replacing_the_evidence_withdraws_the_verification` | change the file or a date → `status` back to `pending`, **`verified_at`/`verified_by` cleared** |
+| `test_a_rejection_says_why_and_remembers_who_said_it` | no `reason` → `422`; with one → `rejected`, `rejection_reason`, `verified_by` set but `verified_at` **null** |
+| `test_accepting_a_document_that_has_already_lapsed_calls_it_expired` | verify an expired row → `status=expired`, not `valid` |
+| `test_archiving_takes_a_document_out_of_the_list_without_taking_it_away` | archive → gone from the default list, **still readable at `status=archived`**, the row and its bytes untouched |
+| `test_only_the_explicit_grant_may_archive` | `documents.update` alone → `403`; `documents.delete` → `200` |
+| `test_the_list_filters_on_the_things_a_desk_asks` | employee, type, `status=pending,valid`, `expired`, `expiring_soon`, the expiry window and `search` each narrow; **no `status` ⇒ archived excluded** |
+| `test_the_expiry_report_is_the_one_question_that_is_about_everybody` | an Employee holding `documents.view` → **`403`**; HR Admin → `200` and `within=` clamped to `0…730` |
+| `test_the_catalogue_is_readable_by_anyone_who_may_file` | `documents.view` reads nine types; each row carries its three `requires_*` flags and `expiry_warning_days` |
+| `test_fields_nobody_owns_are_refused_rather_than_ignored` | `status`, `verified_at`, `verified_by`, `expiry_state` in the body → **`422` naming each**, no row written |
+
+**`OnboardingTest` — 12** (directory, checklist, completion, scope, bank)
+
+| Test | Expectation |
+|---|---|
+| `test_the_directory_shows_everybody_including_people_nobody_has_started` | an employee with no record appears as `draft`, **`exists: false`** — not missing |
+| `test_a_manager_is_not_told_what_people_have_not_handed_in` | a non-manager's directory is **themselves and nobody else**, whatever `onboarding.view` they hold |
+| `test_the_door_is_the_door` | anonymous `401`; a role without `onboarding.view` `403` before a query |
+| `test_the_detail_names_what_is_outstanding_and_who_has_to_fix_it` | `checklist` item-per-requirement with `satisfied` + `state`, `missing` codes, `satisfied/total` counts |
+| `test_a_data_requirement_says_which_columns_are_still_empty` | `personal_information` names the still-empty employee columns; `bank_information` is `missing` until a row exists |
+| `test_refused_and_lapsed_are_told_apart_from_nothing_at_all` | newest row decides `rejected` / `expired` / `pending_verification` vs `missing` |
+| `test_a_refused_new_copy_does_not_unsay_a_passport_still_on_file` | a rejected replacement leaves the earlier `valid` passport satisfying the requirement |
+| `test_onboarding_cannot_be_completed_while_anything_is_outstanding` | **`409` naming each outstanding requirement**, record not `completed` |
+| `test_onboarding_completes_once_everything_is_in_place` | `satisfyEveryRequirementFor()` → `200`, `completed_at`, `completed_by`, `is_completed: true` |
+| `test_a_person_reads_their_own_record_and_nobody_elses` | own `show`/`update` `200`; a colleague's → `403`; the `complete` route needs `onboarding.manage` |
+| `test_the_missing_filter_finds_the_people_who_have_not_filed` | `missing={code}` and `incomplete=1` narrow to the right set; `status=` filters by stage |
+| `test_bank_details_appear_in_no_generic_payload` | **no `iban`/`account_number` key in the employee, onboarding or document payloads** — only on its own two routes |
+
+**`EmployeeBankAccountTest` — 6** (the policy-only pair)
+
+| Test | Expectation |
+|---|---|
+| `test_hr_records_an_account_and_reads_it_back_whole` | `PUT` then `GET` round-trips every field |
+| `test_there_is_one_account_and_one_way_to_write_it` | UNIQUE `employee_id` — a second `PUT` updates rather than duplicating |
+| `test_an_employee_may_read_their_own_but_neither_write_it_nor_somebody_elses` | own `GET` `200`, own `PUT` **`403`**, a colleague's `GET` **`403`** |
+| `test_validation_reports_the_field_and_never_the_value` | a malformed IBAN → `422` naming `iban` and **not echoing what was sent** |
+| `test_currency_follows_the_supported_list_not_the_request` | an unconfigured code → `422`, not a silent store |
+| `test_the_endpoint_is_guarded_even_though_no_middleware_is` | anonymous → `401`, no permission middleware anywhere on the pair, and the policy is the whole answer |
+
+**`DocumentExpiryScanTest` — 6** (the scheduled scan)
+
+| Test | Expectation |
+|---|---|
+| `test_a_lapsed_document_is_expired_and_said_to_be_exactly_once` | a lapsed doc → `status=expired`, `expiry_notified_at` set, **one event**; a second run raises nothing |
+| `test_the_window_a_warning_uses_belongs_to_the_type_not_to_a_constant` | two types with different `expiry_warning_days` are warned at their own windows; a NULL window falls back to `hrms.expiry.default_warning_days` |
+| `test_re_dating_a_document_earns_a_fresh_warning` | moving the expiry clears the marker, so the next pass warns again |
+| `test_a_refused_document_and_an_archived_one_are_left_alone` | `rejected` and `archived` rows are never rewritten |
+| `test_the_scan_is_scheduled_rather_than_left_to_somebody_pressing_a_button` | `schedule:list` shows `ScanDocumentExpiries` at `hrms.expiry.scan_hour:6`, `scan_minute:15` |
+| `test_the_job_runs_from_the_queue_as_well_as_from_the_cron_line` | `dispatchNow()` and a queued dispatch both produce the same outcome |
+
+**Deliberately not asserted here:** FCM or any user-visible notification —
+neither exists (SECURITY §4.9), so the tests assert the events, the
+`expiry_notified_at` marker and the stamped columns instead.
+
 ---
 
 ## 4. Scheduler / Job Tests
@@ -591,8 +686,10 @@ notification — neither exists (SECURITY §8), so the tests assert the
 | **Same job, already approved ✅** | `test_converting_an_approved_request_releases_the_days_it_already_spent` — the balance goes back |
 | **Registration** | `php artisan schedule:list` shows `17 * * * * App\Jobs\EnforceSickCertificateDeadlines` with `withoutOverlapping(60)` and `onOneServer()` |
 | LOP conversion event | `Event::fake([LeaveConvertedToLop::class])` — required because the event `implements ShouldDispatchAfterCommit` under `RefreshDatabase` |
-| Document expiry reminder | ⬜ Not built — no documents module yet |
-| Training expiry reminder | ⬜ Not built |
+| **Document expiry scan ✅ Phase 10** | `DocumentExpiryScanTest` (6) — run `ScanDocumentExpiries` directly, assert `status = expired`, one `DocumentExpired`/`DocumentExpiring` event per document per window, `expiry_notified_at` written before the event, and a second run raising nothing. `dispatchNow()` is used rather than `dispatchSync()`, which does not return the handler's result |
+| **Same job, registration ✅** | `php artisan schedule:list` shows `App\Jobs\ScanDocumentExpiries` at `15 6 * * *` from `hrms.expiry.scan_{hour,minute}` |
+| **Same job, queue ✅** | `test_the_job_runs_from_the_queue_as_well_as_from_the_cron_line` |
+| Training expiry reminder | ⬜ Not built — **cut from Phase 10's approved scope** |
 | Missing check-out detection | **No scheduler exists** — the flag is written lazily by `AttendanceService::flagMissingCheckouts()` the moment anyone reads `GET /attendance/today`. Covered by `AttendanceCheckOutTest::test_the_missing_checkout_flag_is_written_when_the_schedule_ends_unattended`, using `Carbon::setTestNow()` rather than a run |
 | Attendance reminder | ⬜ Not built — arrives with notifications |
 
@@ -674,6 +771,8 @@ it cannot be pointed at development data by mistake.
 | `Money` / `safePdfFilename` (Phase 8) | `30000.00` → `INR 30,000.00`; the currency code read **from the row** rather than a constant; `null`/`''` rendering as zero instead of crashing; **half away from zero** matching PHP's `round()` so the app and the PDF agree on `0.125`; a negative stays negative; `plain()` and `delta()` for a column of one currency and a signed change; and the filename helpers refusing anything a path could be made of while leaving an ordinary generated name intact | `test/core/presentation/money_test.dart` (10) |
 | **The expense slice — 7 Phase 9 files, 70 tests** | **domain**: an amount arrives as a decimal string and is **never parsed into a double**, a zero-padded figure survives the trip, only a draft may be edited/submitted/given receipts, a settled claim carries its decision, *open* vs settled, nothing awaiting a decision until submit, status labels that never spell `pending` at the user, receipt-count phrasing, the receipt requirement read off the claim's own copy with the category row as fallback, `full_name` read from the brief resource (absent rather than crashing), and the approval chain keeping its sequence and its approver; **categories**: the two rules as one line, no ceiling ≠ a ceiling of zero, a retired category not pickable, an absent status read as inactive; **receipts**: ids, labels, size and type with **no storage path**, an image drawn inline while a document is handed to the OS opener, a size in the unit a person compares, a nameless row still drawing; **repository**: a create body with **no `employee_id` and no `status`**, `PUT` on the claim's own path, the four transitions as four endpoints, `remarks` carried through reject and approve, receipts sent as one multipart `receipts` batch and read **by id, never through a URL**, categories read as a plain collection rather than a page, and 401/403 read as the server wrote them; **screens**: the lock before any request, the `expenses.create` / `update` / `approve` doors, the server's field errors drawn against the fields they name, and a receipt photographed, filed, opened by id and removed | `test/features/expenses/domain/expense_test.dart` (15) · `test/features/expenses/domain/expense_category_test.dart` (8) · `test/features/expenses/domain/expense_receipt_test.dart` (4) · `test/features/expenses/data/api_expense_repository_test.dart` (15) · `test/features/expenses/presentation/expense_list_screen_test.dart` (7) · `test/features/expenses/presentation/expense_form_screen_test.dart` (8) · `test/features/expenses/presentation/expense_detail_screen_test.dart` (13) |
 
+| **The document & onboarding slice — 2 Phase 10 domain files** | **`EmployeeDocument`**: expiry labels that always carry words as well as colour — `Expires in 5 days`, `Expired 12 days ago`, `Expires today`, `No expiry date` — and the words come from the **server's** `expiry_state` / `days_until_expiry` rather than being derived on the phone; status labels that never spell `pending`; `isImage` / `isPdf` read from `mime_type` **and** `original_name`, with `file_url` used only as a route; `sizeLabel`. **`OnboardingChecklist` / `OnboardingRecord`**: a stage nobody has begun reading as `Not started` rather than a missing row, `kind` vocabulary, `satisfied`/`total` counts agreeing with the items, an outstanding `missing` list, and `isCompleted` reading the server's own flag | `test/features/documents/domain/employee_document_test.dart` · `test/features/onboarding/domain/onboarding_test.dart` |
+
 **Two non-obvious guarantees worth keeping under test:**
 
 - *Restore asks the server **once**.* `AuthController` may be read by the
@@ -716,6 +815,13 @@ it cannot be pointed at development data by mistake.
 | Certificate detail (9) | the lock before any request; the facts and the decision on them; an approved row offering **one button, not a search**; **`can_issue` read as the server's whole answer** rather than re-derived from `status`; deciding only with `.manage`; approve/reject moving through the repository; reject refusing an empty reason; a refusal shown as written; and a decided request **read-only** |
 | Home / routes (6) | four Phase 8 doors drawn under their own grants and absent without them; **a `payroll.summary.view`-only reader offered the summary door and not the ledger**; every one of the ten new paths resolving to its own screen; a session with no pay grant refused at each; and `new` never mistaken for a row id |
 | Home / routes — ✅ Phase 9 (6) | the expense door appearing under `expenses.view` beside the other home doors, absent without that grant, and **withheld when the grant is a different permission** rather than any `*.view`; the four Phase 9 paths (`/expenses`, `/expenses/new`, `/expenses/7`, `/expenses/7/edit`) each resolving to its own screen; a session with no `expenses.*` grant refused at **every** door before any request is made (`You may not raise an expense claim.` / `You may not edit this draft.`); and `/expenses/new` never mistaken for a row id |
+| Documents list — ✅ Phase 10 | the lock before any request; a row saying **whose it is, what it is, and how long it has left** with the words as well as the colour; the upload door only for `documents.create`; the status filter travelling as `status` and the screen-local **expiry selector becoming the two booleans the API reads** (`expired=1`, `expiring_soon=1`) rather than a client-side slice; empty and error-with-retry |
+| Documents detail — ✅ Phase 10 | the lock before any request; **the file opened by id through the repository and never rendered from `file_url`** (a PDF handed to the viewer with no URL kept, an image drawn from the bytes the policy-checked route returned); *Signed off* row; verify/reject/archive each moving the row **the server moved** and reloading the list; reject refusing an empty reason and then travelling with it; archive behind a confirm dialog with a cancel that archives nothing; a **409 shown as the server's own sentence**; a 403 read as a refusal and a 401 as a different question |
+| Documents form — ✅ Phase 10 | the lock before any request, **and no document-type fetch either**; the chosen type deciding which of number / issue / expiry are required; a type with no rules still refusing a save without the file; a file over `maxDocumentBytes` refused **before** it is sent; a wrong extension refused by extension rather than guessed from bytes; an expiry earlier than the issue date refused on the field; an accepted upload travelling as **bytes and a name, never a path**; a filer sending their own id and one filing for themselves sending none; a 422 drawn against the named fields and a 403 landing as the lock |
+| Documents expiry report — ✅ Phase 10 | **`documents.expiry.view` is a door of its own** and the list is never built without it; an empty window saying so rather than falling back to the directory; `within` sent as the parameter |
+| Onboarding list — ✅ Phase 10 | the lock before any request; **every joiner appearing, including the one nobody has begun**; the stage filter and the incomplete-only switch travelling as query parameters; an empty directory saying what would appear; a first-load failure as a message rather than a blank page |
+| Onboarding detail — ✅ Phase 10 | the lock before any request; the checklist with **its counts and its outstanding names**; an unsatisfied `document` requirement offering **Attach… only for `documents.create`, handing its code to `/documents/new`**; the stage select only for `onboarding.manage`; completion offered only when the record is ready and **a refusal shown as the sentence the server sent**; a 403 as `You do not have permission to view onboarding.` and a 401 as "simply could not be loaded" |
+| Home / routes — ✅ Phase 10 | the documents door under `documents.view` alone, the onboarding door under `onboarding.view` alone, both under both grants side by side, **neither under either alone when both are absent**, the expiry report still needing the grant it sits behind and not being a door of its own — and the seven new paths (`/documents`, `/documents/new`, `/documents/expiring`, `/documents/{id}`, `/onboarding`, `/onboarding/{id}`) each resolving to its own screen |
 
 > **Don't read `TextFormField.obscureText`** — it is not public. Read the
 > widget's own `TextField.obscureText` field instead.
@@ -1129,12 +1235,13 @@ A phase is complete only when:
 |---|---|
 | Test strategy (this document) | ✅ Written |
 | Development/testing database split (`hrms_laravel` vs `hrms_testing`) | ✅ Phase 2 safety cleanup |
-| Backend test suite | ✅ **509 passed (3288 assertions)** — 75 Phase 2 + 45 Phase 3 + 70 Phase 4 + 131 Phase 5 (incl. selfie hardening) + 62 Phase 6 (22 `LeaveRequestTest` · 11 `LeaveCertificateTest` · 13 `OvertimeTest` · 9 `TimesheetTest` · 7 `HolidayApiTest`) + **42 Phase 7** (19 `SiteActivityReportTest` · 15 `DailySiteReportTest` · 8 `DailySiteReportPdfTest`) + **44 Phase 8** (13 `PayrollTest` · 11 `LoanTest` · 9 `SalaryDocumentTest` · **11 `PayrollRepaymentTest`**) + **32 Phase 9** (**22 `ExpenseTest`** · **10 `ExpenseReceiptTest`**) + **8 currency pass** (**8 `ClientSettingsTest`**) |
-| Flutter test suite | ✅ **465 passed** — 89 Phases 3–4 + 87 Phase 5 + 39 Phase 6 + 88 Phase 7 + **75 Phase 8** + **76 Phase 9** (70 expense · 6 home/routes) + **11 currency pass** (7 `client_settings_test` · 4 expense form) |
+| Backend test suite | ✅ **553 passed (3674 assertions)** — 75 Phase 2 + 45 Phase 3 + 70 Phase 4 + 131 Phase 5 (incl. selfie hardening) + 62 Phase 6 (22 `LeaveRequestTest` · 11 `LeaveCertificateTest` · 13 `OvertimeTest` · 9 `TimesheetTest` · 7 `HolidayApiTest`) + **42 Phase 7** (19 `SiteActivityReportTest` · 15 `DailySiteReportTest` · 8 `DailySiteReportPdfTest`) + **44 Phase 8** (13 `PayrollTest` · 11 `LoanTest` · 9 `SalaryDocumentTest` · **11 `PayrollRepaymentTest`**) + **32 Phase 9** (**22 `ExpenseTest`** · **10 `ExpenseReceiptTest`**) + **8 currency pass** (**8 `ClientSettingsTest`**) + **44 Phase 10** (**20 `EmployeeDocumentTest`** · **12 `OnboardingTest`** · **6 `DocumentExpiryScanTest`** · **6 `EmployeeBankAccountTest`**) |
+| Flutter test suite | ✅ **551 passed** — 89 Phases 3–4 + 87 Phase 5 + 39 Phase 6 + 88 Phase 7 + **75 Phase 8** + **76 Phase 9** (70 expense · 6 home/routes) + **11 currency pass** (7 `client_settings_test` · 4 expense form) + **86 Phase 10** (documents · onboarding · 6 home/routes) |
 | Phase 6 registration checks | ✅ `php artisan route:list` (86 route definitions at that point) · `php artisan schedule:list` shows `EnforceSickCertificateDeadlines` |
 | Phase 7 registration checks | ✅ `php artisan route:list` — **104 route definitions under `api/*`, 109 registered** (18 Phase 7) · `php artisan migrate:status` all `Ran` · `composer validate` valid · `vendor\bin\pint --test` clean |
 | Phase 8 registration checks | ✅ `php artisan route:list` — **140 route definitions under `api/*`, 145 registered** (36 Phase 8) · `php artisan migrate:status` all `Ran` (48 tables / 41 migrations) · `composer validate` valid · `vendor\bin\pint --test` clean · `dart format lib test` clean · `flutter analyze` clean |
 | Phase 9 registration checks | ✅ `php artisan route:list` — **153 route definitions under `api/*`, 158 registered** (13 new under `expense`) · `php artisan migrate:status` all `Ran` (**44** migrations) · `composer validate` valid · `vendor\bin\pint --test` **PASS (375 files)** · `dart format .` clean (**216 files**) · `flutter analyze` clean · `flutter test` **454 passed** · `php artisan test` **499 passed (3251 assertions)**, all on `hrms_testing` |
+| Phase 10 registration checks | ✅ `php artisan route:list` — **170 route definitions under `api/*`, 175 registered** (16 new: documents, onboarding, bank-account) · `php artisan migrate:status` all `Ran` (**49** migrations / **56** tables) · `composer validate` valid · `vendor\bin\pint --test` **PASS (419 files)** · `dart format .` clean (**246 files**) · `flutter analyze` clean (**No issues found**) · `flutter test` **551 passed** · `php artisan test` **553 passed (3674 assertions)**, all on `hrms_testing` |
 | Currency configuration checks | ✅ `php artisan route:list` — **154 route definitions under `api/*`, 159 registered** (1 new: `GET client-settings`) · `php artisan migrate:status` all `Ran` (**44** migrations) · `composer validate` valid · `vendor\bin\pint --test` **PASS (377 files)** · `dart format .` clean (**218 files**) · `flutter analyze` clean · `flutter test` **465 passed** · `php artisan test` **509 passed (3288 assertions)**, all on `hrms_testing` (never `hrms_laravel`) — the configured default, the form's default, a claim keeping its own code, and a code outside `system.supported_currencies` refused |
 | Payroll financial-safety hardening checks | ✅ `php artisan test` **469 passed** (all on `hrms_testing`, never `hrms_laravel`) · `php artisan migrate:status` all `Ran` · `composer validate` valid · `vendor\bin\pint --test` clean · `dart format .` clean · `flutter analyze` clean · `flutter test` **378 passed** |
 | `flutter analyze` / `pint --test` / `composer validate` clean | ✅ |

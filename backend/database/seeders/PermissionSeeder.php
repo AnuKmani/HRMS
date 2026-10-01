@@ -223,9 +223,65 @@ class PermissionSeeder extends Seeder
             'daily_site_reports.manage',
             'daily_site_reports.pdf',
         ],
+        /*
+        | Employee documents (Phase 10).
+        |
+        | Seven permissions rather than the two that existed before, and
+        | the split is the whole security story of the module.
+        |
+        | `documents.view` is the COARSE gate: may this role open the
+        | documents screen at all? It is held by almost everybody, because
+        | almost everybody should be able to see *their own* file — and it
+        | is therefore worth nothing on its own. Visibility::mayViewOthersDocuments()
+        | narrows every row to the caller's own unless the same account also
+        | holds `documents.manage`, which is the explicit "you are trusted
+        | with other people's passports" grant and is held by HR only.
+        |
+        | That is what stops a Project Manager reading a report's direct's
+        | Emirates ID merely because they manage that person: managing
+        | somebody is not a permission about their documents, and none of
+        | `employees.view`, `attendance.manage` or `expenses.approve` opens
+        | this door.
+        |
+        | `documents.create` / `.update` are self-service — filing and
+        | correcting your own file — and become "anybody's" only in hands
+        | that already hold `documents.manage`, checked in
+        | EmployeeDocumentPolicy::storeFor() rather than here.
+        |
+        | `documents.verify` is the decision to accept a document as genuine.
+        | Separate from `.manage` because it is a *different act*: HR
+        | Executive may both, but an operator who wants a role to file
+        | paperwork without being able to sign it off can now say so.
+        |
+        | `documents.delete` is archive, never destruction — see
+        | EmployeeDocumentController::destroy(). Held by HR alone.
+        |
+        | `documents.expiry.view` is the expiry *report* — the cross-employee
+        | "what is about to lapse" view. Separate from `.view` because the
+        | answer is a question about the whole workforce rather than about
+        | your own file, and an employee has no business seeing it.
+        */
         'documents' => [
             'documents.view',
+            'documents.create',
+            'documents.update',
+            'documents.verify',
+            'documents.delete',
+            'documents.expiry.view',
             'documents.manage',
+        ],
+        /*
+        | Onboarding (Phase 10).
+        |
+        | Two doors. `onboarding.view` is held by everybody, because every
+        | employee should be able to see where their own onboarding stands
+        | — and it is narrowed to their own row unless they also hold
+        | `onboarding.manage`, which is HR's and is what the list, the
+        | status change and the completion check all sit behind.
+        */
+        'onboarding' => [
+            'onboarding.view',
+            'onboarding.manage',
         ],
         'expenses' => [
             'expenses.view',

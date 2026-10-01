@@ -1,11 +1,14 @@
 # User Guide
 
-> **Status:** Phase 9 — sign-in, the organisation screens, GPS attendance with
+> **Status:** Phase 10 — sign-in, the organisation screens, GPS attendance with
 > site visits, **leave, the holiday calendar, timesheets and overtime**, the
 > **site activity reports and the official daily site report (with its PDF)**,
-> **payroll: the ledger, salary slips, loans and salary certificates**, and now
+> **payroll: the ledger, salary slips, loans and salary certificates**,
 > **expense claims: filling one in, the receipt from the camera, the two-step
-> approval chain and the filters that find an old claim** exist and are usable.
+> approval chain and the filters that find an old claim**, and now
+> **your own documents: filing a passport or an Emirates ID, seeing how long
+> it has left, HR verifying it — and the joiner checklist that says what a
+> new starter still owes** exist and are usable.
 > This guide describes the workflows each role will have once the corresponding
 > phase ships. Sections are marked with the phase that delivers them; ✅ means
 > it is in the app today.
@@ -460,8 +463,64 @@ cancel.
 > tile opens **one row — yours**. Nobody's payslip is a URL: the document is
 > rendered for your session each time you ask.
 
-> **Your own documents** (passport, visa, Emirates ID, contracts) are still
-> ⬜ Phase 10 — that is a different module from payslips.
+> **Your own documents** (passport, visa, Emirates ID, contracts) are a
+> different module from payslips — and they are in the app now. See
+> §3.7a.
+
+### 3.7a Employee documents & onboarding ✅ Phase 10
+
+Your employment file: the papers HR needs you to hold, how long each one has
+left, and — if you are joining — what you still owe.
+
+**Finding your documents.** The home screen offers **Documents** to anyone
+who holds `documents.view` (every role has it). Inside:
+
+| Screen | What it is for |
+|---|---|
+| **Documents** | Every document you may read. Each row says *whose* it is, *what* it is, how long it has left, and where it stands (`Pending review` / `Valid` / `Rejected` / `Expired`) |
+| **Expiring** | The report HR uses: everybody whose paperwork is about to lapse, in one window (`documents.expiry.view` — HR Admin, HR Executive, Payroll Admin, Super Admin) |
+| **Upload** | File a document — yours, or anybody's if you are HR |
+
+**Filing one.** Open **Documents → Upload** and pick the type first — the
+type decides the form. A Passport asks for a number, an issue date and an
+expiry; a Certificate asks for nothing it was not configured to ask for.
+Then choose the file: **camera**, **gallery**, or a **PDF** from the phone.
+Only PDF, JPEG, PNG and WebP are accepted, and the file must be under
+10 MB — the app says so before it sends anything rather than after.
+
+Your document arrives as **Pending review**. Nobody's own paperwork is
+signed off by themselves.
+
+**Seeing how long something has left.** Every row carries the words, not
+just a colour: *Expires in 5 days*, *Expires today*, *Expired 12 days ago*,
+*No expiry date*. The number is the **server's** answer — computed against
+that document type's own warning window (a passport warns at 180 days, a
+medical certificate at 30) — so a phone with the wrong clock shows the same
+answer HR sees.
+
+**Opening the file.** Tapping a document opens it **by its own record**: a
+PDF goes to the phone's viewer, an image draws from the bytes the server
+sent for that document. Nothing is fetched by a link anyone could copy —
+if you may not read the row, the file is not reachable either.
+
+**HR verifying one.** With `documents.verify` (HR Admin, HR Executive, Super
+Admin) the detail screen offers **Verify** and **Reject**:
+
+- **Verify** signs it off — the record remembers *who* and *when*. If the
+  document has already expired, it is recorded as `Expired` rather than
+  `Valid`; verifying something that is already signed off is refused.
+- **Reject** needs a reason. The document goes back to the person who filed
+  it with your words attached.
+- **Change the file or a date and the sign-off is withdrawn** — evidence
+  that has changed has not been looked at.
+- **Archive** (needs `documents.delete`) takes a document out of the list
+  without taking it away. It stays on the employment file, and a verified
+  document can only ever be archived, never deleted.
+
+**Nothing about a document ever leaves the server as a path.** Files sit on
+private storage under a name the server chose; the picture you see on screen
+was re-encoded on arrival, so no GPS location travels with a photograph of
+your passport.
 
 ### 3.8 Dashboard ⬜ Phase 11
 
@@ -611,6 +670,43 @@ Everything an HR Executive can do, plus:
 | **Employee management** | Full CRUD with status changes |
 | **Reports** | Attendance, leave, manpower, document expiry, movement |
 
+### 8.1 Onboarding new starters ✅ Phase 10
+
+**Home → Onboarding** (needs `onboarding.view` — everybody has it, but
+without `onboarding.manage` the directory shows **you and nobody else**).
+
+| Screen | What it is for |
+|---|---|
+| **Onboarding** | Every joiner, including the one nobody has started yet — shown as `Not started`. Filter by stage, or by *incomplete only*, or search for a name |
+| **A joiner's record** | The checklist: every requirement, whether it is met, and what is outstanding. Counts read *3 of 8 requirements met* |
+
+**The checklist is configured, not fixed.** It arrives from the server —
+personal information, passport, Emirates ID, visa, employment contract,
+bank details, photograph, certificates — so a requirement that is met reads
+*Met* whether it was satisfied by a **document** (a valid, unexpired passport
+of the right type), by **data** (the employee's own details filled in), or by
+**bank details** on file. A document that is pending verification, rejected or
+lapsed is reported as such — *Awaiting verification*, *Rejected*, *Expired* —
+never mistaken for one that is simply missing.
+
+**The stages** are `Draft → Waiting on documents → HR review → Completed`.
+Move a record's stage from the detail screen (`onboarding.manage`: HR Admin,
+HR Executive, Super Admin).
+
+**Completing.** *Mark as completed* is offered only when every mandatory
+requirement is met. Press it while something is outstanding and the server
+refuses, naming each item still owed — the sentence appears on screen, so the
+next action is obvious.
+
+**A shortcut.** An outstanding checklist line that needs a document offers
+**Attach…** (`documents.create`): it opens the upload form already pointed at
+the right document type and the right person. File it, verify it, and the
+requirement flips to *Met*.
+
+**Bank details are not part of any list.** They live behind their own two
+calls on the employee record, are encrypted at rest, and never appear in a
+generic employee payload or a log line.
+
 ---
 
 ## 9. Payroll Admin
@@ -736,6 +832,13 @@ notification would be built from are durable and queryable, but nothing is
 sent, and the "who receives it" column is a contract for the notifications
 phase rather than a description of behaviour.
 
+Phase 10 added two more hooks the same way: a **nightly document-expiry
+scan** (06:15) walks every document with an expiry date and raises
+`DocumentExpiring` / `DocumentExpired` **once per document per window** —
+it knows when it has already said something and will not say it twice — but
+no listener is attached, so nothing reaches anybody yet. Today the expiry
+report (**Documents → Expiring**) is how HR sees it.
+
 Until then, a pending request is visible to its approver by opening their
 queue, and a sick-leave deadline is visible on the request itself.
 
@@ -855,6 +958,38 @@ The menu you see is built from your role's permissions. For example:
 - **Management holds the door and no decisions.** Among the six grants above
   it holds `expenses.view` alone: claims may be read, never edited or answered.
 
+**Document & onboarding permissions ✅ Phase 10 — and who holds each:**
+
+| Permission | What it lets you do | Held by |
+|---|---|---|
+| `documents.view` | Open **Documents** — and always **your own** file, whatever else you hold | **10 roles** — every role |
+| `documents.create` | Upload a document: your own always, somebody else's only with `documents.manage` | **7 roles** — Employee, HR Admin, HR Executive, Project Manager, Site Engineer, Site Supervisor, Super Admin |
+| `documents.update` | Correct a document that is not yet signed off | The same **7** |
+| `documents.expiry.view` | Open the **Expiring** report — everybody in the company whose paperwork is about to lapse | **4 roles** — HR Admin, HR Executive, Payroll Admin, Super Admin |
+| `documents.verify` | Sign off, or reject with a reason | **3 roles** — HR Admin, HR Executive, Super Admin |
+| `documents.delete` | Archive a document out of the active list | The same **3** |
+| `documents.manage` | **Read other people's documents.** Without it you see your own file and nothing else | The same **3** |
+| `onboarding.view` | Open **Onboarding** — without `onboarding.manage`, the directory is **you** | **10 roles** — every role |
+| `onboarding.manage` | Move a joiner's stage and mark them completed | The same **3** |
+
+**Reading other people's papers, and whose:**
+
+- **Your own file is always yours to read.** `documents.view` is the coarse
+  door; *whose* documents appear behind it is the server's answer, not the
+  app's.
+- **Managing somebody does not mean reading their passport.** `documents.manage`
+  reaches three roles only. Project Manager, Site Supervisor and Site Engineer
+  hold view + create + update and **not** manage: they may file a colleague's
+  paperwork without ever being able to open a colleague's Emirates ID, visa,
+  medical record or contract.
+- **The expiry report is a question about everyone.** It is its own grant
+  precisely because "who in the company is about to lapse" is a different
+  question from "show me my own file" — and every role passes the second.
+- **Nobody signs off their own paperwork**, whatever they hold.
+- **Bank details are gated twice.** Not in `EmployeeResource`, not in any
+  list, and read only through their own two routes where the policy decides
+  row by row — there is no role whose job is to read everybody's IBAN.
+
 Four things worth knowing about the new modules:
 
 - **Holidays need no permission to read.** Everyone sees the calendar;
@@ -943,5 +1078,8 @@ permission — contact your administrator.
 | **Loans & salary advances** | **8** | ✅ |
 | **Salary certificate requests** | **8** | ✅ |
 | Expenses | 9 | ✅ |
-| Documents, training, assets | 10 | ⬜ |
+| **Employee documents (upload, verify, expiry)** | **10** | ✅ |
+| **Onboarding checklist & stages** | **10** | ✅ |
+| **Bank details (own record, HR only)** | **10** | ✅ |
+| Training & assets | — | ⬜ **Cut from Phase 10's approved scope — unscheduled** |
 | Notifications, dashboards, reports | 11 | ⬜ |

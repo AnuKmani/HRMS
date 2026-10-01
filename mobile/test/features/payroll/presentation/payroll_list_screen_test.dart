@@ -129,9 +129,15 @@ void main() {
   });
 
   testWidgets('a run reports counts, never figures', (tester) async {
-    script.processResult = const PayrollRunReport(
-      year: 2026,
-      month: 9,
+    // The period a run acts on is whatever the screen has open — today's —
+    // so the expectations are read from the same helper the controller uses
+    // rather than written down, which is what made this test start failing
+    // when September ended.
+    final period = currentPayrollQuery();
+
+    script.processResult = PayrollRunReport(
+      year: period['year']! as int,
+      month: period['month']! as int,
       calculated: 41,
       updated: 30,
       created: 11,
@@ -157,8 +163,8 @@ void main() {
     }
 
     expect(script.processCalls, 1);
-    expect(script.lastProcessYear, 2026);
-    expect(script.lastProcessMonth, 9);
+    expect(script.lastProcessYear, period['year']);
+    expect(script.lastProcessMonth, period['month']);
     expect(find.byKey(const ValueKey('payroll-run-report')), findsOneWidget);
     expect(
       find.text('41 calculated · 11 new · 0 skipped · 2 without a salary'),

@@ -1,12 +1,13 @@
 # API Documentation
 
-> **Status:** Phases 1–9. §1 conventions, §2.1 authentication (Phase 3),
+> **Status:** Phases 1–10. §1 conventions, §2.1 authentication (Phase 3),
 > §2.2–§2.3 the organisation modules (Phase 4), §2.4–§2.5 attendance, site
 > visits and movement (Phase 5), §2.6 site activity and daily reports
 > (Phase 7) and §2.7–§2.9 timesheets, overtime, approval workflows, leave,
 > certificates and holidays (Phase 6) are **live**, as are §2.10 payroll,
-> loans and salary documents (Phase 8) and §2.10a expenses and receipts
-> (Phase 9). Everything from §2.11 onward is the contract the remaining
+> loans and salary documents (Phase 8), §2.10a expenses and receipts
+> (Phase 9) and §2.11 employee documents, expiry and onboarding
+> (Phase 10). Everything from §2.11a onward is the contract the remaining
 > phases build against. See §6 for the per-section status.
 
 **Base URL (development):** `http://127.0.0.1:8000/api/v1/`
@@ -155,13 +156,14 @@ Behaviour that holds across every authenticated endpoint:
 > **Implemented:** §2.1 (Phase 3), §2.2–§2.3 (Phase 4), §2.4–§2.5 (Phase 5),
 > §2.6 in **Phase 7**, §2.7 (timesheets + overtime), §2.8 (leave), §2.9
 > (holidays) and §2.7's approval-workflows in **Phase 6**, §2.10 in
-> **Phase 8** and §2.10a in **Phase 9**. Everything still pending is listed
-> here as the contract to build against.
+> **Phase 8**, §2.10a in **Phase 9** and §2.11 in **Phase 10**. Everything
+> still pending is listed here as the contract to build against.
 
-**Two gates, both live on every Phase 4, Phase 5, Phase 6, Phase 7, Phase 8
-and Phase 9 route**
-(the three exceptions are named in §2.7 / §2.9 — holiday reads, and the
-certificate read/write, which are policy-only on purpose):
+**Two gates, both live on every Phase 4, Phase 5, Phase 6, Phase 7, Phase 8,
+Phase 9 and Phase 10 route**
+(the four exceptions are named in §2.7 / §2.9 / §2.11 — holiday reads, the
+certificate read/write, and the bank-account pair, which are policy-only on
+purpose):
 
 | Gate | Runs | Answers |
 |---|---|---|
@@ -190,6 +192,18 @@ that exists because a *different* gate would have been wrong:
 write about?" for the field-reporting form, because `GET /sites` needs
 `sites.view`, which no Employee holds, and filing your own day's work is
 precisely what an Employee is there to do.
+
+**Phase 10 adds two policy-only pairs**, both for the same reason:
+`GET|PUT /employees/{employee}/bank-account` carries **no `permission:` at
+all** — bank details are row-scoped by `EmployeePolicy::viewBankAccount` /
+`updateBankAccount` plus `EMPLOYEE_Bank_Details`, and there is no role
+whose *job* is to read everybody's IBAN — and `GET /document-types` runs on
+`documents.view` but is scoped to types the caller may actually file against.
+`GET /employee-documents` is coarse-gated on `documents.view` and then
+row-scoped by `Visibility::mayViewOthersDocuments()`, which needs
+**`documents.view` *and* `documents.manage`**: `employees.view` is
+deliberately not a third door in, so a Project Manager who may see a team
+does not thereby see its passports.
 
 ### 2.1 Authentication ✅ (Phase 3)
 
@@ -1298,12 +1312,160 @@ Sourced once per *new* claim by Flutter's `core/config/client_settings.dart`.
 Opening a draft does **not** fetch it: an edit keeps the currency the claim
 was filed in, and nothing is ever converted.
 
-### 2.11 Documents, Training, Assets
+### 2.11 Employee documents, expiry & onboarding — (Phase 10 ✅)
+
+**16 routes.** The vocabulary is *file* rather than *document*: a document
+type is a row of configuration, an employee document is one piece of
+evidence, and onboarding is the question of which evidence is still
+outstanding.
+
+| Method | Path | Gate | Notes |
+|---|---|---|---|
+| GET | `/document-types` | `documents.view` | the catalogue a form offers; never a hard-coded list |
+| GET | `/employee-documents` | `documents.view` | paginated, nine filters (below), **row-scoped** |
+| POST | `/employee-documents` | `documents.create` | multipart; the caller may file their own or, with `documents.manage`, anybody's |
+| GET | `/employee-documents/expiring` | `documents.expiry.view` | declared **before** `/{document}` — the Phase 7 ordering rule |
+| GET | `/employee-documents/{document}` | policy | `documents.view` + row scope |
+| PUT | `/employee-documents/{document}` | `documents.update` | replacing the file or a date **withdraws** the sign-off |
+| DELETE | `/employee-documents/{document}` | `documents.delete` | only for a document that was never verified; archive is the normal exit |
+| GET | `/employee-documents/{document}/file` | policy | the bytes, as a `StreamedResponse` with a sanitised download name |
+| POST | `/employee-documents/{document}/verify` | `documents.verify` | records who and when; verifying an already-lapsed row answers `expired` |
+| POST | `/employee-documents/{document}/reject` | `documents.verify` | `reason` is required |
+| GET | `/employees/{employee}/bank-account` | **policy only** — no `permission:` | see below |
+| PUT | `/employees/{employee}/bank-account` | **policy only** — no `permission:` | see below |
+| GET | `/onboarding` | `onboarding.view` | directory over `employees`, left-joined with the record |
+| GET | `/onboarding/{employee}` | `onboarding.view` | materialises the record on first read |
+| PUT | `/onboarding/{employee}` | `onboarding.manage` | stage + notes |
+| POST | `/onboarding/{employee}/complete` | `onboarding.manage` | **409 naming what is outstanding**, never a silent success |
+
+#### `GET /employee-documents`
+
+Nine filters, all of them questions a desk actually asks. Everything is
+scoped first and filtered second, so a filter can never widen the row set:
+
+| Parameter | Meaning |
+|---|---|
+| `employee_id`, `document_type_id` | exact |
+| `status` | comma-separated (`pending,valid,expired,rejected,archived`); **omitted ⇒ everything except `archived`** — archive takes a row out of circulation, not out of the database, so asking for `status=archived` is how an operator goes and looks |
+| `expired` | `1` — driven by the **date**, not the stored status: a document that lapsed an hour ago is expired whether or not the scheduler has run |
+| `expiring_soon` | `1` — computed in SQL per type from `document_types.expiry_warning_days` (falling back to `hrms.expiry.default_warning_days`), never one global constant |
+| `expiry_from`, `expiry_to` | a window on the expiry date |
+| `search` | document number, file name, first or last name |
+| `page`, `per_page` | §1.7 |
+
+`GET /employee-documents/expiring?within={days}` takes one parameter,
+clamped to `0…730`, and is the report behind the Expiry screen. It answers
+for **everybody whose file the caller may already read** — which is exactly
+why it needs its own grant rather than riding on `documents.view`: an
+Employee passes `documents.view` and must still be refused here.
+
+Every row carries `expiry_state` (`none` \| `valid` \| `expiring_soon` \| `expired`),
+`warning_days` and `days_until_expiry` **computed on the server**. A client
+that draws its own countdown would disagree with the nightly scan the first
+time the two looked at different clocks, and the server's answer is the one
+that gets acted on.
+
+`file_url` is `/api/v1/employee-documents/{id}/file` — a route, not a
+location. No payload in this API contains a disk path.
+
+#### `POST /employee-documents`
+
+`multipart/form-data`:
+
+| Field | Rule |
+|---|---|
+| `employee_id` | required; **403** `You may not file a document for that employee.` unless the caller may manage documents or is filing their own |
+| `document_type_id` | required, active type |
+| `file` | required; **PDF / JPEG / PNG / WebP only** — MIME, extension *and* byte content all checked, `hrms.storage.document_max_kilobytes` (default 10240) ceiling, §4.6 |
+| `document_number`, `issue_date`, `expiry_date` | required **only when the type says so** (§`GET /document-types`) |
+| `notes` | optional |
+
+Uploads always arrive `pending`. Identity is never a field: `status`,
+`verified_at`, `verified_by` and `expiry_state` are refused rather than
+ignored (422 naming each).
+
+Changing the file, the number, the issue date or the expiry date resets the
+row to `pending` and clears `verified_at`/`verified_by` — evidence that has
+changed has not been looked at. Verify and reject both write `verified_by`;
+only acceptance writes `verified_at`. A second decision on an already
+settled row is **409**.
+
+#### `GET /document-types`
+
+```
+GET /api/v1/document-types → 200
+```
+
+```json
+{
+    "success": true,
+    "message": "Document types.",
+    "data": [
+        {
+            "id": 1,
+            "code": "PASSPORT",
+            "name": "Passport",
+            "description": "…",
+            "requires_document_number": true,
+            "requires_issue_date": true,
+            "requires_expiry_date": true,
+            "expiry_warning_days": 180,
+            "status": "active"
+        }
+    ]
+}
+```
+
+Nine seeded rows. The three requirement flags are what the form validates
+against *and* what `StoreEmployeeDocumentRequest` enforces — one source, so a
+screen that never showed a field cannot get past it either.
+
+#### `GET /onboarding`
+
+Filters: `status` (comma-separated), `incomplete=1` (nothing completed),
+`missing={code}` (still outstanding), `search`. The list is a directory over
+`employees`, so **somebody nobody has started appears as `draft` with
+`exists: false`** rather than not appearing at all.
+
+Each row carries `status` (`draft` \| `pending_documents` \| `hr_review` \| `completed`),
+`exists`, `is_completed` and the four timestamps. `GET /onboarding/{employee}`
+adds `checklist`: one item per requirement — `{code, label, kind, mandatory,
+satisfied, state, employee_id}` where `state` is `satisfied` \| `pending_verification`
+\| `rejected` \| `expired` \| `missing` — plus `missing` (the outstanding
+mandatory codes) and `satisfied` / `total` counts.
+
+Completion requires **every** mandatory item satisfied. Anything outstanding
+answers **409** with a `message` naming each one, so the next action is on
+the screen rather than in the user's imagination.
+
+**Row scope.** `Visibility::onboardingEmployeesFor()` grants the whole
+directory only with `onboarding.manage`; without it a caller sees
+**themselves and nobody else**. `onboarding.view` on ten roles is therefore
+not "everyone can browse the joiners" — it is "everyone may ask where they
+stand".
+
+#### `GET|PUT /employees/{employee}/bank-account`
+
+The one pair in this API with **no `permission:` middleware at all** — the
+policy is the only gate, and `EmployeePolicy::viewBankAccount` /
+`updateBankAccount` decide per row. Bank details are `encrypted` at rest,
+written through their own routes, and are **not present in `EmployeeResource`
+or in any list**, so no endpoint can leak them by forgetting a `hidden()`.
+The 422 from a bad field names the field and **never echoes the value**.
+
+> **`APP_KEY` must not be rotated casually.** Every `employee_bank_accounts`
+> column is an encrypted cast; rotating the key without re-encrypting the
+> table turns every IBAN into unreadable bytes. See `docs/SECURITY.md` §4.
+
+### 2.11a Training & assets
+
+Documents and onboarding moved up into §2.11 in Phase 10; **this is what
+remains from the original Phase 10 sketch and is not built.** Training and
+assets were cut out of Phase 10's approved scope, and neither has a phase
+number yet.
 
 | Method | Path |
 |---|---|
-| GET/POST/PUT/DELETE | `/documents` … |
-| GET | `/documents/expiring?days=30` |
 | GET/POST | `/training` … |
 | POST | `/training/{id}/enroll` |
 | GET/POST/PUT | `/assets` … |
@@ -1347,6 +1509,7 @@ attached at the route as `throttle:{name}`. Never inline a number in a route.
 | `POST /attendance/check-in`, `POST /attendance/check-out`, `POST /site-visits/start`, `POST /site-visits/{id}/end` | **30 / minute** | authenticated user id | ✅ Phase 5 |
 | Payroll / loans / certificate writes (36 routes) | none | — | ✅ Phase 8, **deliberately** — see below |
 | Expense writes (13 routes) | none | — | ✅ Phase 9, **deliberately** — see below |
+| Document, onboarding & bank-account writes (8 routes) | none | — | ✅ Phase 10, **deliberately** — see below |
 | General API | 60 / minute | — | ⬜ Planned |
 | Exports (PDF/Excel) | 10 / minute | — | ⬜ Phase 11 |
 
@@ -1377,6 +1540,17 @@ is bounded structurally instead: 6 files per request, 10 per claim, 5120 KB
 each (§4.5). A flood of claim writes is stopped by the permission middleware
 before it reaches a query; a flood of receipts is stopped by the byte
 ceiling.
+
+**Phase 10 added no limiter either, deliberately.** The eight write routes —
+five document, two onboarding, one bank account — are behind
+`auth:sanctum` + a permission (except the bank pair, which is policy-only and
+answers 403 for anyone but the row's own subject or a role holding
+`employees.manage`) + a policy, and none accepts an unbounded body. The one
+route that takes bytes, `POST /employee-documents`, is bounded structurally:
+a single file, PDF/JPEG/PNG/WebP only, `hrms.storage.document_max_kilobytes`
+default **10240 KB**, sniffed for its real content (§4.6) — and every upload
+leaves a row behind, so abuse is a query rather than a guess. The nightly
+scan is scheduled, not an endpoint, so there is nothing to hammer.
 
 Exceeded → **HTTP 429** in the standard envelope, with a `Retry-After` header.
 
@@ -1409,7 +1583,9 @@ sick-leave request. It is described in §4.2 below. Phase 5's check-in
 **selfie** follows the same shape with stricter rules (§4.1), and Phase 7
 adds the report photographs (§4.3). **Phase 8 uploads nothing** — its two
 documents are rendered from a row on demand, described in §4.4. Phase 9
-adds the **expense receipts**, described in §4.5.
+adds the **expense receipts**, described in §4.5, and Phase 10 the
+**employee documents**, described in §4.6 — the largest of them: a file
+nobody may read but its owner and HR.
 
 - `multipart/form-data`, field name `selfie`, on `POST /attendance/check-in` only
 - Max size **5120 KB** — `hrms.storage.selfie_max_kilobytes` (`HRMS_SELFIE_MAX_KB`)
@@ -1611,6 +1787,66 @@ guessed at by path, and needs no expiry policy.
   no-store`, `X-Content-Type-Options: nosniff`. `404` when the id is not
   attached to the claim named in the path or the bytes are gone
 
+### 4.6 Employee documents — Phase 10
+
+The most sensitive file this application holds: a passport, an Emirates ID,
+a visa, a contract. It gets everything a receipt gets and one thing more —
+**images are re-encoded**, so no photograph of a person's identity document
+carries their GPS fix onto the disk.
+
+- `multipart/form-data`, field name `file`, on `POST
+  /api/v1/employee-documents` only. One file per request.
+- Max size **10240 KB** — `hrms.storage.document_max_kilobytes`
+  (`HRMS_DOCUMENT_MAX_KB`)
+- Accepted: **PDF, JPEG, PNG, WebP**, validated **five** ways:
+  1. a declared extension from `pdf, jpg, jpeg, png, webp` — the client's
+     name is not believed, it is only used to reject an obvious stranger;
+  2. `finfo` MIME sniff of the real bytes (`application/pdf`, `image/jpeg`,
+     `image/png`, `image/webp`) — an HTTP client may label a part anything
+     it likes, and trusting that header is the hole this check closes;
+  3. the byte ceiling;
+  4. content: a PDF must carry `%PDF-` inside its first kilobyte, and an
+     image must actually decode (`SelfieSanitizer::probe()`) and fit the
+     pixel budget;
+  5. the same four, re-checked in `EmployeeDocumentStore` — a storage layer
+     that trusts a validation layer it may one day stop sharing an author
+     with is waiting for an upload bug.
+- **The extension on disk follows the bytes, not the name.** A `.jpg` full
+  of PDF is stored as `.pdf`.
+- **Images are re-encoded through the attendance `SelfieSanitizer`**, the
+  same decoder as the check-in selfie: EXIF GPS, camera body, software
+  string and any embedded thumbnail cannot survive a trip through a pixel
+  buffer, and what lands is whatever GD produced — which cannot also be a
+  script. Nothing is downsampled for the sake of it: readability is not
+  traded away for a smaller file.
+- **PDFs are stored byte-for-byte.** A document that is not identical to
+  the one filed stops being a document anybody can open, and stripping PDF
+  segments would need a parser this application does not have. The defence
+  is the `%PDF-` sniff, the uuid name, and serving it `nosniff`.
+- **Unnameable**: `{employee-documents}/{employeeId}/{uuid}.{ext}` on the
+  private `local` disk (`storage/app/private`). The client's filename — and
+  anything path-like inside it — is discarded, so `../../evil.php` cannot be
+  expressed even if validation were bypassed. Directory configurable with
+  `HRMS_DOCUMENT_DIRECTORY`.
+- **Unexposed**: no payload contains a path. `EmployeeDocumentResource`
+  reports `has_file`, `original_name`, `mime_type`, `file_size` and
+  `file_url`, and `file_url` is `/api/v1/employee-documents/{id}/file`.
+- **Download**: `GET /api/v1/employee-documents/{document}/file` — raw bytes
+  behind `EmployeeDocumentPolicy` (your own, or `documents.view` +
+  `documents.manage` for somebody else's), a `StreamedResponse` with
+  `Content-Type` from the stored extension, `Cache-Control: no-store`,
+  `X-Content-Type-Options: nosniff`, and `Content-Disposition: attachment`
+  under a **server-minted** name: every byte outside `[A-Za-z0-9 _-]` is
+  dropped from the client's `original_name` (which removes CR, LF and the
+  quote that would close the disposition attribute), length capped, empty ⇒
+  `document.{ext}`. `404` when the row has no file or the bytes are gone.
+- **Deleting is not destroying.** The store's `remove()` runs when a
+  document is *replaced* so the superseded bytes do not linger unpointed-at;
+  archive never calls it. `DELETE /employee-documents/{document}` exists only
+  for a row that was never verified — a verified document has to be archived,
+  and archiving takes it out of the active list while leaving the row and its
+  file on the employment file.
+
 ---
 
 ## 5. Offline Sync Contract
@@ -1681,26 +1917,29 @@ Syncing is manual ("Sync now"), oldest first, and stops at the first 0 or
 | §2.6 Site Activity & Daily Reports | ✅ **Phase 7** |
 | §2.10 Payroll / Loans / Salary documents | ✅ **Phase 8** |
 | §2.10a Expenses & Receipts | ✅ **Phase 9** |
-| §2.11–§2.13 Everything else | ⬜ Phases 10–12 |
+| §2.11 Employee documents, expiry & onboarding | ✅ **Phase 10** |
+| §2.11a Training & assets | ⬜ **out of Phase 10's approved scope — unscheduled** |
+| §2.12–§2.13 Everything else | ⬜ Phases 11–12 |
 | Rate limiting — auth routes | ✅ Phase 3 |
 | Rate limiting — attendance writes | ✅ Phase 5 |
 | Rate limiting — leave/timesheet/overtime/holiday writes | **deliberately none** — see §3 |
 | Rate limiting — site-report writes | **deliberately none** — see §3 |
 | Rate limiting — payroll / loan / certificate writes | **deliberately none** — see §3 |
 | Rate limiting — expense writes | **deliberately none** — see §3 |
+| Rate limiting — document / onboarding / bank writes | **deliberately none** — see §3 |
 | Rate limiting — remaining scopes | ⬜ As their modules land |
 | §4.1 File upload rules (selfie) | ✅ Phase 5, **sanitised server-side since the post-Phase 5 hardening pass** |
 | §4.2 File upload rules (medical certificate) | ✅ Phase 6 |
 | §4.3 File upload rules (report photographs) | ✅ **Phase 7** |
 | §4.4 Salary documents (rendered, never uploaded) | ✅ **Phase 8** |
 | §4.5 File upload rules (expense receipts) | ✅ **Phase 9** |
-| §4 File upload rules (employee documents) | ⬜ Phase 10 |
+| §4.6 File upload rules (employee documents) | ✅ **Phase 10** |
 
-Backend proof: `php artisan test` → **509 passed (3288 assertions)**; **154
-route definitions** under `api/*` (159 registered) — Phase 6 added 37,
-Phase 7 added 18, Phase 8 added 36, Phase 9 added 13, **the currency pass
-added 1**. Flutter proof: `dart format .` clean (218 files), `flutter
-analyze` clean, `flutter test` → **465 passed**.
+Backend proof: `php artisan test` → **553 passed (3674 assertions)**; **170
+route definitions** under `api/*` (175 registered) — Phase 6 added 37,
+Phase 7 added 18, Phase 8 added 36, Phase 9 added 13, the currency pass
+added 1, **Phase 10 added 16**. Flutter proof: `dart format .` clean (246
+files), `flutter analyze` clean, `flutter test` → **551 passed**.
 
 > To explore a running API later, use Laravel's generated OpenAPI/Swagger UI or
 > a tool such as Postman.

@@ -174,6 +174,25 @@ class ApiClient {
   Future<ApiEnvelope> put(String path, {Object? body}) =>
       _send(() => dio.put<dynamic>(path, data: body));
 
+  /// [postMultipart]'s twin for `PUT`, which is how an existing document's
+  /// file is replaced.
+  ///
+  /// Separate for the same reason: `put` sends JSON, and the update route
+  /// accepts multipart only when a file is actually attached — a client that
+  /// guessed between the two would send the wrong body to a route that
+  /// accepts it as an empty object rather than complaining.
+  Future<ApiEnvelope> putMultipart(
+    String path, {
+    required Map<String, Object?> fields,
+    Map<String, Object>? files,
+  }) {
+    final form = <String, Object?>{...fields};
+
+    files?.forEach((name, file) => form[name] = file);
+
+    return _send(() => dio.put<dynamic>(path, data: FormData.fromMap(form)));
+  }
+
   /// Reserved for endpoints that legitimately have one.
   ///
   /// Employee site assignments deliberately have no `DELETE` route — posting

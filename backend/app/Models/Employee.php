@@ -148,6 +148,42 @@ class Employee extends Model
         return $this->hasMany(OvertimeRequest::class);
     }
 
+    /* -------------------------------------------------- Phase 10: file */
+
+    /**
+     * Everything in this person's employment file — passports, Emirates
+     * IDs, visas, contracts.
+     *
+     * Relationship only; *which* of these a caller may open is
+     * EmployeeDocumentPolicy's answer (your own, or `documents.manage`),
+     * and the rows themselves are never included in EmployeeResource.
+     */
+    public function documents(): HasMany
+    {
+        return $this->hasMany(EmployeeDocument::class);
+    }
+
+    /**
+     * Where this person is in onboarding — one row, or none yet.
+     *
+     * HasOne rather than HasMany because the unique index on
+     * `employee_id` makes "one onboarding per employee" a database fact
+     * rather than a convention two concurrent PUTs could break.
+     */
+    public function onboarding(): HasOne
+    {
+        return $this->hasOne(EmployeeOnboarding::class);
+    }
+
+    /**
+     * Where this person gets paid. Deliberately its own table and its own
+     * resource — see EmployeeBankAccount for why it is not columns here.
+     */
+    public function bankAccount(): HasOne
+    {
+        return $this->hasOne(EmployeeBankAccount::class);
+    }
+
     /* ---------------------------------------------------------- accessors */
 
     public function getFullNameAttribute(): string

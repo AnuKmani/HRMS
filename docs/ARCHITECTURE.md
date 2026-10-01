@@ -1,12 +1,14 @@
 # Architecture
 
-> **Status:** Phase 9 — RBAC, authentication, the business slices through
+> **Status:** Phase 10 — RBAC, authentication, the business slices through
 > attendance and leave, the site vertical slice (activity reports, the
 > official daily report and its on-demand PDF), the payroll vertical slice
-> (ledger, calculation, loans and salary documents) and now **the expense
-> vertical slice** (claims, private receipts, the approval engine reused for a
-> third subject) are implemented and documented as built. Sections marked ⬜
-> are planned but not yet built.
+> (ledger, calculation, loans and salary documents), the expense vertical
+> slice (claims, private receipts, the approval engine reused for a third
+> subject) and now **the employee-document and onboarding slice**
+> (configurable document types, private storage, server-computed expiry,
+> the joiner checklist) are implemented and documented as built. Sections
+> marked ⬜ are planned but not yet built.
 
 ---
 
@@ -570,7 +572,7 @@ the two answers differ on purpose, `403` for *who* and `409` for *state*.
 Phase 9 added three to the `expenses` line above — `expenses.create`,
 `expenses.update` and `expenses.receipts.view` — leaving the three that
 already existed (`expenses.view`, `expenses.approve`, `expenses.manage`)
-untouched: **73 permissions / 364 grants** now. Two asymmetries are
+untouched: **73 permissions / 364 grants** after Phase 9. Two asymmetries are
 deliberate, both visible in `RolePermissionSeeder`. First, **`.create` is
 narrower than `.update`**: filing a claim goes to the seven roles expected
 to file their own (Employee, HR Admin, HR Executive, Project Manager, Site
@@ -586,11 +588,30 @@ ownership — and Site Engineer is excluded with it. `ExpensePolicy` then
 asks the row-level question on top of each of the three, and nobody may
 approve their own claim whatever the chain says.
 
+**Phase 10 added seven** — six more `documents.*` verbs
+(`documents.create`, `documents.update`, `documents.verify`,
+`documents.delete`, `documents.expiry.view`, `documents.manage`; the seventh,
+`documents.view`, already existed) and the whole new `onboarding` group
+(`onboarding.view`, `onboarding.manage`) — leaving **80 permissions / 401
+grants**. One asymmetry is the whole design of the slice, and it is visible
+in `RolePermissionSeeder`: **`documents.manage` reaches exactly three roles**
+(HR Admin, HR Executive, Super Admin) while `documents.view` reaches ten.
+`Visibility::mayViewOthersDocuments()` requires **both** `documents.view`
+*and* `documents.manage`, and `employees.view` is deliberately not a third
+door in — so Project Manager, Site Supervisor and Site Engineer, who hold
+`.view` + `.create` + `.update`, may file a colleague's paperwork without
+thereby being able to open a colleague's passport, visa, medical record or
+contract. The same three hold `onboarding.manage`; the other seven hold only
+`onboarding.view`, which the row scope then narrows to *themselves*. Bank
+details are gated again on top, by `EmployeePolicy::viewBankAccount` /
+`updateBankAccount` on two routes that carry no `permission:` middleware at
+all — there is no role whose job is to read everybody's IBAN.
+
 **Super Admin** holds `['*']` — every permission, resolved from the catalogue at seed
 time rather than hard-coded, so a newly added permission is granted automatically.
 Every other role is an explicit allow-list: anything absent is **denied**. The mapping
 is `RolePermissionSeeder::MAP`, and `RbacTest` asserts both directions (Super Admin has
-all 73; `Employee` is denied `payroll.manage`, `payroll.process`, `payroll.lock`, `employees.delete`, `attendance.manage`,
+all 80; `Employee` is denied `payroll.manage`, `payroll.process`, `payroll.lock`, `employees.delete`, `attendance.manage`,
 `leave.approve`, `audit.view`).
 
 `employees.salary.view` — added in Phase 4 — is the one permission that is *not*
@@ -675,6 +696,69 @@ question than absence does. Everything Phase 6 proved — the chain is frozen
 at submit, a later edit to the definition cannot re-route a claim in flight,
 self-approval is impossible at the engine rather than at the route — holds
 for expenses without a line of it being rewritten.
+
+### 3.8 Phase 10 ✅ — Employee documents & onboarding
+
+Five migrations, five models, three services, one store, four policies, two
+events, one scheduled job — and, again, no new engine. What makes this slice
+different is *where the rules live*: **a passport is a row, not a branch.**
+
+**Configuration, not code.** `document_types` carries
+`requires_document_number` / `requires_issue_date` / `requires_expiry_date`
+and `expiry_warning_days`; `onboarding_requirements` carries `code`, `kind`
+and the column list for a `data` requirement. Nothing in
+`EmployeeDocumentService` or `OnboardingService` knows what a passport is,
+which is why adding a document type is one insert and why the checklist and
+the form ask for the same things without either of them being told to.
+
+**Four services, each the only writer of one question.**
+
+| | Owns | Does not own |
+|---|---|---|
+| `EmployeeDocumentService` | filing, replacing, verifying, rejecting, archiving — and the invariant that changing evidence withdraws a sign-off | the bytes (`EmployeeDocumentStore`), the countdown (`DocumentExpiryService`) |
+| `EmployeeDocumentStore` | where a file lands and how it comes back: private disk, minted name, `SelfieSanitizer` for images, `%PDF-` sniff for PDFs, a `StreamedResponse` with a sanitised download name | any knowledge of status or of who may see the row |
+| `DocumentExpiryService` | `valid` / `expiring_soon` / `expired`, computed from the date against **the type's own window** (falling back to `hrms.expiry.default_warning_days`) | the stored `status`, which the service layer writes |
+| `OnboardingService` | `draft → pending_documents → hr_review → completed`, the checklist, `materialise()`, and completion | deciding what a requirement means — that is `onboarding_requirements` |
+
+`DocumentExpiryService` being authoritative is the reason a client can be
+trusted to *draw* and not to *decide*: every row ships with `expiry_state`
+and `days_until_expiry` already computed, so a phone with a wrong clock
+still shows the server's answer.
+
+**The scheduler is idempotent by construction.**
+`ScanDocumentExpiries` walks every non-archived document with an expiry date,
+writes `expiry_notified_at` and raises `DocumentExpiring` / `DocumentExpired`
+— two events raised now, wired to nothing, because FCM is still unstarted and
+a notification hook should be a subscriber rather than a `->notify()` in a
+loop. Re-running in the same window changes nothing and raises nothing: the
+marker is *on the row*, so two overlapping workers cannot both win, and
+`withoutOverlapping()` / `onOneServer()` remain documented requirements rather
+than assumptions. Scheduled at `hrms.expiry.scan_hour:6`, `scan_minute:15`
+in `routes/console.php`.
+
+**Onboarding is computed, never stored as eight booleans.** The checklist is
+folded over `onboarding_requirements` at read time: any non-archived,
+unexpired `valid` document of the matching type satisfies a `document`
+requirement; otherwise the newest non-archived row decides
+`pending_verification` / `rejected` / `expired`. `data` reads the employee's
+own columns; `bank` reads `employee_bank_accounts`. Completion is refused
+with **409 naming each outstanding requirement** — a 403 would say "you may
+not" when the truth is "not yet", and the two lead to different next actions.
+
+**Bank details are a different kind of secret and are shaped like one.**
+They live in a 1:1 side table with `encrypted` casts, are written through two
+routes with **no `permission:` middleware** (`EmployeePolicy::viewBankAccount`
+/ `updateBankAccount` decide per row), and are absent from `EmployeeResource`
+by construction rather than by omission — the leak a `hidden()` forgets cannot
+happen. The cost is that `APP_KEY` must not be rotated without a
+re-encryption pass, which is called out in `docs/SECURITY.md` §4.
+
+**Row scope is one function, and it fails closed.**
+`Visibility::mayViewOthersDocuments()` = `documents.view` **and**
+`documents.manage`; `employeeDocumentsFor()` and `employeeDocumentIsVisible()`
+default to *your own rows*; `onboardingEmployeesFor()` / `onboardingIsVisible()`
+= own or `onboarding.manage`. Every one of them is a single place to read and
+a single place to test.
 
 ---
 
@@ -820,8 +904,13 @@ mobile/lib/
 │   ├── loans/                          # ← Phase 8, three-layer: schedule, progress,
 │   │                                   #    approve / reject with remarks
 │   ├── salary_certificates/            # ← Phase 8, three-layer: ask, decide, PDF
-│   └── expenses/                       # ← Phase 9, three-layer: claim list, form,
-│                                       #    detail + approval timeline, receipt capture
+│   ├── expenses/                       # ← Phase 9, three-layer: claim list, form,
+│   │                                   #    detail + approval timeline, receipt capture
+│   ├── documents/                      # ← Phase 10, three-layer: document list,
+│   │                                   #    expiry report, upload/edit form (camera,
+│   │                                   #    gallery, PDF), detail with verify/reject
+│   └── onboarding/                     # ← Phase 10, three-layer: joiner directory,
+│                                       #    checklist detail, stage + completion
 └── main.dart
 ```
 
@@ -1375,3 +1464,4 @@ The following are explicitly **out of scope** unless later requested:
 | Post-Phase 8 payroll hardening | **Financial safety** — negative `net_salary` can no longer come from a repayment (**§5.14**): `loan_installments.deducted_amount` (1 migration, **48 tables / 41 migrations**) + `partially_deducted`, `RepaymentAllocation` carrying scheduled / before / now / left, `payroll.minimum_net_salary` setting (4 `payroll.*`, **17 total**), carry-forward read `due_date ≤ period end ∧ status ∈ {pending, partially_deducted}` with per-run provenance on `payroll_items`, `LoanInstallmentResource` wired into `LoanResource` (`remaining_amount` on the schedule and `next_installment`); no UAE statutory rule and no audit logging added — both deferred, services ready for it; `PayrollRepaymentTest` (11), backend **469 tests / 2915 assertions**, Flutter **378 tests** |
 | Phase 9 | **Expense management** — 3 migrations (**51 tables / 44 migrations**: `expense_categories`, `expenses`, `expense_receipts`), `ExpenseService` (every mutation in a transaction; field errors as `ValidationException`, illegal state as `409` naming the state) + `ExpenseReceiptStore` (private `expense-receipts/{expenseId}/{uuid}.{ext}`, config `hrms.storage.expense_receipt_{directory,max_kilobytes}`), a thin `ExpenseController`, 4 FormRequests (`StoreExpense`, `UpdateExpense`, `ActOnExpense`, `StoreExpenseReceipts`), `ExpensePolicy` (11 abilities, including `viewReceipt`), `Visibility::{expensesFor, expenseIsVisible, mayViewOthersExpenses, mayClaimExpenseAt}` + a private `directReportIds()`, and the Phase 6 approval engine reused for a third subject (`ApprovalWorkflow::SUBJECT_EXPENSE`, `ApprovalRecord::TYPE_EXPENSE`, union widened to `LeaveRequest\|OvertimeRequest\|Expense`, seeded `EXP-STD`) — 3 permissions (**73 total / 364 grants**), 6 seeded categories, 4 workflows / 9 steps (17 settings unchanged), 13 routes (**153 definitions / 158 registered**), Flutter `features/expenses/` (list, form, detail, receipt capture); backend **499 tests / 3251 assertions** (Phase 9: `ExpenseTest` 20 + `ExpenseReceiptTest` 10) |
 | Post-Phase 9 expense configuration | **Configurable currency** — `system.currency` reseeded `INR → AED` (read by payroll, both PDFs, `PayrollResource`, `LoanResource` and the new-claim default) plus `system.supported_currencies` (`json`, `["AED"]`, **18 settings total**); **`GET /client-settings`** (`ClientSettingsController`, sanctum only, no `permission:`, explicit allow-list of `default_currency` + `supported_currencies`, reconciled so the default it offers is always accepted); `StoreExpenseRequest` upper-cases `currency` in `prepareForValidation()` then validates it against the configured list (`allowedCurrencies()`), `UpdateExpenseRequest` unions that with the code the claim was already filed in so narrowing the setting cannot trap a draft; Flutter `core/config/client_settings.dart` (`ClientSettings` · `ClientSettingsSource` · `clientSettingsProvider`) pre-fills a new claim, shows one code read-only and offers several only when several are configured, opens the field on a fetch failure, and never fetches anything for an edit — a filed claim keeps its currency, and nothing converts; **1 route (154 definitions / 159 registered)**; backend **509 tests / 3288 assertions** (`ClientSettingsTest` 8 + `ExpenseTest` +2), Flutter **465 tests** (+11) |
+| Phase 10 | **Employee documents & onboarding** — 5 migrations (**56 tables / 49 migrations**: `document_types`, `employee_documents`, `onboarding_requirements`, `employee_onboarding`, `employee_bank_accounts`), configuration instead of rules (`document_types.requires_*` + `expiry_warning_days`, `onboarding_requirements.kind = document\|data\|bank` matched **by code**), `EmployeeDocumentService` / `DocumentExpiryService` (authoritative `valid\|expiring_soon\|expired` per type) / `OnboardingService` (`draft → pending_documents → hr_review → completed`, materialised on first read, **409 naming what is outstanding** on completion) + `EmployeeDocumentStore` (private `employee-documents/{employeeId}/{uuid}.{ext}`, config `hrms.storage.document_{directory,max_kilobytes}`, images re-encoded through `SelfieSanitizer`, `%PDF-` sniff, `StreamedResponse` with a `[A-Za-z0-9 _-]` download name), `ScanDocumentExpiries` scheduled at `hrms.expiry.scan_{hour,minute}` and idempotent through `expiry_notified_at` with `DocumentExpiring`/`DocumentExpired` raised and **no FCM**, 5 FormRequests, 5 Resources, `Visibility::{mayViewOthersDocuments, employeeDocumentsFor, employeeDocumentIsVisible, onboardingEmployeesFor, onboardingIsVisible, mayFileDocumentsFor}` failing closed to own rows — **3 new policies (26 total)**: `EmployeeDocumentPolicy`, `DocumentTypePolicy`, `EmployeeOnboardingPolicy`, plus `EmployeePolicy::{viewBankAccount, updateBankAccount}` on two routes with **no `permission:` middleware** and `employee_bank_accounts` on `encrypted` casts outside `EmployeeResource` — 7 permissions (**80 total / 401 grants**, `documents.manage` + `onboarding.manage` held by exactly three roles), 2 seeders (9 document types, 8 requirements), 18 settings unchanged, 16 routes (**170 definitions / 175 registered**), Flutter `features/{documents,onboarding}/` + `DocumentFilePicker` on **`file_picker`** (the only package added), 7 `GoRoute`s (**65 total**), two Home doors, `PermissionScope` +10 getters, `ApiClient.putMultipart()`; backend **553 tests / 3674 assertions** (Phase 10: `EmployeeDocumentTest` 20 + `OnboardingTest` 12 + `DocumentExpiryScanTest` 6 + `EmployeeBankAccountTest` 6), Flutter **551 tests** (+86) |

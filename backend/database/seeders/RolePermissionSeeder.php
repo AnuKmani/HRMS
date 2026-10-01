@@ -49,7 +49,10 @@ class RolePermissionSeeder extends Seeder
             'reports.view', 'reports.export',
             'site_activity_reports.view',
             'daily_site_reports.view', 'daily_site_reports.pdf',
-            'documents.view', 'documents.manage',
+            'documents.view', 'documents.create', 'documents.update',
+            'documents.verify', 'documents.delete',
+            'documents.expiry.view', 'documents.manage',
+            'onboarding.view', 'onboarding.manage',
             // Expenses: this role both files its own claims (`create` /
             // `update` mirror `leave.create`) and is the back office for
             // everybody else's — `.manage` is the permission EXP-STD's
@@ -84,7 +87,10 @@ class RolePermissionSeeder extends Seeder
             'reports.view',
             'site_activity_reports.view',
             'daily_site_reports.view', 'daily_site_reports.pdf',
-            'documents.view', 'documents.manage',
+            'documents.view', 'documents.create', 'documents.update',
+            'documents.verify', 'documents.delete',
+            'documents.expiry.view', 'documents.manage',
+            'onboarding.view', 'onboarding.manage',
             'settings.view',
             // Files her own claims and is told who each one is waiting on,
             // but is not the financial sign-off: `.manage` is withheld, so
@@ -134,7 +140,8 @@ class RolePermissionSeeder extends Seeder
             'expenses.view', 'expenses.update', 'expenses.approve',
             'expenses.manage', 'expenses.receipts.view',
             'reports.view', 'reports.export',
-            'documents.view',
+            'documents.view', 'documents.expiry.view',
+            'onboarding.view',
             'settings.view',
             'audit.view',
         ],
@@ -155,7 +162,12 @@ class RolePermissionSeeder extends Seeder
             'site_activity_reports.view', 'site_activity_reports.create', 'site_activity_reports.update',
             'daily_site_reports.view', 'daily_site_reports.create', 'daily_site_reports.update',
             'daily_site_reports.manage', 'daily_site_reports.pdf',
-            'documents.view',
+            // Own file only. `documents.create` is the self-service door —
+            // filing your own passport — and `documents.manage` is what
+            // this role is pointedly NOT given: managing a person's project
+            // is not a licence to open their Emirates ID.
+            'documents.view', 'documents.create', 'documents.update',
+            'onboarding.view',
             // Files their own claims like anyone else, and acts on the
             // supervisor link of a chain for the team they manage — never
             // the financial sign-off, which `.manage` withholds from this
@@ -182,7 +194,8 @@ class RolePermissionSeeder extends Seeder
             'site_activity_reports.view', 'site_activity_reports.create', 'site_activity_reports.update',
             'daily_site_reports.view', 'daily_site_reports.create', 'daily_site_reports.update',
             'daily_site_reports.pdf',
-            'documents.view',
+            'documents.view', 'documents.create', 'documents.update',
+            'onboarding.view',
             // Claims are self-service exactly like leave is: read the door,
             // file your own, edit your own draft — never approve, because
             // this role is not an approver step on any chain that ships.
@@ -211,7 +224,8 @@ class RolePermissionSeeder extends Seeder
             'site_activity_reports.view', 'site_activity_reports.create', 'site_activity_reports.update',
             'daily_site_reports.view', 'daily_site_reports.create', 'daily_site_reports.update',
             'daily_site_reports.pdf',
-            'documents.view',
+            'documents.view', 'documents.create', 'documents.update',
+            'onboarding.view',
             // As above, plus `.approve`: a supervisor is the
             // `reporting_manager` link of EXP-STD, so they need the coarse
             // gate on POST /expenses/{id}/approve to even reach the policy
@@ -255,6 +269,7 @@ class RolePermissionSeeder extends Seeder
             'expenses.manage', 'expenses.receipts.view',
             'reports.view', 'reports.export',
             'documents.view',
+            'onboarding.view',
             'audit.view',
         ],
 
@@ -281,6 +296,7 @@ class RolePermissionSeeder extends Seeder
             'site_activity_reports.view',
             'daily_site_reports.view', 'daily_site_reports.pdf',
             'documents.view',
+            'onboarding.view',
             // Deliberately `.view` and nothing else. Management reads
             // expense records but does not file them, does not approve them
             // and does not open the receipts attached to them — read-only is
@@ -320,7 +336,15 @@ class RolePermissionSeeder extends Seeder
             'site_activity_reports.view',
             'site_activity_reports.create',
             'site_activity_reports.update',
-            'documents.view',
+            // Their own file, and the door to add to it. `documents.create`
+            // and `.update` are filing and correcting *their own* documents;
+            // `documents.manage` is absent, which is what keeps this role
+            // reading its own passport and nobody else's.
+            'documents.view', 'documents.create', 'documents.update',
+            // Their own onboarding checklist, and nothing else: the list
+            // and the detail both narrow to the caller's own employee row
+            // unless `onboarding.manage` is held.
+            'onboarding.view',
             // Their own claims, and nothing else. `expenses.view` is the
             // coarse gate that lets GET /expenses through at all —
             // Visibility then narrows every row to their own, because this

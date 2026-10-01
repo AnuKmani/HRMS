@@ -54,6 +54,7 @@ dependencies:
   # person downloads, and a PDF rendered on demand deserves to be *read*
   # rather than saved to a path nobody can open.
   open_filex: ^4.7.0
+  file_picker: ^13.1.0
 
 dev_dependencies:
   flutter_test:

@@ -222,6 +222,27 @@ return [
         'expense_receipt_directory' => (string) env('HRMS_EXPENSE_RECEIPT_DIRECTORY', 'expense-receipts'),
 
         'expense_receipt_max_kilobytes' => (int) env('HRMS_EXPENSE_RECEIPT_MAX_KB', 5120),
+
+        /*
+        | Employee documents (Phase 10).
+        |
+        | The same rules as a medical certificate and a receipt — private
+        | disk, no public URL, server-minted filename, read back only
+        | through the owning policy — with one difference that matters:
+        | an image *is* re-encoded, through SelfieSanitizer, because a
+        | passport scan arrives from somebody's camera roll carrying EXIF
+        | the file never needs. A PDF is not touched: it has to stay a PDF
+        | or it stops being a document anybody can open, and parsing
+        | PDF segments would mean a library this app does not have. What
+        | is dropped in both cases is the client's filename.
+        |
+        | 10 MB rather than the 5 MB everything else uses: an Emirates ID
+        | scan at 300 dpi does not fit in 5 MB, and raising one ceiling
+        | should not silently raise another's.
+        */
+        'document_directory' => (string) env('HRMS_DOCUMENT_DIRECTORY', 'employee-documents'),
+
+        'document_max_kilobytes' => (int) env('HRMS_DOCUMENT_MAX_KB', 10240),
     ],
 
     /*
@@ -229,18 +250,21 @@ return [
     | Scheduled enforcement
     |--------------------------------------------------------------------------
     |
-    | Exactly one thing in this application is scheduled: the hourly
-    | conversion of overdue, certificate-less sick leave into Loss of Pay.
-    | These two values tune *when and how often* that runs — both are
-    | deployment mechanics, which is why they are here rather than in a
-    | route file.
+    | Exactly two things in this application are scheduled: the hourly
+    | conversion of overdue, certificate-less sick leave into Loss of Pay,
+    | and the daily scan that expires documents whose date has passed and
+    | raises the warning on those about to. These values tune *when and how
+    | often* they run — all deployment mechanics, which is why they are here
+    | rather than in a route file.
     |
-    | What is deliberately NOT here: the deadline itself. Two days is a
+    | What is deliberately NOT here: any deadline itself. Two days is a
     | business rule about people, so it lives in the `settings` table as
-    | `leave.sick_certificate_deadline_days` and is changed by whoever runs
-    | the company, not by whoever deploys the code. Likewise `tries` and
-    | `uniqueFor` on the job — see EnforceSickCertificateDeadlines for why
-    | each is a class-level decision rather than a knob.
+    | `leave.sick_certificate_deadline_days`; the expiry warning window is
+    | a property of each document type, on `document_types.expiry_warning_days`.
+    | Both are changed by whoever runs the company, not by whoever deploys
+    | the code. Likewise `tries` and `uniqueFor` on the jobs — see
+    | EnforceSickCertificateDeadlines and ScanDocumentExpiries for why each
+    | is a class-level decision rather than a knob.
     |
     */
 
@@ -260,6 +284,40 @@ return [
         // transaction — because a mutex that expires mid-run is worse than
         // no mutex: it converts one run into two.
         'overlap_minutes' => max(1, (int) env('HRMS_SICK_OVERLAP_MINUTES', 60)),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Document expiry
+    |--------------------------------------------------------------------------
+    |
+    | When the daily scan runs, and the fallback warning window for a
+    | document type that has not been given one.
+    |
+    | `default_warning_days` is a *fallback*, not the rule. Each row in
+    | `document_types` carries its own `expiry_warning_days`, because an
+    | Emirates ID that lapses in months and a passport that lapses in years
+    | should not be announced with the same amount of notice — and a single
+    | global window would either cry wolf or warn late for one of them. Zero
+    | on a type means "nobody configured this yet", so it lands here rather
+    | than meaning "never warn", which would be a silent expiry by accident.
+    |
+    | The scan's hour and minute are clamped rather than validated, exactly
+    | as `scheduling.tick_minute` is: a typo in .env must not make the
+    | scheduler throw at load time and quietly stop every scheduled task.
+    |
+    | Nothing here decides *who is told*. The scan raises an event; turning
+    | that into a push notification is a later phase, and FCM is not wired
+    | up yet by design.
+    |
+    */
+
+    'expiry' => [
+        'default_warning_days' => max(0, (int) env('HRMS_DOCUMENT_WARNING_DAYS', 30)),
+
+        'scan_hour' => max(0, min(23, (int) env('HRMS_DOCUMENT_SCAN_HOUR', 6))),
+
+        'scan_minute' => max(0, min(59, (int) env('HRMS_DOCUMENT_SCAN_MINUTE', 15))),
     ],
 
 ];

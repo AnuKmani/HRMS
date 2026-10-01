@@ -181,6 +181,31 @@ HRMS_SICK_OVERLAP_MINUTES=60
 # jurisdiction you deploy into) has its own rules for basic vs. basic+allowance
 # and for the 1.25/1.5/2x tiers — validate and set them yourself. Nothing here
 # is statutory compliance, and the schema will not stop you setting it wrong.
+
+# --- Phase 10: employee documents -------------------------------------------
+# Employee documents are identity papers, so the storage settings are env vars
+# (deployment mechanics) while the *warning* window is not: which type warns
+# early and by how many days is a property of the row in document_types, and
+# HRMS_DOCUMENT_WARNING_DAYS below is only the fallback when a type says none.
+
+# Private directory under storage/app/private that holds the employee file.
+# The name is minted server-side as {employeeId}/{uuid}.{ext} — nothing the
+# client sends becomes part of a path, so this is the only knob.
+HRMS_DOCUMENT_DIRECTORY=employee-documents
+
+# Ceiling for one document upload, in KB (10 MB by default). A passport scan
+# that arrives larger is refused before it is written, not after.
+HRMS_DOCUMENT_MAX_KB=10240
+
+# Fallback warning window in days for a document type whose own
+# expiry_warning_days is NULL. NULL means "use this", never "never warn".
+HRMS_DOCUMENT_WARNING_DAYS=30
+
+# When the nightly expiry scan runs (06:15 by default). Both are deployment
+# mechanics, so they are env vars; the scan is idempotent regardless of when
+# it fires, because expiry_notified_at lives on the row.
+HRMS_DOCUMENT_SCAN_HOUR=6
+HRMS_DOCUMENT_SCAN_MINUTE=15
 ```
 
 **Critical:** `APP_DEBUG=false` in production. A debug page can leak env secrets.
@@ -189,6 +214,13 @@ HRMS_SICK_OVERLAP_MINUTES=60
 `MAIL_MAILER` that has been verified to deliver. The endpoint answers `501`
 while it is `false`, and `config:cache` bakes the value in — changing it needs
 a `php artisan config:clear`.
+
+**Critical:** do **not** rotate `APP_KEY` as part of a routine `.env` refresh.
+Since Phase 10 every column of `employee_bank_accounts` is an encrypted cast,
+and ciphertext written with the old key is unreadable with a new one — a
+rotation that skips re-encrypting that table silently destroys every IBAN.
+Rotate only as a deliberate two-step (decrypt with the old key, re-encrypt
+with the new), with the table backed up first. See `docs/SECURITY.md` §4.10.
 
 ### 3.2 Post-deploy commands
 
@@ -200,8 +232,8 @@ php artisan migrate --force
 php artisan storage:link        # only if any public disk is used
 ```
 
-**When the permission catalogue grows** (it has four times — Phases 4, 6, 7
-and 8, and it now stands at **70 permissions / 332 grants**), re-run the
+**When the permission catalogue grows** (it has six times — Phases 4, 6, 7,
+8, 9 and 10, and it now stands at **80 permissions / 401 grants**), re-run the
 idempotent seeders rather than the whole `DatabaseSeeder`:
 
 ```bash
@@ -231,6 +263,29 @@ Without them the API still starts, but `POST /leave` has no types to offer and
 `ApprovalWorkflowSeeder` is safe to re-run: each workflow is keyed by
 `(subject_type, code)`, and it only clears `is_default` when the definition
 being written asserts one — re-seeding cannot quietly strip the default away.
+
+**Phase 10 added two configuration seeders** — run them on first deploy of
+this release, before anybody opens the Documents screen:
+
+```bash
+php artisan db:seed --class=DocumentTypeSeeder --force         # 9 types, keyed by `code`
+php artisan db:seed --class=OnboardingRequirementSeeder --force # 8 requirements, all mandatory
+```
+
+Both are keyed by a **UNIQUE `code`** rather than by an id, so re-running
+them updates a row it already wrote instead of duplicating it — and
+`DocumentTypeSeeder` refuses to write a requirement whose document type is
+missing rather than leaving a null `document_type_id` behind. Without them
+the API still starts, but `GET /document-types` offers nothing to file
+against and every onboarding checklist reads *missing*.
+
+(Phase 9's `ExpenseCategorySeeder` is the same shape: six categories, keyed
+by `code`, safe to re-run.)
+
+**Phase 10 adds no new `settings` rows** — its warning windows, scan time
+and upload ceiling are the `HRMS_DOCUMENT_*` env vars in §3.1, because they
+are deployment mechanics, while *which* type warns early stays a column on
+`document_types`.
 
 ---
 
@@ -318,8 +373,8 @@ Business rules that **must** run server-side — never depend on the mobile app 
 | Job | Purpose | Default schedule | Status |
 |---|---|---|---|
 | `EnforceSickCertificateDeadlines` | Convert leave past its certificate deadline to **LOP**, release the balance, dispatch `LeaveConvertedToLop` | **hourly at :17** — `hourlyAt(config('hrms.scheduling.tick_minute'))`, `HRMS_SICK_TICK_MINUTE` | ✅ Phase 6 |
-| Document expiry reminders | Passport / visa / Emirates ID / certificates | Daily | ⬜ Phase 10 |
-| Training certificate expiry | Notify employee + HR | Daily | ⬜ Phase 10 |
+| `ScanDocumentExpiries` | Flip every lapsed document to **expired**, and raise `DocumentExpiring` / `DocumentExpired` **once per document per window** | **daily at 06:15** — `HRMS_DOCUMENT_SCAN_HOUR` / `HRMS_DOCUMENT_SCAN_MINUTE` | ✅ Phase 10 — **scheduled but delivering nothing yet**: both events have no subscriber (no FCM, §8/§11), so today the expiry report is how HR sees it |
+| Training certificate expiry | Notify employee + HR | Daily | ⬜ **cut from Phase 10's approved scope — unscheduled** |
 | Leave reminders | Pending approvals, upcoming leave | Daily | ⬜ with notifications |
 | Attendance reminders | Missing check-in / check-out | Daily | ⬜ with notifications |
 | Payroll processing | Monthly run | — | ✅ Phase 8 built it, and **deliberately did not schedule it**: a run is an explicit `POST /payroll/process` behind `payroll.process`. Money should not move on a timer; the one-way ladder already makes an accidental second run cost `updated: 0` |
@@ -364,6 +419,23 @@ The tick minute and overlap window are env-tunable because they are
 deployment mechanics; the **deadline** they enforce is not, because it is a
 business rule about people — `leave.sick_certificate_deadline_days` in the
 `settings` table, default 2 days.
+
+**The expiry scan is guarded the same way, and its idempotency is in the
+data too.** `ScanDocumentExpiries` writes `expiry_notified_at` on the row
+*before* it raises an event, so a second pass in the same window finds the
+marker and raises nothing — which means two overlapping workers, a doubled
+cron entry or a manual `schedule:test` run cannot make HR's inbox (once
+notifications exist) say the same passport twice. `expiry_notified_at`
+clears itself when the document is re-dated, so a renewed passport earns
+exactly one fresh warning.
+
+Verify both jobs are registered:
+
+```bash
+$ php artisan schedule:list
+17 * * * *  App\Jobs\EnforceSickCertificateDeadlines .... Next Due: …
+15 6 * * *  App\Jobs\ScanDocumentExpiries ............... Next Due: …
+```
 
 **The schedule needs a queue worker too** — see §4.
 
@@ -423,9 +495,17 @@ backend/storage/app/private/
 ├── leave-certificates/{employeeId}/{uuid}.pdf   Phase 6, kept exactly as sent
 ├── site-report-photos/activity/{reportId}/{uuid}.jpg   Phase 7, re-encoded
 ├── site-report-photos/daily/{reportId}/{uuid}.jpg      Phase 7, re-encoded
-├── documents/employees/     passports, IDs, visas, contracts   ⬜ Phase 10
+├── employee-documents/{employeeId}/{uuid}.{ext}  Phase 10 — images re-encoded,
+│                                                 PDFs kept exactly as sent
+├── expense-receipts/{expenseId}/{uuid}.{ext}     Phase 9, kept exactly as sent
 └── (no payroll directory — see below)
 ```
+
+`employee-documents/` is the largest of them and the only one holding
+identity papers. Its name is `HRMS_DOCUMENT_DIRECTORY` (§3.1); the **stored
+name is always minted by the server** as `{employeeId}/{uuid}.{ext}`, so a
+client filename — and anything path-like inside it — never becomes part of a
+path. The extension on disk follows the sniffed bytes, not the name.
 
 There is **no `reports/` directory and no stored PDF.** The daily site
 report's document is rendered on demand by `GET /daily-site-reports/{id}/pdf`
@@ -441,18 +521,29 @@ copy of the disk**, and the restore procedure below has nothing extra to
 handle. The only place a Phase 8 PDF ever touches a file system is a
 *client's* private temp directory, deleted by the OS, on the phone.
 
-Never inside the web root. All three live directories are reachable only
+Never inside the web root. Every live directory is reachable only
 through an authenticated route that runs a policy — `GET /attendance/{id}/selfie`,
-`GET /leave/{id}/certificate` and
+`GET /leave/{id}/certificate`,
 `GET /daily-site-reports/{id}/photos/{photo}` (plus its activity-report
-twin) — and all answer `Cache-Control: no-store`. No response body ever
+twin), `GET /employee-documents/{id}/file` and
+`GET /expenses/{expense}/receipts/{receipt}` — and all answer
+`Cache-Control: no-store`. No response body ever
 contains a filesystem path, so there is no URL to leak even if a JSON
 payload is logged somewhere.
 
-`selfie_directory`, `certificate_directory` and `report_photo_directory`
+`selfie_directory`, `certificate_directory`, `report_photo_directory` and
+`document_directory`
 come from `config/hrms.php` (`HRMS_SELFIE_DIRECTORY`,
-`HRMS_CERTIFICATE_DIRECTORY`, `HRMS_REPORT_PHOTO_DIRECTORY`) — change them
+`HRMS_CERTIFICATE_DIRECTORY`, `HRMS_REPORT_PHOTO_DIRECTORY`,
+`HRMS_DOCUMENT_DIRECTORY`) — change them
 there, not by moving the folders afterwards.
+
+**The employee file is the one directory worth an extra restore check.**
+It holds passports, Emirates IDs, visas and contracts: back it up with the
+same nightly pass as the rest of `storage/app/private`, and treat a restore
+as a *security* event as well as an operational one — the bytes are
+identifiable documents, and the database knows which employee each belongs
+to while the filenames deliberately do not.
 
 ### 7.2 Backup strategy
 
@@ -630,7 +721,13 @@ php artisan queue:failed       # must be empty after a deploy
 | Phase 8 payroll settings documented in §3.1 (three `settings` rows, **not** env vars) | ✅ |
 | Phase 8 adds **no** storage directory and stores **no** PDF (§7.1) | ✅ by design — nothing extra to back up, restore or expire |
 | "Never log a payroll figure" recorded as a rule (§9) | ✅ documented; no payroll path calls `Log::info()` today |
-| Permission catalogue documented at its current size (§3.2) | ✅ 70 permissions / 332 grants, four phases of growth |
+| Permission catalogue documented at its current size (§3.2) | ✅ 80 permissions / 401 grants, six phases of growth |
+| Phase 10 document env keys documented in §3.1 (`HRMS_DOCUMENT_*`) | ✅ |
+| Phase 10 document env keys present in `.env.example` | ✅ added with the phase — no secrets, defaults only |
+| Phase 10 storage directory documented (§7.1) | ✅ `employee-documents/{employeeId}/{uuid}.{ext}`, minted server-side |
+| Phase 10 configuration seeders documented (§3.2) | ✅ `DocumentTypeSeeder` · `OnboardingRequirementSeeder`, both keyed by UNIQUE `code` and safe to re-run |
+| Expiry scan scheduled and registered (§5) | ✅ `ScanDocumentExpiries`, daily 06:15, idempotent through `expiry_notified_at` |
+| **`APP_KEY` rotation hazard recorded (§3.1)** | ✅ **documented** — `employee_bank_accounts` is on encrypted casts; rotating without re-encrypting destroys every IBAN. See `docs/SECURITY.md` §4.10 |
 | Statutory (UAE / jurisdiction) overtime rate validated and configured | ⬜ **required before production** — the multiplier is a generic engine setting, not compliance |
 | `.env.example` contains no passwords, keys or credentials | ✅ placeholders only; `MAIL_PASSWORD`, `AWS_SECRET_ACCESS_KEY`, `DB_PASSWORD` remain blank or commented |
 | Scheduler registration documented with real `schedule:list` output (§5) | ✅ |

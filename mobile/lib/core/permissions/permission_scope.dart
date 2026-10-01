@@ -264,6 +264,60 @@ class PermissionScope {
   bool get canViewExpenseReceipts => can('expenses.receipts.view');
 
   bool get canWriteExpenses => canCreateExpenses || canUpdateExpenses;
+
+  /* ------------------------------------------------------- documents */
+
+  /// Reading employment documents. The list, the detail screen and the
+  /// file itself all sit behind this one door — *whose* documents are then
+  /// narrowed by `Visibility::employeeDocumentsFor()`, which is the server's
+  /// answer and not this one: a holder without `documents.manage` sees their
+  /// own file and nobody else's.
+  bool get canViewDocuments => can('documents.view');
+
+  /// Filing a document. For **yourself** with this alone; for a colleague
+  /// the server additionally wants [canManageDocuments] — see
+  /// `Visibility::mayFileDocumentsFor()`, which is why a supervisor who
+  /// manages people is not by that fact handed their passports.
+  bool get canCreateDocuments => can('documents.create');
+
+  /// Correcting the details of a row. Never implied by
+  /// [canCreateDocuments]: the seeders give an Employee both and give Payroll
+  /// Admin neither, and merging them would let a role that may read open a
+  /// field it was never meant to write.
+  bool get canUpdateDocuments => can('documents.update');
+
+  /// Signing a document off — or refusing it, which needs the same grant.
+  /// Never implied by [canCreateDocuments]: nobody verifies their own
+  /// passport, and the server refuses that in the same breath.
+  bool get canVerifyDocuments => can('documents.verify');
+
+  /// Archiving a row. A separate act from verifying, and deliberately
+  /// terminal: nothing in this app un-archives one.
+  bool get canDeleteDocuments => can('documents.delete');
+
+  /// The cross-employee "what is about to lapse" report. Deliberately not
+  /// implied by [canViewDocuments]: the question is about *everybody*, and
+  /// the seeders withhold it from the roles that should only ever see their
+  /// own file.
+  bool get canViewDocumentExpiry => can('documents.expiry.view');
+
+  /// The back office for other people's files — the row-level half of every
+  /// question above. Holding [canViewDocuments] without this is a person
+  /// reading their own employment file and nothing else.
+  bool get canManageDocuments => can('documents.manage');
+
+  bool get canWriteDocuments => canCreateDocuments || canUpdateDocuments;
+
+  /* ------------------------------------------------------ onboarding */
+
+  /// Reading the directory of where starters stand.
+  bool get canViewOnboarding => can('onboarding.view');
+
+  /// Moving a record's stage and completing it. Never implied by
+  /// [canViewOnboarding], and never available for your own row: an employee
+  /// signing off their own requirements is the same self-verification
+  /// `documents.verify` refuses.
+  bool get canManageOnboarding => can('onboarding.manage');
 }
 
 /// Recomputed whenever the session changes, so a permission revoked by a

@@ -1,7 +1,7 @@
 # Security
 
-> **Status:** Phase 9 — authentication, rate limiting, the password policy, a
-> **73-permission** catalogue, row-level policies (22 at Phase 8, plus
+> **Status:** Phase 10 — authentication, rate limiting, the password policy, an
+> **80-permission** catalogue, row-level policies (26 at Phase 10, incl.
 > `ExpensePolicy`), GPS attendance
 > controls (server-authoritative geofence, private selfie storage, location and
 > camera permissions), server-side selfie sanitisation (§4.3), the approval and
@@ -16,13 +16,22 @@
 > taken only once and never below the configurable **net-salary floor**,
 > carry-forward of any repayment that would not fit, and salary slips and
 > certificates rendered on demand with nothing stored and nothing to link to
-> (§4.7) — and now the **expense vertical slice**: three new permissions
-> (**73 in all, 364 grants**), `expenses.manage` held by four roles rather
+> (§4.7) — the **expense vertical slice**: three new permissions,
+> `expenses.manage` held by four roles rather
 > than granted broadly, an `ExpensePolicy` that fails closed to your own
 > claims, five statuses (`draft → pending → approved | rejected | cancelled`)
 > reachable only through `ExpenseService`, a figure a client sends treated as
 > a suggestion and re-validated on the server (§6), and receipt files on
-> private storage whose path never leaves the API (§4.8). Transport hardening
+> private storage whose path never leaves the API (§4.8) — and now the
+> **employee-document and onboarding slice**: seven more permissions
+> (**80 in all, 401 grants**) where **`documents.manage` and
+> `onboarding.manage` are held by exactly three roles**, row scope that
+> fails closed to your own file, the server's own answer to "is this
+> expired" on every row (§4.9), identity documents on private storage under
+> a minted name with images re-encoded and PDFs sniffed (§4.9), a nightly
+> scan that cannot notify twice, and **bank details in a 1:1 side table on
+> `encrypted` casts, outside every generic resource and behind two routes
+> with no `permission:` at all** (§4.10). Transport hardening
 > and audit logging remain phased ahead (§5, §8). Individual controls are
 > marked with their phase below.
 
@@ -105,8 +114,8 @@ Two layers, both mandatory:
 
 ### 3.1 Permission layer (`spatie/laravel-permission`)
 
-**Implemented in Phase 2 ✅, extended in Phases 4–9** — `spatie/laravel-permission`
-**^6.25**, 10 roles, **73 permissions**, **364 grants**. Phase 4 added
+**Implemented in Phase 2 ✅, extended in Phases 4–10** — `spatie/laravel-permission`
+**^6.25**, 10 roles, **80 permissions**, **401 grants**. Phase 4 added
 `employees.salary.view`; Phase 5 granted the existing `attendance.view` to the
 `Employee` role so a person can read back the day they recorded; Phase 6 added 11
 (`approvals.view/manage`, `leave.balance.view/manage`, `holidays.manage`,
@@ -121,7 +130,10 @@ Two layers, both mandatory:
 (`expenses.create`, `expenses.update`, `expenses.receipts.view` — the three
 verbs the pre-existing `expenses.view`/`expenses.approve`/`expenses.manage`
 could not express), taking the catalogue **70 → 73** and the grant map
-**332 → 364**.
+**332 → 364**; **Phase 10 added 7** (the six `documents.*` verbs listed in
+§3.1b, with `documents.view` already in the catalogue, plus the new
+`onboarding.{view,manage}` pair), taking the catalogue **73 → 80** and the
+grant map **364 → 401**.
 
 > **Version pin matters:** v7/v8 of this package require PHP `^8.3`. This environment
 > runs **PHP 8.2.4**, so Composer correctly resolves to **6.25.0** (supports Laravel
@@ -235,7 +247,8 @@ Verified by `RbacTest`: an authorized user gets `200`, a user with the wrong rol
 Three verbs join the catalogue on top of the three that already existed:
 `expenses.view`, `expenses.approve` and `expenses.manage` were Phase 2
 inventory; **Phase 9 added `expenses.create`, `expenses.update` and
-`expenses.receipts.view`**, for **73 permissions / 364 grants** in all.
+`expenses.receipts.view`**, for **73 permissions / 364 grants** in all at
+that point (**80 / 401** after Phase 10 — §3.1).
 
 | Permission | Roles holding it (of 10) |
 |---|---|
@@ -266,6 +279,56 @@ The split between `expenses.view` and `expenses.receipts.view` is the same
 one §4.6 draws for `.pdf`: being shown the numbers of a claim and being
 handed the invoice behind it are different acts, so they are different
 grants.
+
+### 3.1b Document & onboarding permissions — ✅ Phase 10
+
+**Phase 10 added seven** — `documents.create`, `documents.update`,
+`documents.verify`, `documents.delete`, `documents.expiry.view`,
+`documents.manage` and the new pair `onboarding.view` / `onboarding.manage`
+(`documents.view` was already in the catalogue, so eight names and seven
+rows), for **80 permissions / 401 grants** in all.
+
+| Permission | Roles holding it (of 10) |
+|---|---|
+| `documents.view` | every role — **10** (an employee reading their own file is the base case) |
+| `documents.create` | Employee, HR Admin, HR Executive, Project Manager, Site Engineer, Site Supervisor, Super Admin — **7** |
+| `documents.update` | the same seven — **7** |
+| `documents.expiry.view` | HR Admin, HR Executive, Payroll Admin, Super Admin — **4** |
+| `documents.verify` | HR Admin, HR Executive, Super Admin — **3** |
+| `documents.delete` | the same three — **3** |
+| `documents.manage` | the same three — **3** |
+| `onboarding.view` | every role — **10** |
+| `onboarding.manage` | HR Admin, HR Executive, Super Admin — **3** |
+
+Three edges of that matrix are the whole design:
+
+- **`documents.manage` at three roles is the row-scope gate, and that is
+  the point.** `Visibility::mayViewOthersDocuments()` requires
+  **`documents.view` *and* `documents.manage`**, and `employees.view` is
+  deliberately **not** a third door in. Project Manager, Site Supervisor and
+  Site Engineer hold `.view` + `.create` + `.update` — they may file a
+  colleague's paperwork — and are absent from the three-role manage row, so
+  the same people can never open a colleague's passport, Emirates ID, visa,
+  medical record or contract. Supervising somebody must not be a way of
+  reading their identity documents.
+- **`documents.expiry.view` is its own grant rather than a rider on
+  `.view`.** The expiry report answers "who in the whole company is about to
+  lapse", which is a different question from "show me my own file" — and the
+  ten roles holding `.view` include every Employee. Withheld from Project
+  Manager, Site Supervisor, Site Engineer, Finance, Management and Employee;
+  held by HR Admin, HR Executive, Payroll Admin and Super Admin.
+- **`onboarding.view` on ten roles does not mean ten roles can browse the
+  joiners.** Without `onboarding.manage` the row scope narrows the directory
+  to *yourself*: an employee may ask where they stand, and cannot see that a
+  colleague has not yet handed in their visa. `onboarding.manage` — moving
+  stages, completing a record — is held by the same three.
+
+**Bank details are gated twice more on top.**
+`GET|PUT /employees/{employee}/bank-account` carry **no `permission:`
+middleware at all**; `EmployeePolicy::viewBankAccount` / `updateBankAccount`
+decide per row, and there is no role in the catalogue whose *job* is to read
+everybody's IBAN. The route exists as its own family precisely so that
+`EmployeeResource` cannot leak the columns by forgetting a `hidden()`.
 
 ### 3.2 Resource layer (Policies)
 
@@ -415,6 +478,40 @@ gets the tighter answer (`Visibility::mayViewOthersExpenses()`), so
 
 **Status:** ✅ **Expense + expense-receipt policies live (Phase 9)** — one
 policy file, ten abilities, row scope from `App\Support\Visibility`.
+
+### 3.2b Document, onboarding & bank-account policies — ✅ Phase 10
+
+Three new files plus two new abilities on `EmployeePolicy`, for **26
+policies** in all. Every one of them reads row scope through
+`App\Support\Visibility`, which is the only place the rule is written.
+
+| Policy | Abilities | Row scope |
+|---|---|---|
+| `EmployeeDocumentPolicy` | `viewAny`, `view`, `create`, `update`, `viewFile`, `verify`, `reject`, `delete`, `expiryReport` | `mayViewOthersDocuments()` = `documents.view` **and** `documents.manage`; `mayFileDocumentsFor()` = `documents.create` **and** (your own, or `documents.manage`). Fail-closed to *your own rows* |
+| `DocumentTypePolicy` | `viewAny`, `view` | `documents.view` — the catalogue a filer needs, never a configuration screen |
+| `EmployeeOnboardingPolicy` | `viewAny`, `view`, `update`, `complete` | own record, or `onboarding.manage` |
+| `EmployeePolicy` | **+ `viewBankAccount`, `updateBankAccount`** (existing file, two new abilities) | your own row, or `employees.manage`; **and these are the only gates on their two routes** |
+
+Four things this slice does that are worth naming:
+
+- **The file is gated exactly like the row.** `viewFile` is not "knows the
+  id" — it asks `view` first, so a document you may not read is a document
+  you may not download, and `404` rather than `403` when the id is not in
+  your scope (a 403 would confirm the id exists).
+- **`verify` / `reject` are their own abilities, not a rider on `update`.**
+  Filing somebody's paperwork and *signing it off* are different acts, and
+  nobody may sign off on their own: the policy refuses a self-verification
+  on top of the three-role grant, so holding `documents.verify` is not enough
+  to approve your own passport.
+- **`expiryReport` is its own ability** because it is the one query that is
+  about *everybody* rather than about a record — see §3.1b.
+- **Bank details are policy-only by design.** The two routes carry no
+  `permission:` middleware, so there is no coarse gate to bypass or to
+  outgrow; `EmployeePolicy` is the whole answer, and it fails closed.
+
+**Status:** ✅ **Document, onboarding and bank-account policies live
+(Phase 10)** — three new files, two new abilities on `EmployeePolicy`,
+row scope from `App\Support\Visibility`.
 
 ---
 
@@ -637,6 +734,108 @@ Receipts are never committed to Git: they live under
 **Audit logging is still not implemented** for reads of these files —
 §8/§13.
 
+### 4.9 Employee documents & the expiry answer — ✅ Phase 10
+
+The most sensitive file the product holds, and the only one whose *age* is
+also a decision.
+
+**The file.** `EmployeeDocumentStore` is the only writer and the only
+reader:
+
+- **private** `local` disk (`storage/app/private`), `employee-documents/`
+  (config `hrms.storage.document_directory`), so there is no `/storage/…`
+  route and no directory listing;
+- **unnameable** — `{employeeId}/{uuid}.{ext}`. The client's filename, and
+  anything path-like inside it, is discarded, so `../../evil.php` cannot be
+  expressed even if validation were bypassed;
+- **validated five ways**: an allow-listed extension (`pdf, jpg, jpeg, png,
+  webp`), a `finfo` MIME sniff of the real bytes (never the part's
+  `Content-Type`), the byte ceiling
+  (`hrms.storage.document_max_kilobytes`, default 10240 KB), content
+  (`%PDF-` inside the first kilobyte for a PDF; a real decode plus a pixel
+  budget for an image) — and the same checks repeated in the storage layer,
+  because a storage layer that trusts a validation layer it may one day stop
+  sharing an author with is waiting for an upload bug;
+- **re-encoded, for images**: the same fail-closed `SelfieSanitizer` the
+  attendance selfie goes through, so EXIF GPS, camera body, software string
+  and any embedded thumbnail cannot survive a trip through a pixel buffer,
+  and what lands is whatever GD produced — which cannot also be a script.
+  Nothing is downsampled for its own sake;
+- **byte-identical, for PDFs**: a document that is not the one that was
+  filed stops being a document anybody can open, so nothing is stripped and
+  the defence is the sniff, the uuid name, and `nosniff` on serve;
+- **unexposed**: no payload in this API contains a path. The resource
+  reports `has_file`, `original_name`, `mime_type`, `file_size` and
+  `file_url`, and `file_url` is `/api/v1/employee-documents/{id}/file`;
+- **served** as a `StreamedResponse` with `Content-Disposition: attachment`,
+  `Cache-Control: no-store…` and `X-Content-Type-Options: nosniff`, under a
+  server-minted name: every byte outside `[A-Za-z0-9 _-]` is dropped from
+  the client's `original_name` (removing the CR, LF and `"` that would let a
+  caller close the disposition attribute and append a header of their own);
+- **row-scoped like the row**: `viewFile` asks `view` first, so an
+  out-of-scope id answers `404` rather than `403` — a 403 would confirm the
+  id exists;
+- **never destroyed by archive**: `remove()` runs only when a document is
+  *replaced*, so the superseded bytes do not linger unpointed-at.
+  `DELETE /employee-documents/{document}` exists only for a row that was
+  never verified; archiving takes a document out of the active list and
+  leaves the row and its file on the employment file.
+
+Documents are never committed to Git either: they live under
+`backend/storage/app/private/`, ignored by the root `.gitignore` exactly as
+receipts and selfies are.
+
+**The expiry answer.** `expiry_state` (`none | valid | expiring_soon |
+expired`) and `days_until_expiry` are computed **on the server** from the
+date against *the type's own* `expiry_warning_days` (falling back to
+`hrms.expiry.default_warning_days`, default 30), and shipped with every row.
+No client derives them — a phone with the wrong clock still shows the
+server's answer, and the answer the nightly job acts on is the answer the
+screen drew. The `expired` list filter reads the **date**, not the stored
+status, so a lagging scheduler cannot make the filter tell a lie;
+`expiring_soon` computes the per-type window in SQL rather than from one
+global constant.
+
+`ScanDocumentExpiries` is scheduled at `hrms.expiry.scan_hour:6`,
+`scan_minute:15` and writes `expiry_notified_at` **before** raising
+`DocumentExpiring` / `DocumentExpired` — the marker is on the row, so a
+second run in the same window changes nothing and raises nothing, and two
+overlapping workers cannot both notify. The two events have no subscribers:
+**no FCM exists**, and a notification hook is a listener rather than a
+`->notify()` inside a loop.
+
+**Audit logging is still not implemented** for reads of these files —
+§8/§13.
+
+### 4.10 Bank details — ✅ Phase 10
+
+A different kind of secret from a document, and shaped like one:
+
+- **1:1 side table** `employee_bank_accounts` with **every column on an
+  `encrypted` cast** — `bank_name`, `account_holder_name`, `iban`,
+  `account_number`, `swift_bic`;
+- **absent from `EmployeeResource` and from every generic list by
+  construction rather than by omission** — the columns are simply not on the
+  model's arrayable surface for those resources, so the leak a forgotten
+  `hidden()` causes cannot happen;
+- **its own routes** `GET|PUT /employees/{employee}/bank-account` with **no
+  `permission:` middleware at all**, gated only by
+  `EmployeePolicy::viewBankAccount` / `updateBankAccount` (your own row, or
+  `employees.manage`);
+- **never logged**: a 422 from a bad field names the field and never echoes
+  the value, and nothing in the slice writes an IBAN to a log line or an
+  exception context;
+- **not in Git** — it is database rows, and `APP_KEY` lives in `.env`
+  behind §9.
+
+> **⚠ `APP_KEY` must not be rotated casually.** Every column above is an
+> encrypted cast. Rotating the key without first re-encrypting
+> `employee_bank_accounts` turns every IBAN into unreadable bytes — the
+> encryption is not reversible without the key it was written with. A
+> rotation is a two-step operation (decrypt with the old key, re-encrypt
+> with the new) and belongs in the deployment runbook, not in a routine
+> `.env` refresh.
+
 ---
 
 ## 5. Transport Security
@@ -742,6 +941,7 @@ literal.
 | `POST /auth/login` | 5 / min | client IP | ✅ Phase 3 |
 | `POST /auth/forgot-password` · `POST /auth/reset-password` | 5 / 15 min | client IP | ✅ Phase 3 |
 | `POST /attendance/check-in` · `check-out` · `site-visits/start` · `site-visits/{id}/end` | 30 / min | authenticated user id | ✅ Phase 5 |
+| Document / onboarding / bank-account writes (8 routes) | none | — | ✅ Phase 10, **deliberately** |
 | General API | 60 / min | client IP | ⬜ Planned |
 | Exports (PDF/Excel) | 10 / min | client IP | ⬜ Phase 11 |
 
@@ -784,6 +984,21 @@ decision routes are bounded by *who may call them* — `expenses.approve` is
 held by seven roles, `expenses.manage` by four — and by the state machine,
 where a repeated approve costs a `403` and a second write never happens
 (§3.1a, §3.2a).
+
+**Phase 10 added no limiter either — deliberately.** None of the eight new
+write routes (five document, two onboarding, one bank account) carries a
+`throttle:`; the coarse gates are `auth:sanctum` + `permission:` on six of
+them, and the two bank-account routes are **policy-only by design** (§4.10),
+which answers `403` before a query rather than after a burst. Every one also
+sits behind a policy, and none accepts an unbounded body. The single
+resource a client can consume is `POST /employee-documents`, bounded
+structurally: one file, `PDF/JPEG/PNG/WebP`, 10240 KB (§4.9), five-way
+validated — and every upload **leaves a row behind**, so abuse is a query
+rather than a guess. The verification routes are bounded by *who may call
+them*: `documents.verify` is held by three roles, `documents.manage` by the
+same three, and nobody may sign off their own paperwork on top of that
+(§3.1b). The nightly expiry scan is scheduled, not an endpoint, and its
+idempotency marker lives on the row — there is nothing to repeat.
 
 On breach → `429` in the standard envelope with `Retry-After`, rendered by the
 exception handler rather than by a per-limiter `Limit::response()` callback, so
@@ -1055,7 +1270,7 @@ HR Admin, HR Executive, Project Manager, Site Engineer, Site Supervisor and
 Management, and by neither Payroll Admin, Finance nor `Employee`; 8 new permissions (59 total / 278 grants); submit-time GPS with a `(0,0)`/non-finite/accuracy-ceiling check; **deliberately no new rate limiter (§7)**. **Not delivered: report audit rows — still outstanding (§8)** |
 | 8 | **Payroll, loans & salary documents** — 36 routes, each behind `permission:` **and** a policy; a one-way money ladder (`draft → calculated → reviewed → processed → locked`) with no reverse and no delete, so no permission authorises a capability the services refuse; `payroll.lock` held by **Payroll Admin alone**, `payroll.process` by three roles, `payroll.summary.view` returning totals with **no names**; every figure `DECIMAL(12,2)` and printed by one formatter (§5 of ARCHITECTURE), no float column anywhere; salary-slip and certificate PDFs rendered on demand behind `no-store` with **no stored file, no path and no URL** (§4.7); loan schedule minted at approval with a `payroll_id` on every installment it takes, so a run cannot take a payment twice; `employee_id` required on create and prohibited on update; salary never present in an employee resource or a log line; 11 new permissions (**70 total / 332 grants**), 5 new policies (22 total), 3 new settings (16 total); **deliberately no new rate limiter (§7)**. **Not delivered: payroll and salary-document audit rows — still outstanding (§8), and the UAE/statutory overtime rate is a generic multiplier, not a validated statutory configuration** |
 | 9 | **Expense claims & receipts** — 13 new routes under `expense`, each behind `permission:` **and** `ExpensePolicy`; the claimant always from the authenticated user, with `employee_id` and `status` **`prohibited`** in `StoreExpenseRequest` (`422`, never silently ignored); statuses `draft → pending → approved \| rejected \| cancelled` reachable only through `ExpenseService`, every transition in a DB transaction, an illegal transition `409` and a field failure `422` with an `errors` map; money a decimal string end to end (`DECIMAL(12,2)`, `App\Support\Money`), amount `numeric`, `> 0`, `<= 99999999.99`, re-validated at the request **and** against the category ceiling at create, update and submit; the site must belong to the named project *and* to somewhere the claimant is placed; approval chain `ApprovalWorkflow::SUBJECT_EXPENSE` with seeded `EXP-STD` (step 1 `reporting_manager`, step 2 `permission: expenses.manage`), no self-approval, current-link-only, one decision per link; receipts on private storage at `expense-receipts/{expenseId}/{uuid}.{ext}` behind `viewReceipt`, MIME/extension/size/content validated, **no storage path and no file URL in any response** (`url` is the id-based route), 5120 KB and 10 per claim, `ExpenseReceiptStore` the only writer; 3 new permissions (**73 total / 364 grants**) and 1 new policy; **deliberately no new rate limiter (§7)**. **Not delivered: expense decision audit rows — still outstanding (§8)** |
-| 10 | Employee documents, onboarding, training, assets; daily-report approval (`approved_at` is created and reserved) |
+| 10 | **Employee documents & onboarding** — 16 new routes; `employee-documents` behind `permission:` **and** `EmployeeDocumentPolicy` (row scope that fails closed to your own file, `employees.view` deliberately not a third door in), `document-types` behind `documents.view`, onboarding behind `onboarding.{view,manage}` with the row scope narrowing a non-manager to *themselves*, and the bank-account pair behind **no `permission:` at all** (`EmployeePolicy::{viewBankAccount,updateBankAccount}` is the only gate); `employee_id` on a store call answers `403` when the caller may neither file their own nor manage others'; uploads validated five ways (extension, `finfo` MIME, byte ceiling, content sniff, re-checked in the store), images **re-encoded through `SelfieSanitizer`** so no identity document keeps its EXIF GPS, PDFs stored byte-for-byte behind a `%PDF-` sniff, private disk at `employee-documents/{employeeId}/{uuid}.{ext}`, **no path in any response** (`file_url` is the id-based route), download `attachment` + `nosniff` + `no-store` + a `[A-Za-z0-9 _-]` filename; `expiry_state`/`days_until_expiry` **computed by the server per type window**, the `expired` filter driven by the date rather than the stored status, `ScanDocumentExpiries` scheduled and idempotent through `expiry_notified_at` with two events raised and **no FCM**; onboarding completion refused **409 naming what is outstanding**; `employee_bank_accounts` on `encrypted` casts outside every generic resource, **never logged**, with the `APP_KEY` rotation hazard documented (§4.10); 7 new permissions (**80 total / 401 grants**) with `documents.manage` + `onboarding.manage` held by exactly three roles, 3 new policies (26 total); **deliberately no new rate limiter (§7)**. **Training and assets were cut from this phase's approved scope. Not delivered: document and onboarding audit rows — still outstanding (§8)** |
 | 11 | Notifications/FCM, dashboards, exports — planned |
 | 12 | Full security audit, penetration-style test pass, deployment hardening |
 

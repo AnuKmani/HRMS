@@ -149,7 +149,7 @@ HRMS/
 │   │   └── rate_limiting.php   # login, password-reset, attendance limits
 │   ├── database/migrations/
 │   ├── routes/api.php
-│   └── tests/               # Feature + Unit (509 tests, 3288 assertions)
+│   └── tests/               # Feature + Unit (553 tests, 3674 assertions)
 │
 ├── docs/                    # Project documentation
 │   ├── ARCHITECTURE.md
@@ -188,7 +188,7 @@ Access is controlled by **roles** *and* **granular permissions**. Hiding a butto
 
 Example permissions: `employees.view`, `employees.create`, `attendance.manage`, `leave.approve`, `payroll.manage`, `sites.manage`, `audit.view`.
 
-**Implemented:** **73 permissions** (364 role grants), all named
+**Implemented:** **80 permissions** (401 role grants), all named
 `resource.action`, seeded by `RoleSeeder` + `PermissionSeeder` +
 `RolePermissionSeeder`. Super Admin holds every permission; each other role
 is an explicit allow-list, so anything absent is denied.
@@ -202,7 +202,12 @@ eight site-report permissions; **Phase 8 added eleven** —
 `payroll.process`, `payroll.lock`, `payroll.summary.view`; **Phase 9 added
 three** — `expenses.create`, `expenses.update` and `expenses.receipts.view`
 (the other three `expenses.*` gates, `view`, `approve` and `manage`, already
-existed), taking the catalogue to 73 and the grants to 364.
+existed), taking the catalogue to 73 and the grants to 364. **Phase 10 added
+seven** — `documents.{create,update,verify,delete,expiry.view,manage}` (six,
+with `documents.view` already in the catalogue) and the new
+`onboarding.{view,manage}` pair, taking it to **80 permissions** and
+**401 grants**. Managers keep `documents.view` without `documents.manage`:
+supervising a person must not open their passport.
 See [`docs/SECURITY.md`](docs/SECURITY.md) §3.1 for the full catalogue and the
 middleware used to enforce it server-side.
 
@@ -260,7 +265,7 @@ php artisan serve          # http://127.0.0.1:8000
 > database settings, not environment variables.
 
 ```bash
-php artisan test                  # 509 tests, 3288 assertions
+php artisan test                  # 553 tests, 3674 assertions
 ./vendor/bin/pint                 # code style
 ```
 
@@ -341,7 +346,7 @@ flutter test                 # 378 tests, no device or server required
 | Deliverable | Status |
 |---|---|
 | `spatie/laravel-permission` **^6.25** (the release line compatible with PHP 8.2 + Laravel 12) | ✅ |
-| 10 roles · 70 permissions · 332 role-permission grants (the count grew as Phases 4–8 added permissions; `PermissionSeeder::PERMISSIONS` is the single source of truth) | ✅ |
+| 10 roles · 80 permissions · 401 role-permission grants (the count grew as Phases 4–10 added permissions; `PermissionSeeder::PERMISSIONS` is the single source of truth) | ✅ |
 | Middleware aliases `permission` / `role` / `role_or_permission` registered | ✅ |
 | `settings` table + `SettingsService` — 12 seeded business rules | ✅ |
 | `departments`, `designations` | ✅ |
@@ -677,6 +682,63 @@ app reads.
 > expected value, not the behaviour. No shipped Phase 1–8 or Phase 9 row
 > above was rewritten to say so.
 
+### ✅ Phase 10 — Employee documents & onboarding (COMPLETE)
+
+The employment file, and the state of a new joiner's. Every kind of document
+is a **row rather than a rule**: `document_types` says whether a passport
+needs a number, an issue date and an expiry, and which warning window it
+counts down from, so nothing in the services knows what a passport is. Files
+are **PDF/JPEG/PNG/WebP in private storage under a random name** — validated on
+MIME, extension, byte content and size, sanitised through the same
+`SelfieSanitizer` the attendance slice uses — and the API never returns a
+path, only an id-based read route.
+
+**Backend**
+
+| Deliverable | Status |
+|---|---|
+| **5 migrations · 49 total · 56 tables · all `Ran`** — `document_types`, `employee_documents`, `onboarding_requirements`, `employee_onboarding`, `employee_bank_accounts` | ✅ |
+| **9 seeded document types** (`DocumentTypeSeeder`): `PASSPORT`, `EMIRATES_ID`, `VISA`, `EMPLOYMENT_CONTRACT`, `LABOUR_DOCUMENTS`, `CERTIFICATE`, `MEDICAL_DOCUMENT`, `TRAINING_CERTIFICATE`, `OTHER` — the three travel documents require number + issue + expiry, everything else asks for nothing it was not told to | ✅ |
+| **8 seeded onboarding requirements** (`OnboardingRequirementSeeder`) — personal information, passport, Emirates ID, visa, employment contract, bank information, employee photo, certificates — each of kind `document` (matched to a type **by code**), `data` (a comma list of non-empty employee columns) or `bank`. No boolean columns on `employee` | ✅ |
+| `employee_documents.status` is stored (`pending`, `valid`, `expired`, `rejected`, `archived`); **`expiry_state` and `days_until_expiry` are computed on the server** from the type's own warning days (or `hrms.expiry.default_warning_days`) and shipped with every row. Uploads always arrive `pending`; changing the file or any identifying field resets it and clears the sign-off; verifying an expired document answers `expired`; a second decision is **409 naming the state** | ✅ |
+| `EmployeeDocumentStore` — private `local` disk, `{employee-documents}/{employeeId}/{uuid}.{ext}`, `%PDF-` sniffed, image metadata stripped by `SelfieSanitizer`, download names reduced to `[A-Za-z0-9 _-]`, served as a `StreamedResponse` through `GET /employee-documents/{document}/file`. **No raw path exists in any payload**, and delete/archive never removes a file or a row from history | ✅ |
+| `DocumentExpiryService` is authoritative for `valid` / `expiring_soon` / `expired`; `ScanDocumentExpiries` runs on the Scheduler (`hrms.expiry.scan_hour:6`, `scan_minute:15`) and is **idempotent through `expiry_notified_at`** — a second run in the same window changes nothing and emits no duplicate event. Two events (`DocumentExpiring`, `DocumentExpired`) are raised as the notification hooks; **no FCM is sent** | ✅ |
+| `OnboardingService` — `draft → pending_documents → hr_review → completed`, `materialise()` creating the record on first read, the checklist computed from the requirements (any unexpired valid document of the type satisfies it; otherwise the newest non-archived row decides `pending_verification` / `rejected` / `expired` / `missing`), and **completion refused with 409 naming what is outstanding** rather than 403 | ✅ |
+| Bank details live in **`employee_bank_accounts`** behind their own routes `GET|PUT /employees/{employee}/bank-account` with **no `permission:` middleware** — the row-level policy decides — are **encrypted at rest**, and are **absent from `EmployeeResource` and from every generic list**. `APP_KEY` must not be rotated casually (see `docs/SECURITY.md` §4) | ✅ |
+| Permissions: **7 new → 80 total, 401 grants** — `documents.{create,update,verify,delete,expiry.view,manage}` and the new `onboarding.{view,manage}`; `documents.view` already existed. Managers deliberately do **not** receive `documents.manage`, so supervising people does not open a colleague's passport | ✅ |
+| Routes: **16 new — 170 definitions / 175 registered** — `employee-documents` (+ `/expiring`, `/{document}/verify`, `/{document}/reject`, `/{document}/file`, `/{document}`), `document-types`, `onboarding` (+ `/{employee}`, `/{employee}/complete`) and the two bank-account routes; `/employee-documents/expiring` is declared **before** `/{document}` (the Phase 7 ordering rule) | ✅ |
+| Policies: `EmployeeDocumentPolicy`, `DocumentTypePolicy`, `EmployeeOnboardingPolicy`, plus `EmployeePolicy::viewBankAccount` / `updateBankAccount` — row scope in `Visibility::{mayViewOthersDocuments, employeeDocumentsFor, employeeDocumentIsVisible, onboardingEmployeesFor, onboardingIsVisible, mayFileDocumentsFor}` | ✅ |
+| Tests: backend **all green on `hrms_testing`** — `EmployeeDocumentTest`, `DocumentExpiryScanTest`, `OnboardingTest`, `EmployeeBankAccountTest` · `composer validate` valid · `vendor\bin\pint --test` **PASS** (419 files) | ✅ |
+
+**Flutter**
+
+| Deliverable | Status |
+|---|---|
+| `mobile/lib/features/documents/` — `domain/` (`employee_document`, `document_type`, `document_repository`), `data/` (`api_document_repository`, `document_source`), `presentation/` (list, expiry report, form, detail, source sheet, controller) | ✅ |
+| `mobile/lib/features/onboarding/` — `domain/` (`onboarding`, `onboarding_repository`), `data/api_onboarding_repository`, `presentation/` (list, detail, controller) | ✅ |
+| **Expiry is always words as well as colour** — "Expires in 5 days", "Expired 12 days ago", "Expires today", "Expires tomorrow", "No expiry date", each with an icon; the server's `expiry_state` and `days_until_expiry` are rendered and never re-derived here | ✅ |
+| One `DocumentSourceSheet` offers all three doors: **camera** reuses `documentCameraProvider` + `CameraCaptureSheet`, gallery and PDF go through the new `DocumentFilePicker` interface backed by **`file_picker`** — one added package, no duplicate picker, bytes going straight to the request with no temporary file and no path in any payload | ✅ |
+| 7 new routes — `/documents`, `/documents/new`, `/documents/expiring`, `/documents/:id`, `/documents/:id/edit`, `/onboarding`, `/onboarding/:id` → **65 `GoRoute` entries**; `/documents/new` and `/documents/expiring` are declared **before** `/documents/:id` | ✅ |
+| Two Home doors — **Documents** (`Icons.folder_shared_outlined`, "Passports, IDs, visas and contracts", `documents.view`) and **Onboarding** (`Icons.person_add_alt_outlined`, "Where new joiners stand", `onboarding.view`) — each behind its own grant, never behind a wildcard `*.view` | ✅ |
+| `PermissionScope` gained 10 getters; `ApiClient.putMultipart()` added beside `postMultipart()` | ✅ |
+| Tests: **86 new Phase 10 tests** across `test/features/documents/`, `test/features/onboarding/`, `test/features/home/home_phase10_test.dart` and `test/app_phase10_routes_test.dart` · `dart format .` clean (246 files) · `flutter analyze` clean · full `flutter test` green | ✅ |
+
+> **What Phase 10 does not do:**
+>
+> - **No training, no assets.** Both were named in the original Phase 10
+>   sketch and are **out of this phase's approved scope**; they are not
+>   started and not scheduled.
+> - **No FCM.** The scan raises events and writes `expiry_notified_at`;
+>   nothing is pushed to a device.
+> - **No audit logging.** Every document and onboarding mutation already
+>   runs through a service method, which is where that log will attach.
+> - **No physical deletion.** Archiving removes a row from the active list
+>   and leaves the record and its file on the employment file — a delete
+>   endpoint exists only for a document that was never verified.
+> - **No bank details in any generic API.** The bank account is its own
+>   route, its own policy check and its own encrypted column; it is never in
+>   `EmployeeResource`, and it is never logged.
+
 ### Planned Phases
 
 | Phase | Scope | Status |
@@ -691,7 +753,8 @@ app reads.
 | **8** | Payroll, salary slips, certificates, loans | ✅ Done |
 | **8h** | Payroll financial-safety hardening — net-salary floor, partial/carry-forward repayments | ✅ Done |
 | **9** | Expenses: workflow approval + private receipts | ✅ Done |
-| **10** | Documents + expiry, onboarding, training, assets | ⬜ Next |
+| **10** | Employee documents (types, private storage, expiry) + onboarding | ✅ Done |
+| **10b** | Training & assets — cut out of Phase 10's approved scope, not scheduled | ⬜ |
 | **11** | FCM notifications, dashboards, reports & exports | ⬜ |
 | **12** | Testing, security audit, deployment, backups | ⬜ |
 

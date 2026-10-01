@@ -6,6 +6,7 @@ use App\Models\Allowance;
 use App\Models\Attendance;
 use App\Models\DailySiteReport;
 use App\Models\Employee;
+use App\Models\EmployeeDocument;
 use App\Models\EmployeeSiteAssignment;
 use App\Models\Expense;
 use App\Models\Holiday;
@@ -1392,6 +1393,147 @@ final class Visibility
         }
 
         return $user->can('payroll.manage');
+    }
+
+    /* -------------------------------------------------- Phase 10: file */
+
+    /*
+    | Employment documents get a narrower answer than every other module
+    | in this file, and the difference is the whole point of the section.
+    |
+    | Attendance, leave, timesheets and expenses all ask a two-or-three
+    | door question ("a listed overseer, the `.manage` grant, or — for
+    | some of them — `employees.view`"). Documents ask exactly ONE door,
+    | and `employees.view` is deliberately not it.
+    |
+    | The reason is that a passport, an Emirates ID, a visa and a medical
+    | record are not "rows about somebody's working day". They are the
+    | documents a person's identity is made of, and a Project Manager who
+    | holds `employees.view` for the people on their project would
+    | otherwise be handed every one of them simply for being their
+    | manager. Managing somebody is not a permission about their
+    | documents.
+    |
+    | So: `documents.view` opens the module (it is what lets an Employee
+    | read their own file), and `documents.manage` — HR Admin, HR
+    | Executive, Super Admin — is the only way to read a *colleague's*.
+    | Fails CLOSED for the reason payroll and loans do: an ordinary
+    | employee holds `documents.view` for their own records, so it cannot
+    | also mean "the company's".
+    */
+
+    /**
+     * May this user read somebody *else's* employment documents?
+     */
+    public static function mayViewOthersDocuments(User $user): bool
+    {
+        if (! $user->can('documents.view')) {
+            return false;
+        }
+
+        return $user->can('documents.manage');
+    }
+
+    /**
+     * Restrict an employee document query to what this user may see.
+     *
+     * The query half of EmployeeDocumentPolicy::view(), asked in the same
+     * words so a `show` cannot answer "yes" to a document the index hid.
+     *
+     * @param  Builder<EmployeeDocument>  $query
+     * @return Builder<EmployeeDocument>
+     */
+    public static function employeeDocumentsFor(Builder $query, User $user)
+    {
+        if (self::mayViewOthersDocuments($user)) {
+            return $query;
+        }
+
+        // Fails closed to `0` rather than to a predicate that matches
+        // nothing, exactly as attendanceFor() does it: indexable, and
+        // honest about what it means when the account has no employee
+        // record — no record, no file.
+        return $query->where('employee_documents.employee_id', $user->employee?->id ?? 0);
+    }
+
+    /**
+     * Does this one document fall inside what the reader may see?
+     */
+    public static function employeeDocumentIsVisible(User $user, EmployeeDocument $document): bool
+    {
+        if ($user->employee?->id === $document->employee_id) {
+            return true;
+        }
+
+        return self::mayViewOthersDocuments($user);
+    }
+
+    /**
+     * Restrict an *employee* query for the onboarding list.
+     *
+     * Deliberately narrower than employeesFor(), and deliberately not
+     * reusing it: a Project Manager may open the directory for the people
+     * on their project, but onboarding says who has not yet produced a
+     * visa — and handing that to every line manager "because they manage
+     * the person" is the accident this rule exists to prevent. One door,
+     * `onboarding.manage`, plus your own row.
+     *
+     * @param  Builder<Employee>  $query
+     * @return Builder<Employee>
+     */
+    public static function onboardingEmployeesFor(Builder $query, User $user)
+    {
+        if ($user->can('onboarding.manage')) {
+            return $query;
+        }
+
+        return $query->where('employees.id', $user->employee?->id ?? 0);
+    }
+
+    /**
+     * Does this one employee's onboarding fall inside the reader's view?
+     */
+    public static function onboardingIsVisible(User $user, Employee $employee): bool
+    {
+        if ($user->employee?->id === $employee->id) {
+            return true;
+        }
+
+        return $user->can('onboarding.manage');
+    }
+
+    /**
+     * May this user file a document *for this particular employee*?
+     *
+     * Asked by StoreEmployeeDocumentRequest, because the question cannot be
+     * asked before the payload has said who the file is for — an
+     * `authorize()` on the policy receives only the class, not the target.
+     * That is exactly the shape {@see self::mayClaimExpenseAt()} already
+     * has: the rule lives here, the caller asks it as soon as it knows the
+     * answer's other half, and there is still only one copy of it.
+     *
+     * Two ways in and no third:
+     *  - your own record — `documents.create` is what lets an Employee add
+     *    a passport to their own file, which is the whole of self-service
+     *    onboarding;
+     *  - `documents.manage`, the explicit HR grant, which is what lets a
+     *    colleague file on somebody else's behalf.
+     *
+     * Deliberately does NOT fall open for `employees.view`, and that is the
+     * point of the section above: a manager who may open the directory is
+     * not thereby allowed to write into somebody's employment file.
+     */
+    public static function mayFileDocumentsFor(User $user, Employee $employee): bool
+    {
+        if (! $user->can('documents.create')) {
+            return false;
+        }
+
+        if ($user->employee?->id === $employee->id) {
+            return true;
+        }
+
+        return $user->can('documents.manage');
     }
 
     /* ------------------------------------------------------------ helpers */

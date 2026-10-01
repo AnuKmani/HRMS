@@ -100,6 +100,55 @@ class EmployeePolicy
         return $this->viewSalary($user, $employee);
     }
 
+    /* ------------------------------------------------- Phase 10: banking */
+
+    /*
+    | Bank details live in their own table and their own resource — see
+    | EmployeeBankAccount for why they are not columns on the row this
+    | policy already governs. Only the *gate* sits here, because the route
+    | is `/employees/{employee}/bank-account` and Laravel resolves a policy
+    | from the class of its first argument: the question really is "may you
+    | see this person's bank details?", and the person is what the caller
+    | named.
+    |
+    | Two permissions rather than one, and neither is `employees.view`:
+    |
+    |   reading   your own — it is your account — or `employees.salary.view`
+    |             (whoever is already trusted with pay figures) or
+    |             `onboarding.manage` (whoever records them during
+    |             onboarding);
+    |   writing   those same two grants, never the employee themselves.
+    |             Self-service entry of the account a salary is paid into is
+    |             a decision for the operator to switch on, not a default:
+    |             an unverified IBAN sitting in a payroll run is a failed
+    |             payment nobody notices until payday.
+    */
+
+    /**
+     * May this user read the employee's bank details?
+     */
+    public function viewBankAccount(User $user, Employee $employee): bool
+    {
+        if ($this->owns($user, $employee)) {
+            return true;
+        }
+
+        return $this->mayRecordBankAccount($user);
+    }
+
+    /**
+     * May this user set or change them?
+     */
+    public function updateBankAccount(User $user, Employee $employee): bool
+    {
+        return $this->mayRecordBankAccount($user);
+    }
+
+    private function mayRecordBankAccount(User $user): bool
+    {
+        return $user->can('employees.salary.view') || $user->can('onboarding.manage');
+    }
+
     private function owns(User $user, Employee $employee): bool
     {
         return $user->employee !== null && $user->employee->id === $employee->id;

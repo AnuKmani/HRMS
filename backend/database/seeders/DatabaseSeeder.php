@@ -27,6 +27,11 @@ class DatabaseSeeder extends Seeder
             // Categories before anything that might reference one — an
             // expense row cannot exist without a category to name.
             ExpenseCategorySeeder::class,
+            // Document types before onboarding requirements: a requirement
+            // is matched to its type by code, and throws rather than
+            // writing a null foreign key if the type is missing.
+            DocumentTypeSeeder::class,
+            OnboardingRequirementSeeder::class,
             DevelopmentDataSeeder::class,
         ]);
     }

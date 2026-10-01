@@ -163,6 +163,27 @@ class HomeScreen extends ConsumerWidget {
           'Proof of salary for a bank or landlord',
         ),
 
+      // Phase 10. Two doors, two permissions — and the reason both are here
+      // rather than one behind the other: `documents.view` is *your* file
+      // (and a colleague's only with `documents.manage`), while
+      // `onboarding.view` is a directory of who is joining. A person can
+      // hold either, both, or neither, and hiding one behind the other
+      // would say something untrue about which question they were asking.
+      if (scope.canViewDocuments)
+        _Module(
+          'Documents',
+          Icons.folder_outlined,
+          '/documents',
+          'Passports, IDs, visas and contracts',
+        ),
+      if (scope.canViewOnboarding)
+        _Module(
+          'Onboarding',
+          Icons.person_add_alt_outlined,
+          '/onboarding',
+          'Where new joiners stand',
+        ),
+
       _Module(
         'Holidays',
         Icons.calendar_month_outlined,

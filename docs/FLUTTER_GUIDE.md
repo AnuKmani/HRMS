@@ -1,15 +1,19 @@
 # Flutter Guide
 
-> **Status:** Phase 9 — the organisation, auth and attendance slices plus
+> **Status:** Phase 10 — the organisation, auth and attendance slices plus
 > `leave/`, `holidays/`, `timesheet/`, `overtime/`, `site_reports/`,
 > **`payroll/`, `loans/` and `salary_certificates/`** (the ledger, the run
 > report and its ladder, salary slips handed to the OS viewer, a loan
 > schedule, and a certificate that is asked for, decided and exported), and
-> now **`expenses/`** (a claim filed against a date, a category, a place and
+> **`expenses/`** (a claim filed against a date, a category, a place and
 > a project, receipts from the camera, the same approval engine as leave,
-> and money kept as a decimal string from the API to the screen), all
+> and money kept as a decimal string from the API to the screen), and now
+> **`documents/` and `onboarding/`** (a file picked from the camera, the
+> gallery or the phone's disk and posted as bytes; the server's own answer
+> to "how long has this got" drawn rather than derived; the joiner
+> checklist and its stages), all
 > in the same `data / domain / presentation` shape. `dart format .` clean
-> (218 files), `flutter analyze` clean, `flutter test` **465 passed**. This
+> (246 files), `flutter analyze` clean, `flutter test` **551 passed**. This
 > guide explains the concepts and patterns the app uses, written for someone
 > who knows PHP/Laravel but is new to Flutter/Dart. Sections that were
 > written as a plan in earlier phases — the offline queue, the location and
@@ -816,6 +820,26 @@ second, so the report is behind a four-second banner. `pumpAndSettle` stops
 the moment nothing animates and never reaches it — pump a fixed loop of
 100 ms steps instead (§5.3 of TESTING).
 
+### 11.5 Three things the document screens add (Phase 10 ✅)
+
+| Seam / rule | Where | Why it is one |
+|---|---|---|
+| `DocumentFilePicker` | `features/documents/data/document_source.dart` | Three doors — camera, gallery, PDF — behind one interface with two methods (`pickImage` / `pickPdf`). The camera already existed (`documentCameraProvider`, the same `CameraCaptureSheet` the selfie, the sick certificate and the receipts use), so the *new* problem was only "get a file off the phone's disk", which is `file_picker`'s entire job. `FilePicker` is an `abstract final class` with **static** methods — no `.platform` singleton, no `withData` — and `PlatformFile` exposes `name`, `path`, `lengthSync()`, `readAsBytes()`. Because `allowedExtensions` only applies to `FileType.custom`, the extension is repaired **client-side** from `name` before upload rather than trusted from `path`. Keeping it behind an interface means the widget tests never import a platform channel |
+| **The expiry label is drawn, never derived** | `features/documents/domain/employee_document.dart` | `expiry_state` and `days_until_expiry` arrive on the row and the label is built from *them*: `Expires in 5 days`, `Expires today`, `Expired 12 days ago`, `No expiry date` — always **words**, always with an icon, never colour alone. A client that recomputed the count from `DateTime.now()` would disagree with the server's nightly scan the first time the two clocks differed, and the disagreement would show as a wrong number on HR's screen rather than as a bug report |
+| `ApiClient.putMultipart()` | `core/network/api_client.dart` | The twin of `postMultipart()`. Editing a document is a `PUT` and `Dio` will not put a file in a `post()` body, so the pair now exists — **and multipart bodies drop null fields**, because a cleared date must reach the server as an absence rather than as the string `"null"` |
+| **The gate is read before the request** | `DocumentDetailScreen` / `DocumentFormScreen` / `OnboardingDetailScreen` `initState` | House pattern is a `ConsumerStatefulWidget` + `initState` load (no family notifiers), so the permission has to be read *inside* `initState` rather than only in `build` — otherwise a typed URL fires an unauthenticated request before the `NoPermission` card is drawn. All three screens also `didUpdateWidget`-reload when the id changes, because a route push to a different row reuses the widget |
+
+**After a write, the screen shows what the server returned.** Verify,
+reject and archive hand the row back; the detail screen uses *that* row and
+calls `documentListProvider` / `documentExpiryProvider` `.reload()`, rather
+than patching a local copy — a local copy and the list would drift the
+moment the two disagreed about what `pending` means.
+
+**`file_url` is a route, not an image.** The detail screen never feeds it to
+`Image.network`; it fetches bytes through the repository's own `file(id)` and
+hands a PDF to `pdfOpenerProvider.openBytes(...)`, while an image draws from
+the bytes that same route returned.
+
 ---
 
 ## 12. Project structure
@@ -1066,6 +1090,51 @@ repository here is one: `ScriptedClientSettings` in `test/support/phase9.dart`
 answers with a fixture, so a widget test never stands a server up to ask what
 currency it should offer.
 
+### 12.4 `features/documents/` and `features/onboarding/` — the folders, the screens, the wiring (Phase 10 ✅)
+
+```
+features/documents/                      # 11 files
+├── domain/      # EmployeeDocument · DocumentType · DocumentRepository
+│                #   ← no Flutter import, no JSON, no HTTP
+├── data/        # ApiDocumentRepository + DocumentFilePicker (the one file-picking seam)
+│                #   ← the only place that knows the envelope and the bytes
+└── presentation/# documents_controller · list · detail · form · expiry
+                 #   + DocumentSourceSheet (camera | gallery | PDF, one sheet)
+
+features/onboarding/                     # 6 files
+├── domain/      # OnboardingRecord · OnboardingChecklistItem · OnboardingRepository
+├── data/        # ApiOnboardingRepository
+└── presentation/# onboarding_controller · list · detail
+```
+
+**The list has two doors, not one.** `documentListProvider` serves the
+directory and `documentExpiryProvider` serves the report; they are separate
+`PagedListController`s because they are different questions with different
+grants (`documents.view` vs `documents.expiry.view`) and different query
+strings. The screen-local *expiry* dropdown is **not** a filter the client
+applies — `DocumentListController.fetch()` translates it into the two
+booleans the API reads (`expired=1`, `expiring_soon=1`) and sends them, so
+the narrowing happens in SQL where the server's own warning window is.
+
+**The form is told what to ask for by the type.** `DocumentFormScreen` takes
+an optional `documentId`, `employeeId` and `typeCode`; `_applyTypeCode()`
+matches a requirement's code to a document type **by code** and fills the
+three `requires_*` flags, then clears the number / issue / expiry errors.
+Changing the type clears them again, because the fields it demands are a
+property of the type and not of what was typed a moment ago. The file is
+required on create and replaceable on edit — an edit with no new file keeps
+the one already stored.
+
+**The checklist can hand work to the upload form.** An outstanding
+`document` requirement with `documents.create` draws an **Attach…** tile
+that pushes `/documents/new` with `extra: {typeCode, employeeId}` — one
+screen filling in another's first page, rather than the user retyping both.
+
+**Both features are behind `permissionScopeProvider` at `initState`.** See
+§11.5: the coarse gate is read before the first request, so a typed URL
+never produces a `401` flash, and `didUpdateWidget` reloads when the id in
+the route changes.
+
 ---
 
 ## 13. Running the app
@@ -1175,7 +1244,8 @@ flutter build appbundle         # build an AAB for Play Store
 | Packages: `flutter_riverpod` 3.4.3 · `dio` 5.11.1 · `go_router` 18.0.1 · `flutter_secure_storage` 11.2.0 | ✅ Phase 3 |
 | Packages: `geolocator` ^14.1.0 · `camera` ^0.12.1 · `image` ^4.10.1 · `shared_preferences` ^2.5.5 · `path_provider` ^2.1.6 | ✅ Phase 5 — five additions, each checked for Dart 3.13 / Flutter 3.47 compatibility before it was added |
 | Package: `open_filex` ^4.7.0 | ✅ Phase 7 — the only dependency a downloaded PDF needs. The bytes come from the API, land in a temp file, and the system's own viewer opens them; no in-app PDF engine, no rendering of untrusted content |
-| Packages deliberately **not** added | ✅ Phase 5 — `connectivity_plus` (the queue learns a failure is transport-level from the failed request itself; a connectivity plugin would report "online" at a captive portal) and `permission_handler` (it drags in platform channels the two permissions we need do not require — `geolocator` and `camera` already surface their own statuses) · ✅ Phase 6 — `file_picker` (the certificate is captured with the back camera rather than chosen from disk, so the one package the feature would have needed is not added) and `intl` (the app formats its own dates) · ✅ Phase 7 — `image_picker` (the report photographs are taken with the **camera**, through the same `DeviceCamera` the selfie and the certificate already use) |
+| Packages deliberately **not** added | ✅ Phase 5 — `connectivity_plus` (the queue learns a failure is transport-level from the failed request itself; a connectivity plugin would report "online" at a captive portal) and `permission_handler` (it drags in platform channels the two permissions we need do not require — `geolocator` and `camera` already surface their own statuses) · ✅ Phase 6 — `file_picker` (**see the row below: Phase 10 added it back**) and `intl` (the app formats its own dates) · ✅ Phase 7 — `image_picker` (the report photographs are taken with the **camera**, through the same `DeviceCamera` the selfie and the certificate already use) |
+| Package: `file_picker` **13.1.0** | ✅ Phase 10 — added back, and the **only** package this phase takes. Phase 6 declined it because a sick certificate is captured with the back camera rather than chosen from disk; a passport scan is neither. `FilePicker` is an `abstract final class` with **static** methods (no `.platform` singleton, no `withData`/`allowMultiple`), `allowedExtensions` is only valid with `FileType.custom`, and the extension is repaired client-side from `PlatformFile.name`. It sits behind `DocumentFilePicker`, so no widget test imports a platform channel · ✅ no pre-existing package was upgraded |
 | `core/` — config, network, storage, router | ✅ Phase 3 |
 | `core/data` page envelope · `core/permissions` scope · `core/presentation` list + form widgets | ✅ Phase 4 |
 | `core/presentation` `StatusChip` · `NoPermission` · `CameraCaptureSheet`; `core/data` `device_camera`; `core/data` `approval_step` | ✅ Phase 6 |
@@ -1225,5 +1295,15 @@ flutter build appbundle         # build an AAB for Play Store
 | **Phase 9 validation summary** — `dart format .` **clean** (216 files) · `flutter analyze` **clean** · `flutter test` **454 passed** (378 before Phase 9, **+76** in `test/features/expenses/` + `test/features/home/home_phase9_test.dart` + `test/app_phase9_routes_test.dart`) | ✅ Phase 9 |
 | **Currency configuration** — `core/config/client_settings.dart` (`ClientSettings` · `ClientSettingsSource` · `clientSettingsProvider`) + the form's `_currencyEditable` / `_currencyHelper` / `_awaitingCurrency`; `ScriptedClientSettings` added to `scopedPhase9` so no test reaches the network for it; `expense.dart`'s parser no longer invents a code when the server omits one | ✅ Post-Phase 9 |
 | **Currency configuration validation summary** — `dart format .` **clean** (218 files) · `flutter analyze` **clean** · `flutter test` **465 passed** (**+11**: 7 in `test/core/config/client_settings_test.dart`, 4 in `expense_form_screen_test.dart`) | ✅ Post-Phase 9 |
+| `features/documents/` — `EmployeeDocument` · `DocumentType` · `DocumentRepository` · `ApiDocumentRepository` · `DocumentFilePicker` · `documents_controller` + `documentListProvider` / `documentExpiryProvider` · list · detail · form · expiry report · `DocumentSourceSheet` (**11 files**, 3 layers) | ✅ Phase 10 |
+| `features/onboarding/` — `OnboardingRecord` / checklist item · `OnboardingRepository` · `ApiOnboardingRepository` · `onboarding_controller` · directory · detail with the checklist (**6 files**, 3 layers) | ✅ Phase 10 |
+| PermissionScope: `canViewDocuments` · `canCreateDocuments` · `canUpdateDocuments` · `canVerifyDocuments` · `canDeleteDocuments` · `canManageDocuments` · `canViewDocumentExpiry` · `canViewOnboarding` · `canManageOnboarding` · `canViewBankAccount` (+ derived helpers) · home doors **Documents** (`documents.view`) and **Onboarding** (`onboarding.view`) | ✅ Phase 10 |
+| Router: **65 `GoRoute` entries** — Phase 10 adds 7: `/documents`, `/documents/new` and `/documents/expiring` **declared before** `/documents/:id`, `/documents/:id`, `/onboarding`, `/onboarding/:id`, and `documentForm()` reading `state.extra` defensively as a `Map` with `:id` parsed by `int.parse` | ✅ Phase 10 |
+| `ApiClient.putMultipart()` — the twin of `postMultipart()`, multipart bodies dropping null fields | ✅ Phase 10 |
+| Expiry chips that always carry words and an icon (never colour alone), built from the server's `expiry_state` / `days_until_expiry` | ✅ Phase 10 |
+| Private file fetching by id (`DocumentRepository.file(int)` → `ApiClient.bytes`), opened through `pdfOpenerProvider` for a PDF and drawn from bytes for an image — **`file_url` is never passed to `Image.network`** | ✅ Phase 10 |
+| Onboarding checklist *Attach…* tile handing `{typeCode, employeeId}` to `/documents/new` | ✅ Phase 10 |
+| Harness `test/support/phase10.dart` — `ScriptedDocuments` · `ScriptedOnboarding` · `scopedPhase10(...)` · `phase10Router(...)` · JSON payload builders `documentRow` / `documentTypeRow` / `checklistItem` / `onboardingRow` parsed by `rows()` so a transition merges into the payload · re-exports from `phase4`/`phase9` | ✅ Phase 10 |
+| **Phase 10 validation summary** — `dart format .` **clean** (246 files) · `flutter analyze` **clean (No issues found)** · `flutter test` **551 passed** (465 before Phase 10, **+86** across 10 new files) | ✅ Phase 10 |
 | Local database (Drift) + relational offline cache | ⬜ Not started — Phase 5 proved the queue does not need it (§10); revisit when a module is genuinely relational |
 | Shared widgets under `core/widgets/` | ⬜ The list and form widgets live in `core/presentation/` today; the split is worth it once a second, differently-shaped widget set appears |

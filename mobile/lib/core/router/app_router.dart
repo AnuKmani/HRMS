@@ -11,6 +11,10 @@ import '../../features/departments/presentation/department_form_screen.dart';
 import '../../features/departments/presentation/departments_list_screen.dart';
 import '../../features/designations/presentation/designation_form_screen.dart';
 import '../../features/designations/presentation/designations_list_screen.dart';
+import '../../features/documents/presentation/document_detail_screen.dart';
+import '../../features/documents/presentation/document_expiry_screen.dart';
+import '../../features/documents/presentation/document_form_screen.dart';
+import '../../features/documents/presentation/document_list_screen.dart';
 import '../../features/employees/presentation/employee_detail_screen.dart';
 import '../../features/employees/presentation/employee_form_screen.dart';
 import '../../features/employees/presentation/employees_list_screen.dart';
@@ -30,6 +34,8 @@ import '../../features/loans/presentation/loan_list_screen.dart';
 import '../../features/overtime/presentation/overtime_detail_screen.dart';
 import '../../features/overtime/presentation/overtime_form_screen.dart';
 import '../../features/overtime/presentation/overtime_list_screen.dart';
+import '../../features/onboarding/presentation/onboarding_detail_screen.dart';
+import '../../features/onboarding/presentation/onboarding_list_screen.dart';
 import '../../features/payroll/presentation/payroll_detail_screen.dart';
 import '../../features/payroll/presentation/payroll_list_screen.dart';
 import '../../features/payroll/presentation/salary_slips_screen.dart';
@@ -82,6 +88,22 @@ final routerProvider = Provider<GoRouter>((ref) {
   /// The `(\d+)` pattern on each route means this cannot throw for a
   /// well-formed URL; a malformed one never reaches the builder.
   int idOf(GoRouterState state) => int.parse(state.pathParameters['id']!);
+
+  // `push('/documents/new', extra: {...})` is how the onboarding checklist
+  // hands over the requirement it wants attached. Read defensively: `extra`
+  // is null for a plain navigation, and a route that assumed otherwise would
+  // throw on the ordinary way in rather than on the unusual one.
+  DocumentFormScreen documentForm(GoRouterState state) {
+    final extra = state.extra;
+    final map = extra is Map ? extra : const <String, Object?>{};
+    final employeeId = map['employeeId'];
+    final typeCode = map['typeCode'];
+
+    return DocumentFormScreen(
+      typeCode: typeCode is String ? typeCode : null,
+      employeeId: employeeId is int ? employeeId : null,
+    );
+  }
 
   final router = GoRouter(
     initialLocation: '/',
@@ -430,6 +452,49 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/salary-certificates/:id',
         builder: (context, state) =>
             SalaryCertificateDetailScreen(requestId: idOf(state)),
+      ),
+
+      // Phase 10: employee documents and onboarding.
+      //
+      // The three fixed `/documents/...` paths are declared **before**
+      // `/documents/:id` for the reason `/employees/new` is: go_router takes
+      // the first route that matches, and `:id` is read with `int.parse`, so
+      // a `new` or `expiring` declared after it would be swallowed by a
+      // route that cannot parse its own parameter.
+      GoRoute(
+        path: '/documents',
+        builder: (context, state) => const DocumentListScreen(),
+      ),
+      GoRoute(
+        path: '/documents/new',
+        builder: (context, state) => documentForm(state),
+      ),
+      GoRoute(
+        path: '/documents/expiring',
+        builder: (context, state) => const DocumentExpiryScreen(),
+      ),
+      GoRoute(
+        path: '/documents/:id',
+        builder: (context, state) =>
+            DocumentDetailScreen(documentId: idOf(state)),
+      ),
+      GoRoute(
+        path: '/documents/:id/edit',
+        builder: (context, state) =>
+            DocumentFormScreen(documentId: idOf(state)),
+      ),
+
+      // `{id}` is the *employee's* id, not the record's — the API takes the
+      // person because "where does she stand?" is the question being asked,
+      // and there is no record for a starter nobody has begun.
+      GoRoute(
+        path: '/onboarding',
+        builder: (context, state) => const OnboardingListScreen(),
+      ),
+      GoRoute(
+        path: '/onboarding/:id',
+        builder: (context, state) =>
+            OnboardingDetailScreen(employeeId: idOf(state)),
       ),
     ],
   );
