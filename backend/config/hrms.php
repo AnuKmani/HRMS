@@ -321,9 +321,9 @@ return [
     | a deployment choice, not a constraint — the two scans never read each
     | other's rows.
     |
-    | Nothing here decides *who is told*. Each scan raises an event; turning
-    | that into a push notification is a later phase, and FCM is not wired
-    | up yet by design.
+    | Nothing here decides *who is told*. Each scan raises an event; the
+    | listeners that turn those events into inbox rows and pushes live in
+    | App\Providers\NotificationServiceProvider.
     |
     */
 
@@ -337,6 +337,95 @@ return [
         'training_scan_hour' => max(0, min(23, (int) env('HRMS_TRAINING_SCAN_HOUR', 6))),
 
         'training_scan_minute' => max(0, min(59, (int) env('HRMS_TRAINING_SCAN_MINUTE', 20))),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Notifications
+    |--------------------------------------------------------------------------
+    |
+    | Two clocks and one timeout.
+    |
+    | `attendance_reminder_*` drives the daily "you have not checked in"
+    | job. It is off by default because a reminder that fires on a
+    | deployment nobody asked for is the fastest way to get a notification
+    | channel muted; a site that wants it sets
+    | `HRMS_ATTENDANCE_REMINDER_HOUR` and it starts the next day. The
+    | hour/minute are clamped rather than validated for the same reason
+    | every other scheduler pair here is: a typo in .env must not make the
+    | scheduler throw at boot and quietly stop every scheduled task.
+    |
+    | `fcm_timeout_seconds` is per HTTP call to FCM, and deliberately
+    | short. A push is best-effort; a worker that sits on a dead connection
+    | for thirty seconds is a worker that is not delivering anything else.
+    |
+    */
+
+    'notifications' => [
+        'attendance_reminder_enabled' => (bool) env('HRMS_ATTENDANCE_REMINDER_ENABLED', false),
+
+        'attendance_reminder_hour' => max(0, min(23, (int) env('HRMS_ATTENDANCE_REMINDER_HOUR', 8))),
+
+        'attendance_reminder_minute' => max(0, min(59, (int) env('HRMS_ATTENDANCE_REMINDER_MINUTE', 0))),
+
+        'fcm_timeout_seconds' => max(1, (int) env('HRMS_FCM_TIMEOUT_SECONDS', 10)),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Reporting & exports
+    |--------------------------------------------------------------------------
+    |
+    | `export_max_rows` is the line between a report that is generated
+    | inline and one that is handed to the queue. Under it, the request
+    | streams a file and the user gets it immediately; over it, the POST
+    | parks a `report_exports` row, answers 202, and a job builds the file
+    | in private storage — because a 40,000-row XLSX built inside a request
+    | holds a worker and a connection for a minute, and a load balancer
+    | will cut that request in half.
+    |
+    | Raise it if your traffic can afford it; lower it if a shared host
+    | cannot. Nothing else in the application reads it, so it is a pure
+    | capacity dial.
+    |
+    | `page_size` is the default page for report *results* (not the
+    | paginated lists elsewhere, which keep their own). `max_pages` caps
+    | how deep a report will page — an export walks every row, a screen
+    | does not need to.
+    |
+    */
+
+    'reporting' => [
+        'export_max_rows' => max(100, (int) env('HRMS_EXPORT_MAX_ROWS', 5000)),
+
+        // The ceiling on a *queued* export — the one a large report is
+        // sent to precisely because it is large. Ten times the inline cap
+        // is the difference between "big" and "the whole history of a
+        // three-year-old installation", and a number needs to exist
+        // somewhere so a runaway filter fails with a message instead of
+        // filling a disk. A PDF never reaches this: over `export_max_rows`
+        // rows it is refused outright, because 6,000 rows of A4 landscape
+        // is a ream of paper, not a document.
+        'queue_max_rows' => max(100, (int) env('HRMS_EXPORT_QUEUE_MAX_ROWS', 50000)),
+
+        'page_size' => max(1, min(500, (int) env('HRMS_REPORT_PAGE_SIZE', 50))),
+
+        'queue' => env('HRMS_EXPORT_QUEUE', 'default'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Pagination defaults
+    |--------------------------------------------------------------------------
+    |
+    | Shared per-page ceiling for lists that do not define their own
+    | limit (notifications, audit logs, etc.). A single config value
+    | rather than hard-coding 15 in multiple controllers.
+    |
+    */
+
+    'pagination' => [
+        'per_page' => max(1, min(100, (int) env('HRMS_PAGINATION_PER_PAGE', 15))),
     ],
 
 ];

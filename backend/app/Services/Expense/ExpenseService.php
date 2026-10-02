@@ -2,6 +2,7 @@
 
 namespace App\Services\Expense;
 
+use App\Events\ExpenseDecided;
 use App\Models\ApprovalRecord;
 use App\Models\Employee;
 use App\Models\Expense;
@@ -222,6 +223,8 @@ final class ExpenseService
             $expense->current_approval_step = null;
             $expense->save();
 
+            event(new ExpenseDecided($expense, ExpenseDecided::REJECTED, $user));
+
             return $expense->refresh();
         });
     }
@@ -391,6 +394,11 @@ final class ExpenseService
         $expense->final_approved_by = $approver?->id;
         $expense->current_approval_step = null;
         $expense->save();
+
+        // Raised here rather than in approve(): this is the one place a
+        // claim becomes approved, whether the answer came from the last
+        // approver or from a workflow with nobody left to ask.
+        event(new ExpenseDecided($expense, ExpenseDecided::APPROVED, $approver));
     }
 
     /**

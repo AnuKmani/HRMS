@@ -3,6 +3,7 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Notifications\PasswordResetMail;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -75,6 +76,22 @@ class User extends Authenticatable
     public function employee(): HasOne
     {
         return $this->hasOne(Employee::class);
+    }
+
+    /**
+     * Send the password-reset mail through this application's queued
+     * subclass rather than the broker's stock one.
+     *
+     * The broker calls this synchronously inside `POST /auth/forgot-password`,
+     * which would otherwise put an SMTP round trip between a person tapping
+     * a button and their phone telling them the request went through.
+     * {@see App\Notifications\PasswordResetMail} is the same notification
+     * with a queue on it, and AppServiceProvider is where its URL and copy
+     * are wired up.
+     */
+    public function sendPasswordResetNotification($token): void
+    {
+        $this->notify(new PasswordResetMail($token));
     }
 
     /**

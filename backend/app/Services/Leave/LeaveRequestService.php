@@ -3,6 +3,8 @@
 namespace App\Services\Leave;
 
 use App\Events\LeaveConvertedToLop;
+use App\Events\LeaveDecided;
+use App\Events\LeaveSubmitted;
 use App\Models\ApprovalRecord;
 use App\Models\Employee;
 use App\Models\LeaveRequest;
@@ -173,6 +175,12 @@ final class LeaveRequestService
                 $leave->save();
             }
 
+            // Always raised. A chain that had nothing to ask (a leave type
+            // with no approval steps) resolves to an empty audience a
+            // moment later and sends nothing, which is the correct answer
+            // to "who was waiting on this?" — nobody.
+            event(new LeaveSubmitted($leave));
+
             return $leave->refresh();
         });
     }
@@ -215,6 +223,8 @@ final class LeaveRequestService
             $leave->save();
 
             $leave->loadMissing(['leaveType', 'employee']);
+
+            event(new LeaveDecided($leave, LeaveDecided::REJECTED, $user));
 
             // Nobody is being paid for a refusal — the reservation goes back
             // so the days are bookable again.
@@ -390,6 +400,11 @@ final class LeaveRequestService
             (int) $leave->start_date->year,
             (float) $leave->requested_days,
         );
+
+        // Raised here rather than in approve(): this method is the one place
+        // a leave becomes approved, whether the answer arrived from the last
+        // approver or from a workflow with nobody left to ask.
+        event(new LeaveDecided($leave, LeaveDecided::APPROVED, $approver));
     }
 
     /**

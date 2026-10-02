@@ -331,10 +331,18 @@ class SalaryDocumentTest extends TestCase
             $request->load(['employee.department', 'employee.designation']),
         );
 
+        // Every fact goes through the blade `{{ }}` escape, so a name with
+        // an apostrophe in it — O'Hara, D'Angelo, anything a faker generator
+        // produces a few times in a thousand — reaches the page as `&#039;`.
+        // Asserting on the *escaped* needle is the point of the test, not a
+        // concession to it: the certificate must print the facts it
+        // certifies, and it must print them escaped, in that order.
+        $escaped = fn (string $value): string => htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
         foreach ([
             'SALARY CERTIFICATE',
             $request->reference(),
-            $employee->full_name,
+            $escaped($employee->full_name),
             $employee->employee_code,
             'Current monthly salary',
             'AED 125000.00',

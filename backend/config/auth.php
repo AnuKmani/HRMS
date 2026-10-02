@@ -103,23 +103,29 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Self-service password reset
+    | Password reset delivery
     |--------------------------------------------------------------------------
     |
-    | The forgot-password and reset-password endpoints are implemented and
-    | routed, but they only answer 200/202 once this is true.
+    | There is no switch here any more. Phase 12 removed PASSWORD_RESET_ENABLED
+    | because it asked the wrong question: a flag cannot make mail work, and
+    | answering 501 until somebody remembered to set one meant a deployment
+    | that had SMTP configured still served a dead endpoint.
     |
-    | Leave it false while the application's mailer cannot actually deliver
-    | (MAIL_MAILER=log only files the message into storage/logs). Answering
-    | "check your inbox" when nothing was sent would be misleading, so the
-    | routes return 501 instead. Flip this to true together with a real
-    | mailer in .env.
+    | What happens instead depends entirely on MAIL_MAILER, in .env.example:
+    |
+    |   smtp / ses / sendgrid / …   real delivery, which is what production
+    |                               must be set to — see .env.example
+    |   log                         the full message, link included, is
+    |                               written to storage/logs/laravel.log.
+    |                               A real delivery to a real place, and
+    |                               the only one possible on a laptop with
+    |                               no mail server; it is the development
+    |                               default, not a substitute for SMTP.
+    |
+    | The mail itself is queued (App\Notifications\PasswordResetMail), so the
+    | request never waits on a transport either way.
     |
     */
-
-    'password_reset' => [
-        'enabled' => (bool) env('PASSWORD_RESET_ENABLED', false),
-    ],
 
     /*
     |--------------------------------------------------------------------------

@@ -2,6 +2,7 @@
 
 namespace App\Services\Payroll;
 
+use App\Events\SalarySlipPublished;
 use App\Models\Employee;
 use App\Models\Payroll;
 use App\Models\PayrollItem;
@@ -131,6 +132,13 @@ final class PayrollService
                     $report['updated']++;
                 } else {
                     $report['created']++;
+
+                    // Only a row that actually got figures is a payslip
+                    // somebody can read. A blocked run is still a draft and
+                    // announcing it would be a message pointing at nothing.
+                    if ($calculation->blockedReason === null) {
+                        event(new SalarySlipPublished($payroll));
+                    }
                 }
 
                 if ($calculation->blockedReason !== null) {

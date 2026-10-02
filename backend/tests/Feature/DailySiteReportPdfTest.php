@@ -63,7 +63,8 @@ class DailySiteReportPdfTest extends TestCase
             $report->project->name,
             '28/09/2026',
             'Prepared by',
-            $report->creator->name,
+            // The creator's name is HTML-escaped in the PDF (e.g., O'Hara -> O&#039;Hara)
+            htmlspecialchars($report->creator->name, ENT_QUOTES, 'UTF-8'),
             'Manpower',
             'Total head count: <strong>18</strong>',
             'Masons',

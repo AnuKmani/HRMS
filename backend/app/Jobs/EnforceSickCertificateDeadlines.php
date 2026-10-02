@@ -2,8 +2,10 @@
 
 namespace App\Jobs;
 
+use App\Events\SickCertificateReminder;
 use App\Models\LeaveRequest;
 use App\Services\Leave\LeaveRequestService;
+use App\Services\SettingsService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -13,7 +15,8 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Turn overdue, certificate-less sick leave into Loss of Pay.
+ * Warn about an approaching certificate deadline, then turn overdue,
+ * certificate-less sick leave into Loss of Pay.
  *
  * Runs from the scheduler (routes/console.php), never from Flutter. A phone
  * that is switched off, offline or uninstalled must not decide whether
@@ -58,10 +61,20 @@ class EnforceSickCertificateDeadlines implements ShouldBeUnique, ShouldQueue
     public int $uniqueFor = 3600;
 
     /**
+     * Warn first, then convert.
+     *
+     * The warning pass runs ahead of the deadline pass so a person hears
+     * about a certificate that is about to become Loss of Pay while there
+     * is still something they can do about it. It deliberately does not
+     * contribute to the return value: this method promises "how many
+     * requests were converted", and a reminder is not a conversion.
+     *
      * @return int how many requests were converted
      */
-    public function handle(LeaveRequestService $service): int
+    public function handle(LeaveRequestService $service, SettingsService $settings): int
     {
+        $this->remindUpcoming($settings);
+
         $due = LeaveRequest::query()
             ->whereIn('status', [
                 LeaveRequest::STATUS_PENDING,
@@ -83,6 +96,53 @@ class EnforceSickCertificateDeadlines implements ShouldBeUnique, ShouldQueue
         }
 
         return $converted;
+    }
+
+    /**
+     * Raise {@see SickCertificateReminder} for every request whose deadline
+     * is inside the warning window.
+     *
+     * **Nothing here marks a row as reminded.** The clock cannot own that
+     * flag: it would be a second column on `leave_requests` keeping time
+     * with `certificate_due_at`, and the two would drift the first time a
+     * deadline was extended. The dedupe key carried on the message
+     * (`sick_cert:{id}`, enforced by `notifications`' unique index) is the
+     * whole suppression mechanism, which means the window is free to move
+     * and a request that slips out of it and back in is handled correctly
+     * without anything to reset.
+     *
+     * `$window <= 0` switches the pass off entirely — a deployment that
+     * does not want reminders says so with one number rather than by
+     * stripping a job out of the scheduler.
+     */
+    private function remindUpcoming(SettingsService $settings): void
+    {
+        $window = $settings->int('notification.sick_cert_expiry_warning_days', 7);
+
+        if ($window <= 0) {
+            return;
+        }
+
+        $today = today();
+
+        $upcoming = LeaveRequest::query()
+            ->with(['employee', 'leaveType'])
+            ->whereIn('status', [
+                LeaveRequest::STATUS_PENDING,
+                LeaveRequest::STATUS_APPROVED,
+            ])
+            ->whereNull('certificate_path')
+            ->whereNotNull('certificate_due_at')
+            ->whereBetween(
+                'certificate_due_at',
+                [$today->toDateString(), $today->copy()->addDays($window)->toDateString()],
+            )
+            ->orderBy('id')
+            ->get();
+
+        foreach ($upcoming as $leave) {
+            event(new SickCertificateReminder($leave));
+        }
     }
 
     private function convertOne(int $id, LeaveRequestService $service): bool

@@ -9,6 +9,7 @@ use App\Models\LeaveBalance;
 use App\Models\LeaveRequest;
 use App\Models\LeaveType;
 use App\Services\Leave\LeaveRequestService;
+use App\Services\SettingsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
@@ -414,7 +415,10 @@ class LeaveCertificateTest extends TestCase
      */
     private function enforceDeadlines(): int
     {
-        return (new EnforceSickCertificateDeadlines)->handle(app(LeaveRequestService::class));
+        return (new EnforceSickCertificateDeadlines)->handle(
+            app(LeaveRequestService::class),
+            app(SettingsService::class),
+        );
     }
 
     private function balance(int $leaveId): LeaveBalance

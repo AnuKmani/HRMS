@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\SiteAssigned;
 use App\Models\Employee;
 use App\Models\EmployeeSiteAssignment;
 use App\Models\User;
@@ -59,6 +60,13 @@ class EmployeeSiteAssignmentService
             $assignment->assignment_type = $data['assignment_type'] ?? EmployeeSiteAssignment::TYPE_PRIMARY;
             $assignment->created_by = $creator->id;
             $assignment->save();
+
+            // Only an *active* posting is news. Closing one, or opening a
+            // backdated row that was already in the past, would tell
+            // somebody they had been posted to a site two weeks ago.
+            if ($assignment->status === EmployeeSiteAssignment::STATUS_ACTIVE) {
+                event(new SiteAssigned($assignment));
+            }
 
             return $assignment;
         });

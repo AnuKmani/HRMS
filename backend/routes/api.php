@@ -6,11 +6,14 @@ use App\Http\Controllers\Api\V1\AssetAssignmentController;
 use App\Http\Controllers\Api\V1\AssetController;
 use App\Http\Controllers\Api\V1\AssetTypeController;
 use App\Http\Controllers\Api\V1\AttendanceController;
+use App\Http\Controllers\Api\V1\AuditLogController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ClientSettingsController;
 use App\Http\Controllers\Api\V1\DailySiteReportController;
+use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\DepartmentController;
 use App\Http\Controllers\Api\V1\DesignationController;
+use App\Http\Controllers\Api\V1\DeviceTokenController;
 use App\Http\Controllers\Api\V1\DocumentTypeController;
 use App\Http\Controllers\Api\V1\EmployeeBankAccountController;
 use App\Http\Controllers\Api\V1\EmployeeController;
@@ -24,12 +27,16 @@ use App\Http\Controllers\Api\V1\LeaveRequestController;
 use App\Http\Controllers\Api\V1\LeaveTypeController;
 use App\Http\Controllers\Api\V1\LoanController;
 use App\Http\Controllers\Api\V1\MovementController;
+use App\Http\Controllers\Api\V1\NotificationController;
+use App\Http\Controllers\Api\V1\NotificationPreferenceController;
 use App\Http\Controllers\Api\V1\OnboardingController;
 use App\Http\Controllers\Api\V1\OvertimeController;
 use App\Http\Controllers\Api\V1\PasswordResetController;
 use App\Http\Controllers\Api\V1\PayrollAdjustmentController;
 use App\Http\Controllers\Api\V1\PayrollController;
 use App\Http\Controllers\Api\V1\ProjectController;
+use App\Http\Controllers\Api\V1\ReportController;
+use App\Http\Controllers\Api\V1\ReportExportController;
 use App\Http\Controllers\Api\V1\RoleController;
 use App\Http\Controllers\Api\V1\SalaryCertificateRequestController;
 use App\Http\Controllers\Api\V1\SalarySlipController;
@@ -72,8 +79,9 @@ Route::prefix('v1')->group(function () {
     Route::post('auth/login', [AuthController::class, 'login'])
         ->middleware('throttle:login');
 
-    // Built, validated and routed — but answered 501 until a real mailer is
-    // configured and PASSWORD_RESET_ENABLED=true. See PasswordResetController.
+    // Live as of Phase 12 — no 501, no enable flag. Delivery follows
+    // MAIL_MAILER (see .env.example and config/auth.php); throttled by
+    // password_reset so a script cannot spend a server's mail budget.
     Route::post('auth/forgot-password', [PasswordResetController::class, 'forgotPassword'])
         ->middleware('throttle:password_reset');
 
@@ -93,6 +101,32 @@ Route::prefix('v1')->group(function () {
         Route::get('auth/sessions', [AuthController::class, 'sessions']);
         Route::delete('auth/sessions/{id}', [AuthController::class, 'revokeSession'])
             ->whereNumber('id');
+
+        // Phase 12 additions to the same block, both for signing out in a
+        // way a stale token cannot undo:
+        //
+        //   DELETE  /auth/sessions           EVERY session, including the
+        //                                    one making the call. "Sign
+        //                                    out everywhere" is one
+        //                                    answer, not a parameter —
+        //                                    see AuthController for why
+        //                                    sparing the caller would make
+        //                                    the safety property
+        //                                    conditional.
+        //   POST    /auth/sessions/revoke    present an OLD plaintext token
+        //                                    and have it killed. This is
+        //                                    what a client that has
+        //                                    already lost its own session
+        //                                    (offline logout, a reinstall)
+        //                                    needs: the token is the
+        //                                    credential, so holding it is
+        //                                    what makes it yours to kill.
+        //
+        // The literal `revoke` is declared before `{id}` is even a question
+        // — different verb, different path — and `{id}` stays `whereNumber`
+        // so nothing else can be read as an id.
+        Route::post('auth/sessions/revoke', [AuthController::class, 'revokeByToken']);
+        Route::delete('auth/sessions', [AuthController::class, 'revokeAllSessions']);
 
         // Client-safe configuration: the currency a form should offer, and
         // the codes it may offer. No `permission:` on purpose — see
@@ -155,9 +189,11 @@ Route::prefix('v1')->group(function () {
             ->middleware('permission:employees.view');
         Route::get('employees/{employee}', [EmployeeController::class, 'show']);
         Route::post('employees', [EmployeeController::class, 'store'])
-            ->middleware('permission:employees.create');
+            ->middleware('permission:employees.create')
+            ->middleware('throttle:write');
         Route::put('employees/{employee}', [EmployeeController::class, 'update'])
-            ->middleware('permission:employees.update');
+            ->middleware('permission:employees.update')
+            ->middleware('throttle:write');
         Route::delete('employees/{employee}', [EmployeeController::class, 'destroy'])
             ->middleware('permission:employees.delete');
 
@@ -298,7 +334,8 @@ Route::prefix('v1')->group(function () {
             ->middleware('permission:leave.view');
 
         Route::post('leave/{leaveRequest}/certificate', [LeaveRequestController::class, 'storeCertificate'])
-            ->whereNumber('leaveRequest');
+            ->whereNumber('leaveRequest')
+            ->middleware('throttle:upload');
         Route::get('leave/{leaveRequest}/certificate', [LeaveRequestController::class, 'certificate'])
             ->whereNumber('leaveRequest');
 
@@ -420,7 +457,8 @@ Route::prefix('v1')->group(function () {
 
         Route::post('site-activity-reports/{siteActivityReport}/photos', [SiteActivityReportController::class, 'storePhotos'])
             ->whereNumber('siteActivityReport')
-            ->middleware('permission:site_activity_reports.update');
+            ->middleware('permission:site_activity_reports.update')
+            ->middleware('throttle:upload');
 
         Route::delete('site-activity-reports/{siteActivityReport}/photos/{photo}', [SiteActivityReportController::class, 'destroyPhoto'])
             ->whereNumber('siteActivityReport')
@@ -453,7 +491,8 @@ Route::prefix('v1')->group(function () {
 
         Route::post('daily-site-reports/{dailySiteReport}/photos', [DailySiteReportController::class, 'storePhotos'])
             ->whereNumber('dailySiteReport')
-            ->middleware('permission:daily_site_reports.update');
+            ->middleware('permission:daily_site_reports.update')
+            ->middleware('throttle:upload');
 
         Route::delete('daily-site-reports/{dailySiteReport}/photos/{photo}', [DailySiteReportController::class, 'destroyPhoto'])
             ->whereNumber('dailySiteReport')
@@ -518,7 +557,8 @@ Route::prefix('v1')->group(function () {
             ->middleware('permission:payroll.summary.view');
 
         Route::post('payroll/process', [PayrollController::class, 'process'])
-            ->middleware('permission:payroll.process');
+            ->middleware('permission:payroll.process')
+            ->middleware('throttle:write');
 
         Route::post('payroll/{payroll}/recalculate', [PayrollController::class, 'recalculate'])
             ->whereNumber('payroll')
@@ -683,7 +723,8 @@ Route::prefix('v1')->group(function () {
             ->middleware('permission:expenses.view');
 
         Route::post('expenses', [ExpenseController::class, 'store'])
-            ->middleware('permission:expenses.create');
+            ->middleware('permission:expenses.create')
+            ->middleware('throttle:write');
 
         // `expenses.create` for the three an author drives (submit, cancel,
         // file) and `expenses.update` for the edit — the same split leave
@@ -697,7 +738,8 @@ Route::prefix('v1')->group(function () {
         // `expenses.receipts.view` on top of a claim you may already read.
         Route::post('expenses/{expense}/receipts', [ExpenseController::class, 'storeReceipts'])
             ->whereNumber('expense')
-            ->middleware('permission:expenses.view');
+            ->middleware('permission:expenses.view')
+            ->middleware('throttle:upload');
 
         Route::get('expenses/{expense}/receipts/{receipt}', [ExpenseController::class, 'receipt'])
             ->whereNumber('expense')
@@ -711,11 +753,13 @@ Route::prefix('v1')->group(function () {
 
         Route::post('expenses/{expense}/submit', [ExpenseController::class, 'submit'])
             ->whereNumber('expense')
-            ->middleware('permission:expenses.create');
+            ->middleware('permission:expenses.create')
+            ->middleware('throttle:write');
 
         Route::post('expenses/{expense}/approve', [ExpenseController::class, 'approve'])
             ->whereNumber('expense')
-            ->middleware('permission:expenses.approve');
+            ->middleware('permission:expenses.approve')
+            ->middleware('throttle:write');
 
         Route::post('expenses/{expense}/reject', [ExpenseController::class, 'reject'])
             ->whereNumber('expense')
@@ -781,7 +825,8 @@ Route::prefix('v1')->group(function () {
             ->middleware('permission:documents.view');
 
         Route::post('employee-documents', [EmployeeDocumentController::class, 'store'])
-            ->middleware('permission:documents.create');
+            ->middleware('permission:documents.create')
+            ->middleware('throttle:upload');
 
         Route::post('employee-documents/{document}/verify', [EmployeeDocumentController::class, 'verify'])
             ->whereNumber('document')
@@ -805,7 +850,8 @@ Route::prefix('v1')->group(function () {
 
         Route::put('employee-documents/{document}', [EmployeeDocumentController::class, 'update'])
             ->whereNumber('document')
-            ->middleware('permission:documents.update');
+            ->middleware('permission:documents.update')
+            ->middleware('throttle:upload');
 
         Route::delete('employee-documents/{document}', [EmployeeDocumentController::class, 'destroy'])
             ->whereNumber('document')
@@ -919,7 +965,8 @@ Route::prefix('v1')->group(function () {
             ->middleware('permission:training.view');
 
         Route::post('employee-training', [EmployeeTrainingController::class, 'store'])
-            ->middleware('permission:training.assign');
+            ->middleware('permission:training.assign')
+            ->middleware('throttle:write');
 
         // Two POSTs rather than a PUT with a `status`: each is a distinct
         // act with its own permission (`.complete` vs `.update`) and its
@@ -927,7 +974,8 @@ Route::prefix('v1')->group(function () {
         // say the same thing and a first way to say a different one.
         Route::post('employee-training/{training}/complete', [EmployeeTrainingController::class, 'complete'])
             ->whereNumber('training')
-            ->middleware('permission:training.complete');
+            ->middleware('permission:training.complete')
+            ->middleware('throttle:upload');
 
         Route::post('employee-training/{training}/cancel', [EmployeeTrainingController::class, 'cancel'])
             ->whereNumber('training')
@@ -975,11 +1023,13 @@ Route::prefix('v1')->group(function () {
 
         Route::post('assets/{asset}/assign', [AssetController::class, 'assign'])
             ->whereNumber('asset')
-            ->middleware('permission:assets.assign');
+            ->middleware('permission:assets.assign')
+            ->middleware('throttle:write');
 
         Route::post('assets/{asset}/return', [AssetController::class, 'returnAsset'])
             ->whereNumber('asset')
-            ->middleware('permission:assets.return');
+            ->middleware('permission:assets.return')
+            ->middleware('throttle:write');
 
         Route::patch('assets/{asset}/status', [AssetController::class, 'changeStatus'])
             ->whereNumber('asset')
@@ -1003,5 +1053,116 @@ Route::prefix('v1')->group(function () {
         Route::get('asset-assignments/{assignment}', [AssetAssignmentController::class, 'show'])
             ->whereNumber('assignment')
             ->middleware('permission:assets.view');
+
+        /* -------------------------------------- Phase 12: notifications */
+
+        // The inbox carries **no `permission:` middleware anywhere**, and
+        // the reason is not an omission: every row it returns was written
+        // for this caller by NotificationService, so `auth:sanctum` is the
+        // whole authorisation. A `notifications.view` grant would be a
+        // lie — there is no body of notifications a person is forbidden to
+        // see, only rows addressed to them, and the service filters by
+        // `user_id` before anything reaches a response.
+        //
+        // `unread-count` is declared before `{notification}/read` — the
+        // Phase 7 ordering rule — and both dynamic halves are `whereNumber`,
+        // so neither can swallow the other either way round.
+        Route::get('notifications', [NotificationController::class, 'index']);
+        Route::get('notifications/unread-count', [NotificationController::class, 'unreadCount']);
+        Route::post('notifications/read-all', [NotificationController::class, 'readAll']);
+        Route::post('notifications/{notification}/read', [NotificationController::class, 'read'])
+            ->whereNumber('notification');
+
+        // Preferences. Both routes are self-service for the same reason
+        // the inbox is: the switch belongs to the person whose switches
+        // they are. Mandatory categories are refused inside the controller
+        // with a 409 — see NotificationPreferenceController.
+        Route::get('notification-preferences', [NotificationPreferenceController::class, 'index']);
+        Route::put('notification-preferences', [NotificationPreferenceController::class, 'update']);
+
+        // Device registration. `throttle:device_token` is on POST because
+        // that is the one a script can loop — an upsert against a unique
+        // index, followed by a queue job per notification. DELETE is
+        // idempotent cleanup at logout and costs nothing to repeat.
+        Route::post('device-tokens', [DeviceTokenController::class, 'store'])
+            ->middleware('throttle:device_token');
+        Route::delete('device-tokens/{deviceToken}', [DeviceTokenController::class, 'destroy'])
+            ->whereNumber('deviceToken');
+
+        /* ------------------------------------------- Phase 12: audit */
+
+        // One coarse gate, `audit.view`, and the policy asks the same
+        // question again from the controller. No row-level scoping exists
+        // on purpose: an audit trail filtered to rows you could already
+        // see is not an audit trail. See AuditLogController.
+        Route::get('audit-logs', [AuditLogController::class, 'index'])
+            ->middleware('permission:audit.view');
+        Route::get('audit-logs/options', [AuditLogController::class, 'options'])
+            ->middleware('permission:audit.view');
+
+        /* ---------------------------------------- Phase 12: dashboards */
+
+        // Four role dashboards behind ONE coarse gate — `dashboard.view` —
+        // because the gate answers "may this account open a dashboard at
+        // all?", which is a single question. What each payload may contain
+        // is decided inside DashboardController with explicit
+        // multi-permission checks, so a Project Manager who holds
+        // `dashboard.view` gets the blocks their other grants allow and
+        // nothing about salary, while a Management account holding
+        // `payroll.summary.view` gets the totals and still not one row of
+        // them. Two mechanisms, each doing the half it can express: no
+        // permission middleware combination can say "this endpoint, but
+        // only these three of its four blocks".
+        Route::get('dashboards/employee', [DashboardController::class, 'employee'])
+            ->middleware('permission:dashboard.view');
+        Route::get('dashboards/hr', [DashboardController::class, 'hr'])
+            ->middleware('permission:dashboard.view');
+        Route::get('dashboards/project-manager', [DashboardController::class, 'projectManager'])
+            ->middleware('permission:dashboard.view');
+        Route::get('dashboards/management', [DashboardController::class, 'management'])
+            ->middleware('permission:dashboard.view');
+
+        /* ------------------------------------------ Phase 12: reporting */
+
+        // `GET  /reports`                    the catalogue this caller may run
+        // `GET  /reports/{key}`              one report, filtered, paged
+        // `GET  /reports/{key}/export`       a small report, streamed now
+        // `POST /reports/{key}/exports`      a big one, queued, 202
+        // `GET  /report-exports`             what is still building
+        // `GET  /report-exports/{id}/file`   the finished file
+        //
+        // The route gate is the *coarse* answer (`reports.view` /
+        // `reports.export`); every report then carries its own permission
+        // in the registry — `payroll.view` for the salary report,
+        // `attendance.view` for attendance — and ReportService re-checks it
+        // after the path parameter, so a key typed into a URL can never
+        // reach a report the caller's role does not hold. See
+        // App\Services\Reporting\ReportRegistry.
+        //
+        // `{key}` is constrained to a safe slug rather than `whereNumber`:
+        // it is a catalogue name from this application, never a number and
+        // never free text, and narrowing the pattern means a stray path
+        // segment 404s instead of being looked up.
+        Route::get('reports', [ReportController::class, 'index'])
+            ->middleware('permission:reports.view');
+
+        Route::get('reports/{key}', [ReportController::class, 'show'])
+            ->where('key', '[a-z0-9\-.]+')
+            ->middleware('permission:reports.view');
+
+        Route::get('reports/{key}/export', [ReportController::class, 'export'])
+            ->where('key', '[a-z0-9\-.]+')
+            ->middleware(['permission:reports.view', 'permission:reports.export', 'throttle:export']);
+
+        Route::post('reports/{key}/exports', [ReportController::class, 'storeExport'])
+            ->where('key', '[a-z0-9\-.]+')
+            ->middleware(['permission:reports.view', 'permission:reports.export', 'throttle:export']);
+
+        Route::get('report-exports', [ReportExportController::class, 'index'])
+            ->middleware('permission:reports.view');
+
+        Route::get('report-exports/{reportExport}/file', [ReportExportController::class, 'file'])
+            ->whereNumber('reportExport')
+            ->middleware('permission:reports.view');
     });
 });

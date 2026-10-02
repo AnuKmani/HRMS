@@ -2,6 +2,7 @@
 
 namespace App\Services\Payroll;
 
+use App\Events\SalaryCertificateDecided;
 use App\Models\SalaryCertificateRequest;
 use App\Models\User;
 
@@ -79,6 +80,8 @@ final class SalaryCertificateService
 
         $request->save();
 
+        event(new SalaryCertificateDecided($request, SalaryCertificateDecided::APPROVED, $actor));
+
         return $request;
     }
 
@@ -103,6 +106,8 @@ final class SalaryCertificateService
         }
 
         $request->save();
+
+        event(new SalaryCertificateDecided($request, SalaryCertificateDecided::REJECTED, $actor));
 
         return $request;
     }

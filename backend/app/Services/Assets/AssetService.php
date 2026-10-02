@@ -2,6 +2,7 @@
 
 namespace App\Services\Assets;
 
+use App\Events\AssetHandover;
 use App\Models\Asset;
 use App\Models\AssetAssignment;
 use App\Models\User;
@@ -158,6 +159,8 @@ class AssetService
             $fresh->status = Asset::STATUS_ASSIGNED;
             $fresh->save();
 
+            event(new AssetHandover($assignment, AssetHandover::ASSIGNED));
+
             return $assignment;
         });
     }
@@ -210,6 +213,8 @@ class AssetService
                 ? Asset::STATUS_MAINTENANCE
                 : Asset::STATUS_AVAILABLE;
             $fresh->save();
+
+            event(new AssetHandover($active, AssetHandover::RETURNED));
 
             return $active;
         });

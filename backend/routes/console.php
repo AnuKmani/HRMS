@@ -3,6 +3,7 @@
 use App\Jobs\EnforceSickCertificateDeadlines;
 use App\Jobs\ScanDocumentExpiries;
 use App\Jobs\ScanTrainingExpiries;
+use App\Jobs\SendAttendanceReminders;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -69,8 +70,9 @@ Schedule::job(new EnforceSickCertificateDeadlines)
 | the job itself is the third line of defence, so the schedule is belt,
 | braces and buckles.
 |
-| Nothing here sends anything. The scan raises events; turning them into
-| reminders is a later phase, and FCM is deliberately not wired up yet.
+| Nothing here sends anything directly. The scan raises events; the
+| listeners in App\Providers\NotificationServiceProvider turn them into
+| inbox rows and queued pushes.
 |
 */
 Schedule::job(new ScanDocumentExpiries)
@@ -96,8 +98,8 @@ Schedule::job(new ScanDocumentExpiries)
 |
 | Same three defences as above (idempotent queries, a per-row lock, and
 | ShouldBeUnique on the job), same shared-cache condition on
-| `withoutOverlapping()` / `onOneServer()`, and the same deliberate absence
-| of any delivery: the events it raises are hooks for Phase 12.
+| `withoutOverlapping()` / `onOneServer()`, and no delivery of its own:
+| the events it raises are picked up by the notification listeners.
 |
 */
 Schedule::job(new ScanTrainingExpiries)
@@ -108,3 +110,31 @@ Schedule::job(new ScanTrainingExpiries)
     ))
     ->withoutOverlapping((int) config('hrms.scheduling.overlap_minutes'))
     ->onOneServer();
+
+/*
+|--------------------------------------------------------------------------
+| Attendance check-in reminders
+|--------------------------------------------------------------------------
+|
+| Registered **only when `HRMS_ATTENDANCE_REMINDER_ENABLED=true`**, which
+| is why `schedule:list` shows three jobs on a default install and four on
+| one that has switched this on. The registration is conditional rather
+| than the job being a no-op: a schedule entry that always runs and always
+| returns 0 is a line in `schedule:list` lying about what the server does.
+|
+| Every fifteen minutes rather than daily, because the window a reminder
+| is useful in is `shift start - offset` to `shift start + grace` — a few
+| dozen minutes that a single daily run would land either side of for most
+| shift times. See App\Jobs\SendAttendanceReminders for every condition
+| that decides who is told, and for why the job is off by default.
+|
+| Same `withoutOverlapping` / `onOneServer()` pair as everything above,
+| and therefore the same shared-cache requirement in production.
+|
+*/
+if ((bool) config('hrms.notifications.attendance_reminder_enabled', false)) {
+    Schedule::job(new SendAttendanceReminders)
+        ->everyFifteenMinutes()
+        ->withoutOverlapping((int) config('hrms.scheduling.overlap_minutes'))
+        ->onOneServer();
+}

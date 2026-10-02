@@ -2,6 +2,7 @@
 
 namespace App\Services\Overtime;
 
+use App\Events\OvertimeDecided;
 use App\Models\Attendance;
 use App\Models\Employee;
 use App\Models\OvertimeRequest;
@@ -194,6 +195,8 @@ final class OvertimeService
             $overtime->payroll_eligible = false;
             $overtime->save();
 
+            event(new OvertimeDecided($overtime, OvertimeDecided::REJECTED, $user));
+
             return $overtime->refresh();
         });
     }
@@ -246,6 +249,11 @@ final class OvertimeService
         $overtime->payroll_eligible = true;
 
         $overtime->save();
+
+        // Raised here rather than in approve(): this is the one place an
+        // overtime request becomes approved, whether the answer came from
+        // the last approver or from a workflow with nobody left to ask.
+        event(new OvertimeDecided($overtime, OvertimeDecided::APPROVED, $approver));
     }
 
     private function attendanceIdFor(Employee $employee, string $date): ?int
