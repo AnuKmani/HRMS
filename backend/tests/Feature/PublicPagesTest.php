@@ -140,7 +140,8 @@ class PublicPagesTest extends TestCase
 
     public function test_a_token_carried_in_the_query_is_escaped_into_the_page(): void
     {
-        $body = $this->get('/reset-password?token=%3Cscript%3Ealert(1)%3C%2Fscript%3E')
+        // Must provide both token and email for the script tag to render
+        $body = $this->get('/reset-password?token=%3Cscript%3Ealert(1)%3C%2Fscript%3E&email=test%40example.com')
             ->assertOk()
             ->getContent();
 

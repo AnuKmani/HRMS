@@ -259,6 +259,8 @@ class ReportingTest extends TestCase
 
         // Someone else's file is not theirs to download, and a 404 says so
         // without confirming that an export with that id exists at all.
+        // Give them reports.view so the index is reachable, but they own no exports.
+        $other->assignRole('Site Engineer');
         Sanctum::actingAs($other);
 
         $this->getJson('/api/v1/report-exports')->assertOk()->assertJsonPath('data.items', []);

@@ -275,8 +275,14 @@ class AuthController extends Controller
 
         $user = $request->user();
 
+        // Sanctum's plainTextToken is "id|token". We need to hash only the token part.
+        $tokenPart = $plain;
+        if (str_contains($plain, '|')) {
+            $tokenPart = substr($plain, strpos($plain, '|') + 1);
+        }
+
         $token = $user->tokens()
-            ->where('token', hash('sha256', $plain))
+            ->where('token', hash('sha256', $tokenPart))
             ->first();
 
         if ($token === null) {
