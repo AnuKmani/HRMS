@@ -4,9 +4,11 @@
 > runbook to deploy to. What is live is local: `php artisan serve` against
 > `hrms_laravel`, and a Flutter debug build pointed at it with
 > `--dart-define=API_BASE_URL`. Phase 4 added the environment variables in §3.1,
-> Phase 6 the certificate and scheduler ones, and Phase 8 added three
+> Phase 6 the certificate and scheduler ones, Phase 8 added three
 > **`settings` rows** (LOP divisor and the overtime multiplier) that are
-> deliberately *not* env vars — see §3.1.
+> deliberately *not* env vars, Phase 10 added `HRMS_DOCUMENT_*`, and Phase 11
+> added `HRMS_TRAINING_SCAN_*` — see §3.1. Three scheduler jobs now exist
+> (§5); only the FCM dispatcher and the audit trail are still unbuilt.
 
 ---
 
@@ -206,6 +208,17 @@ HRMS_DOCUMENT_WARNING_DAYS=30
 # it fires, because expiry_notified_at lives on the row.
 HRMS_DOCUMENT_SCAN_HOUR=6
 HRMS_DOCUMENT_SCAN_MINUTE=15
+
+# --- Phase 11: training certificates ----------------------------------------
+# The same two keys for the second nightly scan. It runs five minutes behind
+# the document scan on purpose, so two full-table reads are not competing in
+# the same second; it reads employee_trainings only, so the order between
+# them is courtesy rather than a dependency. It shares
+# HRMS_DOCUMENT_WARNING_DAYS for the "expiring soon" window rather than
+# having one of its own: a warning window is one company-wide policy, and
+# two env vars saying it would eventually disagree.
+HRMS_TRAINING_SCAN_HOUR=6
+HRMS_TRAINING_SCAN_MINUTE=20
 ```
 
 **Critical:** `APP_DEBUG=false` in production. A debug page can leak env secrets.
@@ -232,8 +245,8 @@ php artisan migrate --force
 php artisan storage:link        # only if any public disk is used
 ```
 
-**When the permission catalogue grows** (it has six times — Phases 4, 6, 7,
-8, 9 and 10, and it now stands at **80 permissions / 401 grants**), re-run the
+**When the permission catalogue grows** (it has seven times — Phases 4, 6, 7,
+8, 9, 10 and 11, and it now stands at **95 permissions / 462 grants**), re-run the
 idempotent seeders rather than the whole `DatabaseSeeder`:
 
 ```bash
@@ -286,6 +299,31 @@ by `code`, safe to re-run.)
 and upload ceiling are the `HRMS_DOCUMENT_*` env vars in §3.1, because they
 are deployment mechanics, while *which* type warns early stays a column on
 `document_types`.
+
+**Phase 11 added two more configuration seeders** — run them on first
+deploy of this release, before anybody opens the Training or Assets screen:
+
+```bash
+php artisan db:seed --class=TrainingTypeSeeder --force # 8 codes, upsert on `code`
+php artisan db:seed --class=AssetTypeSeeder --force    # 7 codes, upsert on `code`
+```
+
+Same shape as the Phase 10 pair, same reason: keyed by a **UNIQUE `code`**
+so a re-run renames rather than duplicates. Without them the API still
+starts, but `GET /training-types` and `GET /asset-types` answer an empty
+array and every catalogue screen has nothing to offer.
+
+**`TrainingTypeSeeder` is deliberately not followed by a program seeder.**
+A *type* is vocabulary that means the same thing on every deployment; a
+*course* is something this company actually runs with this provider. Seeding
+courses would give a fresh install seven classes nobody teaches and a
+compliance screen that reports on them. **`training_programs` starts empty
+on purpose.**
+
+**Phase 11 adds no new `settings` rows either** — the scan time is
+`HRMS_TRAINING_SCAN_*` (§3.1), the warning window is the existing
+`HRMS_DOCUMENT_WARNING_DAYS`, and the two vocabularies are their own tables
+rather than configuration entries.
 
 ---
 
@@ -374,11 +412,11 @@ Business rules that **must** run server-side — never depend on the mobile app 
 |---|---|---|---|
 | `EnforceSickCertificateDeadlines` | Convert leave past its certificate deadline to **LOP**, release the balance, dispatch `LeaveConvertedToLop` | **hourly at :17** — `hourlyAt(config('hrms.scheduling.tick_minute'))`, `HRMS_SICK_TICK_MINUTE` | ✅ Phase 6 |
 | `ScanDocumentExpiries` | Flip every lapsed document to **expired**, and raise `DocumentExpiring` / `DocumentExpired` **once per document per window** | **daily at 06:15** — `HRMS_DOCUMENT_SCAN_HOUR` / `HRMS_DOCUMENT_SCAN_MINUTE` | ✅ Phase 10 — **scheduled but delivering nothing yet**: both events have no subscriber (no FCM, §8/§11), so today the expiry report is how HR sees it |
-| Training certificate expiry | Notify employee + HR | Daily | ⬜ **cut from Phase 10's approved scope — unscheduled** |
+| `ScanTrainingExpiries` | Flip nothing, but *report*: compute every training card's state and raise `EmployeeTrainingExpiring` / `EmployeeTrainingExpired` **once per record per window** | **daily at 06:20** — `HRMS_TRAINING_SCAN_HOUR` / `HRMS_TRAINING_SCAN_MINUTE` | ✅ Phase 11 — **scheduled but delivering nothing yet**: both events have no subscriber (no FCM, §8/§11), so today **Training → Expiring** is how HR sees it |
 | Leave reminders | Pending approvals, upcoming leave | Daily | ⬜ with notifications |
 | Attendance reminders | Missing check-in / check-out | Daily | ⬜ with notifications |
 | Payroll processing | Monthly run | — | ✅ Phase 8 built it, and **deliberately did not schedule it**: a run is an explicit `POST /payroll/process` behind `payroll.process`. Money should not move on a timer; the one-way ladder already makes an accidental second run cost `updated: 0` |
-| Notification dispatch | FCM delivery | Every minute | ⬜ Phase 11 |
+| Notification dispatch | FCM delivery | Every minute | ⬜ Phase 12 |
 
 **Cron entry** (`crontab -e` for the deploy user):
 
@@ -429,12 +467,20 @@ notifications exist) say the same passport twice. `expiry_notified_at`
 clears itself when the document is re-dated, so a renewed passport earns
 exactly one fresh warning.
 
-Verify both jobs are registered:
+**The training scan is guarded identically**, one step further: the job is
+`ShouldBeUnique` with `$tries = 1`, the schedule carries
+`withoutOverlapping()` and `onOneServer()`, and its idempotency is in the
+same `expiry_notified_at` column on `employee_trainings`. `$tries = 1`
+because a scan that dies mid-pass has written nothing yet — the next
+scheduled run is a fresh attempt rather than a retry of a half-done one.
+
+Verify all three jobs are registered:
 
 ```bash
 $ php artisan schedule:list
 17 * * * *  App\Jobs\EnforceSickCertificateDeadlines .... Next Due: …
 15 6 * * *  App\Jobs\ScanDocumentExpiries ............... Next Due: …
+20 6 * * *  App\Jobs\ScanTrainingExpiries ............... Next Due: …
 ```
 
 **The schedule needs a queue worker too** — see §4.
@@ -506,6 +552,14 @@ identity papers. Its name is `HRMS_DOCUMENT_DIRECTORY` (§3.1); the **stored
 name is always minted by the server** as `{employeeId}/{uuid}.{ext}`, so a
 client filename — and anything path-like inside it — never becomes part of a
 path. The extension on disk follows the sniffed bytes, not the name.
+
+**Phase 11 created no directory either.** A training certificate is written
+into that same `employee-documents/{employeeId}/{uuid}.{ext}` namespace
+through the same `EmployeeDocumentStore`, because a second storage rule
+invented for one more PDF is how the first one eventually gets bypassed. The
+pointer lives on `employee_trainings.certificate_path` and is never
+returned; replacing a card deletes the old bytes, so nothing is left on the
+disk with nothing pointing at it.
 
 There is **no `reports/` directory and no stored PDF.** The daily site
 report's document is rendered on demand by `GET /daily-site-reports/{id}/pdf`
@@ -721,12 +775,17 @@ php artisan queue:failed       # must be empty after a deploy
 | Phase 8 payroll settings documented in §3.1 (three `settings` rows, **not** env vars) | ✅ |
 | Phase 8 adds **no** storage directory and stores **no** PDF (§7.1) | ✅ by design — nothing extra to back up, restore or expire |
 | "Never log a payroll figure" recorded as a rule (§9) | ✅ documented; no payroll path calls `Log::info()` today |
-| Permission catalogue documented at its current size (§3.2) | ✅ 80 permissions / 401 grants, six phases of growth |
+| Permission catalogue documented at its current size (§3.2) | ✅ 95 permissions / 462 grants, seven phases of growth |
 | Phase 10 document env keys documented in §3.1 (`HRMS_DOCUMENT_*`) | ✅ |
 | Phase 10 document env keys present in `.env.example` | ✅ added with the phase — no secrets, defaults only |
 | Phase 10 storage directory documented (§7.1) | ✅ `employee-documents/{employeeId}/{uuid}.{ext}`, minted server-side |
 | Phase 10 configuration seeders documented (§3.2) | ✅ `DocumentTypeSeeder` · `OnboardingRequirementSeeder`, both keyed by UNIQUE `code` and safe to re-run |
 | Expiry scan scheduled and registered (§5) | ✅ `ScanDocumentExpiries`, daily 06:15, idempotent through `expiry_notified_at` |
+| Phase 11 training-scan env keys documented in §3.1 (`HRMS_TRAINING_SCAN_*`) | ✅ |
+| Phase 11 training-scan env keys present in `.env.example` | ✅ added with the phase — no secrets, defaults only |
+| Phase 11 configuration seeders documented (§3.2) | ✅ `TrainingTypeSeeder` (8 codes) · `AssetTypeSeeder` (7 codes), both upserts keyed by UNIQUE `code` and safe to re-run; **`training_programs` is deliberately not seeded** |
+| Second expiry scan scheduled and registered (§5) | ✅ `ScanTrainingExpiries`, daily 06:20, `ShouldBeUnique` + `$tries = 1` + `withoutOverlapping()` + `onOneServer()`, idempotent through `expiry_notified_at`, **no FCM subscriber** |
+| Phase 11 adds **no** storage directory (§7.1) | ✅ by design — a certificate reuses `EmployeeDocumentStore` and the `employee-documents/` namespace |
 | **`APP_KEY` rotation hazard recorded (§3.1)** | ✅ **documented** — `employee_bank_accounts` is on encrypted casts; rotating without re-encrypting destroys every IBAN. See `docs/SECURITY.md` §4.10 |
 | Statutory (UAE / jurisdiction) overtime rate validated and configured | ⬜ **required before production** — the multiplier is a generic engine setting, not compliance |
 | `.env.example` contains no passwords, keys or credentials | ✅ placeholders only; `MAIL_PASSWORD`, `AWS_SECRET_ACCESS_KEY`, `DB_PASSWORD` remain blank or commented |

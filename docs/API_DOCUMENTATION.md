@@ -1,14 +1,15 @@
 # API Documentation
 
-> **Status:** Phases 1–10. §1 conventions, §2.1 authentication (Phase 3),
+> **Status:** Phases 1–11. §1 conventions, §2.1 authentication (Phase 3),
 > §2.2–§2.3 the organisation modules (Phase 4), §2.4–§2.5 attendance, site
 > visits and movement (Phase 5), §2.6 site activity and daily reports
 > (Phase 7) and §2.7–§2.9 timesheets, overtime, approval workflows, leave,
 > certificates and holidays (Phase 6) are **live**, as are §2.10 payroll,
 > loans and salary documents (Phase 8), §2.10a expenses and receipts
-> (Phase 9) and §2.11 employee documents, expiry and onboarding
-> (Phase 10). Everything from §2.11a onward is the contract the remaining
-> phases build against. See §6 for the per-section status.
+> (Phase 9), §2.11 employee documents, expiry and onboarding (Phase 10) and
+> §2.11a training & assets (Phase 11). Everything from §2.12 onward is the
+> contract the remaining phases build against. See §6 for the per-section
+> status.
 
 **Base URL (development):** `http://127.0.0.1:8000/api/v1/`
 **Content type:** `application/json` (except file uploads: `multipart/form-data`)
@@ -156,11 +157,12 @@ Behaviour that holds across every authenticated endpoint:
 > **Implemented:** §2.1 (Phase 3), §2.2–§2.3 (Phase 4), §2.4–§2.5 (Phase 5),
 > §2.6 in **Phase 7**, §2.7 (timesheets + overtime), §2.8 (leave), §2.9
 > (holidays) and §2.7's approval-workflows in **Phase 6**, §2.10 in
-> **Phase 8**, §2.10a in **Phase 9** and §2.11 in **Phase 10**. Everything
-> still pending is listed here as the contract to build against.
+> **Phase 8**, §2.10a in **Phase 9**, §2.11 in **Phase 10** and §2.11a in
+> **Phase 11**. Everything still pending is listed here as the contract to
+> build against.
 
 **Two gates, both live on every Phase 4, Phase 5, Phase 6, Phase 7, Phase 8,
-Phase 9 and Phase 10 route**
+Phase 9, Phase 10 and Phase 11 route**
 (the four exceptions are named in §2.7 / §2.9 / §2.11 — holiday reads, the
 certificate read/write, and the bank-account pair, which are policy-only on
 purpose):
@@ -204,6 +206,14 @@ row-scoped by `Visibility::mayViewOthersDocuments()`, which needs
 **`documents.view` *and* `documents.manage`**: `employees.view` is
 deliberately not a third door in, so a Project Manager who may see a team
 does not thereby see its passports.
+
+**Phase 11 adds no exception of that kind** — all 24 routes carry both
+gates — but it does add two *layers*: `GET /employee-training/{training}/file`
+is coarse-gated on `training.view` and then judged per row by
+`EmployeeTrainingPolicy::viewCertificate` (your own card, or
+`training.certificates.view`), and `GET /asset-assignments` is coarse-gated
+on `assets.view` but only answers rows outside your own holding to a caller
+who also holds `assets.history.view`.
 
 ### 2.1 Authentication ✅ (Phase 3)
 
@@ -1067,9 +1077,10 @@ Flutter form does not offer yet (see `docs/FLUTTER_GUIDE.md`); the API does.
 
 #### What is *not* here yet
 
-`/documents`, `/training`, `/assets` (Phase 10) and
-`/notifications` (Phase 11) remain contracts, as §2.11–§2.13 say
-(`/expenses` left this list in Phase 9 and is documented in §2.10a below).
+`/documents` (left in Phase 10) and `/training`, `/assets` (left in Phase 11)
+are documented in §2.11 and §2.11a below; `/notifications` (Phase 12)
+remains a contract, as §2.12–§2.13 say (`/expenses` left this list in Phase 9
+and is documented in §2.10a below).
 Phase 8 adds
 **no rate limiter**: none of these routes accepts a credential, a file or an
 unbounded body — see §3.
@@ -1457,19 +1468,92 @@ The 422 from a bad field names the field and **never echoes the value**.
 > column is an encrypted cast; rotating the key without re-encrypting the
 > table turns every IBAN into unreadable bytes. See `docs/SECURITY.md` §4.
 
-### 2.11a Training & assets
+### 2.11a Training & assets — (Phase 11 ✅)
 
-Documents and onboarding moved up into §2.11 in Phase 10; **this is what
-remains from the original Phase 10 sketch and is not built.** Training and
-assets were cut out of Phase 10's approved scope, and neither has a phase
-number yet.
+Two registers. **What a course is** and **what kind of thing a laptop is**
+are rows — `training-types` and `asset-types` — so the whole vocabulary is
+read from the database and no endpoint, validator or screen knows that
+`WORKING_AT_HEIGHTS` exists. Both type endpoints answer a **plain array**
+inside `data` (no `meta`): they are a vocabulary, not a paginated resource.
 
-| Method | Path |
+**24 routes: 194 definitions / 199 registered.** `/training-programs/expiring`
+and `/training-compliance` are declared **before** `/{program}`, and
+`/employee-training/expiring` **before** `/{training}` — the Phase 7 ordering
+rule.
+
+| Method | Path | Permission |
+|---|---|---|
+| GET | `/training-types` | `training.view` |
+| GET/POST | `/training-programs` | `training.view` / `training.create` |
+| GET | `/training-programs/expiring` | `training.view` |
+| GET/PUT | `/training-programs/{program}` | `training.view` / `training.update` |
+| GET/POST | `/employee-training` | `training.view` / `training.assign` |
+| GET | `/employee-training/expiring` | `training.expiry.view` |
+| GET | `/employee-training/{training}` | `training.view` |
+| PUT | `/employee-training/{training}` | `training.update` |
+| POST | `/employee-training/{training}/complete` | `training.complete` |
+| POST | `/employee-training/{training}/cancel` | `training.update` |
+| GET | `/employee-training/{training}/file` | `training.view` + `EmployeeTrainingPolicy::viewCertificate` |
+| GET | `/training-compliance` | `training.view` |
+| GET | `/asset-types` | `assets.view` |
+| GET/POST | `/assets` | `assets.view` / `assets.create` |
+| GET/PUT | `/assets/{asset}` | `assets.view` / `assets.update` |
+| POST | `/assets/{asset}/assign` | `assets.assign` |
+| POST | `/assets/{asset}/return` | `assets.return` |
+| PATCH | `/assets/{asset}/status` | `assets.manage` |
+| GET | `/asset-assignments` | `assets.view` (+ `assets.history.view` for rows you do not hold) |
+| GET | `/asset-assignments/{assignment}` | `assets.view` |
+
+`{program}`, `{training}` and `{asset}` are `whereNumber` — a barcode is a
+**route key**, not a path segment, so `TOOL-00042` never reaches the model
+resolver.
+
+**Enrolment is a ledger with a unique key, not a list of names.**
+`POST /employee-training` refuses a duplicate twice before it inserts, and
+each refusal is a **409 naming the state rather than the payload**:
+
+| Refusal | Message |
 |---|---|
-| GET/POST | `/training` … |
-| POST | `/training/{id}/enroll` |
-| GET/POST/PUT | `/assets` … |
-| POST | `/assets/{id}/assign` |
+| same person, same course, same date | `That person is already enrolled on this course for that date.` |
+| same person, same course, already holding a place | `That person already has a place on this course.` |
+
+Recertification is therefore a **new row**; nothing rewrites a finished one.
+`certificate_expiry_date` may be **omitted** on `POST …/complete` and the
+server will date the card from `training_programs.certificate_validity_days`.
+`null` validity means *never lapses*; it is not `0`.
+
+**Certificate expiry is computed, never stored.** `certificate_expiry_state`
+on the resource is `none | valid | expiring_soon | expired`, derived per row
+from the certificate's own dates against `hrms.expiry.default_warning_days`
+(30, `HRMS_DOCUMENT_WARNING_DAYS`), alongside `warning_days` and
+`days_until_expiry`. Read it; do not re-derive it client-side and do not
+write it — the payload `prohibits()` it.
+
+**Row scope.** `Visibility::employeeTrainingsFor()` answers *your own rows*
+with `training.view` alone and *the workforce's* only with
+`training.assign`/`training.complete`. `Visibility::assetsFor()` is the same
+shape for the register: `assets.view` without `assets.manage` narrows it to
+the assets you hold. `GET /training-compliance` tallies **after** that
+filtering, so a manager's compliance totals are never the whole company's by
+accident.
+
+**Mutations run through services, not controllers.** `TrainingService`,
+`TrainingExpiryService` and `AssetService` are the only writers, which is
+what makes the 409 ordering (open-assignment check **before** the transition
+table) and the `lockForUpdate()` around "one open hand-over per asset" hold
+in one place. There is deliberately **no `POST /asset-assignments`**: a
+hand-over is created only by `POST /assets/{asset}/assign`, so there is no
+second door into that table.
+
+**Costs.** `purchase_cost` is **omitted, not nulled**, from `AssetResource`
+unless the reader holds `assets.manage`. An absent key means "not your
+business"; a `null` would mean "it was free" — two different statements.
+
+**No limiter on the 24 writes, deliberately**, for the same reason as
+§3 rows above: they are all behind a `permission:` middleware and a policy,
+and the interesting abuse (double-issuing a card, retiring a held laptop) is
+a *state* attack that only a 409 can answer — which is exactly what
+`AssetService` and `TrainingService` return.
 
 ### 2.12 Dashboards & Reports
 
@@ -1510,8 +1594,9 @@ attached at the route as `throttle:{name}`. Never inline a number in a route.
 | Payroll / loans / certificate writes (36 routes) | none | — | ✅ Phase 8, **deliberately** — see below |
 | Expense writes (13 routes) | none | — | ✅ Phase 9, **deliberately** — see below |
 | Document, onboarding & bank-account writes (8 routes) | none | — | ✅ Phase 10, **deliberately** — see below |
+| Training & asset writes (24 routes) | none | — | ✅ Phase 11, **deliberately** — see below |
 | General API | 60 / minute | — | ⬜ Planned |
-| Exports (PDF/Excel) | 10 / minute | — | ⬜ Phase 11 |
+| Exports (PDF/Excel) | 10 / minute | — | ⬜ Phase 12 |
 
 **Phase 6 added no new limiter, deliberately.** Leave, overtime, holiday and
 timesheet writes are cheap, already behind `auth:sanctum` + a permission +
@@ -1847,6 +1932,49 @@ carries their GPS fix onto the disk.
   and archiving takes it out of the active list while leaving the row and its
   file on the employment file.
 
+### 4.7 Training certificates — Phase 11
+
+A safety card is a document about a person, so it gets **no new upload
+path**. It goes through `EmployeeDocumentStore` — the same private store, the
+same six rules, the same directory — because "a second storage rule
+invented for one more PDF" is how the first one eventually gets bypassed.
+
+- `multipart/form-data`, field name `file`, on **`POST
+  /api/v1/employee-training/{training}/complete`** only. One file per request.
+- **The rules are not restated.** `CompleteEmployeeTrainingRequest` `use`s
+  `ValidatesEmployeeDocuments` and calls `$this->fileRules()`, so a change to
+  an employment document's rules changes a training card's rules in the same
+  commit. Same accepted set (**PDF, JPEG, PNG, WebP**), same byte ceiling
+  (`HRMS_DOCUMENT_MAX_KB`, 10240 KB default), same `finfo` sniff, same
+  `%PDF-` / decode probes, same re-check inside the store, same
+  bytes-follow extension on disk.
+- **Unnameable**: `{employee-documents}/{employeeId}/{uuid}.{ext}` on the
+  private `local` disk — a *card* and a *passport* for the same person land
+  side by side under that person's id, which is the only grouping that
+  matters to a reader and the only key nobody has to guess.
+- **Unexposed**: `EmployeeTrainingResource` reports `has_certificate`,
+  `certificate_original_name`, `certificate_mime_type`,
+  `certificate_size` and `certificate_file_url`; **`certificate_path` is
+  never in a payload**, and there is no `/storage` route to it.
+- **Download**: `GET /api/v1/employee-training/{training}/file` — a
+  `StreamedResponse` through `EmployeeDocumentStore::response()`, `no-store`,
+  `nosniff`, server-minted disposition name. `404` with
+  `That training record has no certificate attached.` when there is no file.
+- **A different gate from the row it belongs to.** Your own card needs only
+  `training.view` — a worker showing a supervisor a working-at-heights card
+  is the *point* of the file — while a colleague's needs
+  `training.certificates.view`. **`training.manage` deliberately does not
+  open it**: holding the right to correct an enrolment date is not the right
+  to read everybody's competence paper.
+- **Replaced, not accumulated.** Completing an already-completed row with a
+  new file calls `remove()` on the old bytes first, exactly as
+  `PUT /employee-documents/{document}` does, so superseded cards do not
+  linger unpointed-at.
+- **Certificate data is refused, not trusted.** `status`, `expiry_notified_at`,
+  `created_by`, `employee_id` and `training_program_id` are all `prohibited`
+  on the completion payload — a client cannot walk its own card to `completed`
+  or backdate a window it will later be graded against.
+
 ---
 
 ## 5. Offline Sync Contract
@@ -1918,8 +2046,8 @@ Syncing is manual ("Sync now"), oldest first, and stops at the first 0 or
 | §2.10 Payroll / Loans / Salary documents | ✅ **Phase 8** |
 | §2.10a Expenses & Receipts | ✅ **Phase 9** |
 | §2.11 Employee documents, expiry & onboarding | ✅ **Phase 10** |
-| §2.11a Training & assets | ⬜ **out of Phase 10's approved scope — unscheduled** |
-| §2.12–§2.13 Everything else | ⬜ Phases 11–12 |
+| §2.11a Training & assets | ✅ **Phase 11** |
+| §2.12–§2.13 Everything else | ⬜ **Phase 12** |
 | Rate limiting — auth routes | ✅ Phase 3 |
 | Rate limiting — attendance writes | ✅ Phase 5 |
 | Rate limiting — leave/timesheet/overtime/holiday writes | **deliberately none** — see §3 |
@@ -1927,6 +2055,7 @@ Syncing is manual ("Sync now"), oldest first, and stops at the first 0 or
 | Rate limiting — payroll / loan / certificate writes | **deliberately none** — see §3 |
 | Rate limiting — expense writes | **deliberately none** — see §3 |
 | Rate limiting — document / onboarding / bank writes | **deliberately none** — see §3 |
+| Rate limiting — training / asset writes | **deliberately none** — see §3 |
 | Rate limiting — remaining scopes | ⬜ As their modules land |
 | §4.1 File upload rules (selfie) | ✅ Phase 5, **sanitised server-side since the post-Phase 5 hardening pass** |
 | §4.2 File upload rules (medical certificate) | ✅ Phase 6 |
@@ -1934,12 +2063,14 @@ Syncing is manual ("Sync now"), oldest first, and stops at the first 0 or
 | §4.4 Salary documents (rendered, never uploaded) | ✅ **Phase 8** |
 | §4.5 File upload rules (expense receipts) | ✅ **Phase 9** |
 | §4.6 File upload rules (employee documents) | ✅ **Phase 10** |
+| §4.7 File upload rules (training certificates) | ✅ **Phase 11** |
 
-Backend proof: `php artisan test` → **553 passed (3674 assertions)**; **170
-route definitions** under `api/*` (175 registered) — Phase 6 added 37,
+Backend proof: `php artisan test` → **609 passed (4103 assertions)**; **194
+route definitions** under `api/*` (199 registered) — Phase 6 added 37,
 Phase 7 added 18, Phase 8 added 36, Phase 9 added 13, the currency pass
-added 1, **Phase 10 added 16**. Flutter proof: `dart format .` clean (246
-files), `flutter analyze` clean, `flutter test` → **551 passed**.
+added 1, **Phase 10 added 16**, **Phase 11 added 24**. Flutter proof:
+`dart format .` clean (285 files), `flutter analyze` clean, `flutter test` →
+**654 passed**.
 
 > To explore a running API later, use Laravel's generated OpenAPI/Swagger UI or
 > a tool such as Postman.

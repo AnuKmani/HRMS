@@ -184,6 +184,30 @@ class Employee extends Model
         return $this->hasOne(EmployeeBankAccount::class);
     }
 
+    /**
+     * Every course this person has been enrolled in, newest first.
+     *
+     * Relationship only; *which* of these a caller may open is
+     * EmployeeTrainingPolicy's answer (your own, or `training.manage`).
+     * The rows are never included in EmployeeResource — a training record
+     * says something about somebody's competence and is reached through its
+     * own list, behind its own permission.
+     */
+    public function trainings(): HasMany
+    {
+        return $this->hasMany(EmployeeTraining::class)->orderByDesc('enrollment_date')->orderByDesc('id');
+    }
+
+    /**
+     * Every hand-over of company property to this person, including the
+     * ones already closed — the history is the point, so nothing here is
+     * filtered to the active row.
+     */
+    public function assetAssignments(): HasMany
+    {
+        return $this->hasMany(AssetAssignment::class)->orderByDesc('assigned_date')->orderByDesc('id');
+    }
+
     /* ---------------------------------------------------------- accessors */
 
     public function getFullNameAttribute(): string

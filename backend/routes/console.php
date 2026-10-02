@@ -2,6 +2,7 @@
 
 use App\Jobs\EnforceSickCertificateDeadlines;
 use App\Jobs\ScanDocumentExpiries;
+use App\Jobs\ScanTrainingExpiries;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -15,7 +16,7 @@ Artisan::command('inspire', function () {
 | Scheduled work
 |--------------------------------------------------------------------------
 |
-| Two jobs, for the same reason stated twice. A medical certificate's
+| Three jobs, each for the same reason said again. A medical certificate's
 | deadline must be enforced whether or not anybody opens the app, and an
 | employment file must lapse when its date says it does — a phone that is
 | switched off, offline or uninstalled does not get to decide whether an
@@ -77,6 +78,33 @@ Schedule::job(new ScanDocumentExpiries)
         '%02d:%02d',
         (int) config('hrms.expiry.scan_hour'),
         (int) config('hrms.expiry.scan_minute'),
+    ))
+    ->withoutOverlapping((int) config('hrms.scheduling.overlap_minutes'))
+    ->onOneServer();
+
+/*
+|--------------------------------------------------------------------------
+| Training certificate expiry scan
+|--------------------------------------------------------------------------
+|
+| The same scan, for the other kind of expiring paper: a safety card that
+| has lapsed stops being a card whether or not anybody looked at the
+| training screen. Default 06:20 — five minutes behind the document scan —
+| so two full-table reads are not competing in the same second. It reads
+| `employee_trainings` only, so the order between the two is courtesy
+| rather than a dependency.
+|
+| Same three defences as above (idempotent queries, a per-row lock, and
+| ShouldBeUnique on the job), same shared-cache condition on
+| `withoutOverlapping()` / `onOneServer()`, and the same deliberate absence
+| of any delivery: the events it raises are hooks for Phase 12.
+|
+*/
+Schedule::job(new ScanTrainingExpiries)
+    ->dailyAt(sprintf(
+        '%02d:%02d',
+        (int) config('hrms.expiry.training_scan_hour'),
+        (int) config('hrms.expiry.training_scan_minute'),
     ))
     ->withoutOverlapping((int) config('hrms.scheduling.overlap_minutes'))
     ->onOneServer();

@@ -193,6 +193,18 @@ class ApiClient {
     return _send(() => dio.put<dynamic>(path, data: FormData.fromMap(form)));
   }
 
+  /// The one verb in this client with exactly one caller:
+  /// `PATCH /assets/{asset}/status`.
+  ///
+  /// Not folded into [put], which sends `PUT` and would be answered with a
+  /// 405 by a route registered under `PATCH` — a mismatch that reads like a
+  /// permissions bug for as long as it takes to find the route list. Not
+  /// folded into [post] either: the route updates one field of a row that
+  /// already exists, which is what `PATCH` means, and a client that sent
+  /// `POST` would be asking the server to guess.
+  Future<ApiEnvelope> patch(String path, {Object? body}) =>
+      _send(() => dio.patch<dynamic>(path, data: body));
+
   /// Reserved for endpoints that legitimately have one.
   ///
   /// Employee site assignments deliberately have no `DELETE` route — posting

@@ -140,7 +140,7 @@ HRMS/
 │   │   │   └── Responses/            # ApiResponse — the response envelope
 │   │   ├── Models/          # Eloquent models
 │   │   ├── Services/        # Business logic (leave days, approval chain, timesheets…)
-│   │   ├── Policies/        # Authorization — 15 policies (always named `<Model>Policy`)
+│   │   ├── Policies/        # Authorization — 30 policies (always named `<Model>Policy`)
 │   │   ├── Support/         # Visibility scoping, Geo (haversine), ClientInput
 │   │   ├── Jobs/            # Queued work
 │   │   └── Notifications/   # FCM + database notifications
@@ -188,7 +188,7 @@ Access is controlled by **roles** *and* **granular permissions**. Hiding a butto
 
 Example permissions: `employees.view`, `employees.create`, `attendance.manage`, `leave.approve`, `payroll.manage`, `sites.manage`, `audit.view`.
 
-**Implemented:** **80 permissions** (401 role grants), all named
+**Implemented:** **95 permissions** (462 role grants), all named
 `resource.action`, seeded by `RoleSeeder` + `PermissionSeeder` +
 `RolePermissionSeeder`. Super Admin holds every permission; each other role
 is an explicit allow-list, so anything absent is denied.
@@ -207,7 +207,13 @@ seven** — `documents.{create,update,verify,delete,expiry.view,manage}` (six,
 with `documents.view` already in the catalogue) and the new
 `onboarding.{view,manage}` pair, taking it to **80 permissions** and
 **401 grants**. Managers keep `documents.view` without `documents.manage`:
-supervising a person must not open their passport.
+supervising a person must not open their passport. **Phase 11 added
+fifteen** — the eight `training.*` verbs (`view`, `create`, `update`,
+`manage`, `assign`, `complete`, `certificates.view`, `expiry.view`) and the
+seven `assets.*` verbs (`view`, `create`, `update`, `manage`, `assign`,
+`return`, `history.view`), taking the catalogue to **95 permissions** and
+**462 grants**. `assets.view` alone reads your own kit at cost-free, and
+`assets.history.view` — not `assets.view` — is who has held *what*.
 See [`docs/SECURITY.md`](docs/SECURITY.md) §3.1 for the full catalogue and the
 middleware used to enforce it server-side.
 
@@ -237,7 +243,7 @@ composer install
 cp .env.example .env
 php artisan key:generate
 # configure DB_* in .env
-php artisan migrate --seed        # 26 migrations, 34 tables + RBAC/settings seed data
+php artisan migrate --seed        # 55 migrations, 62 tables + RBAC/settings seed data
 php artisan serve          # http://127.0.0.1:8000
 ```
 
@@ -346,7 +352,7 @@ flutter test                 # 378 tests, no device or server required
 | Deliverable | Status |
 |---|---|
 | `spatie/laravel-permission` **^6.25** (the release line compatible with PHP 8.2 + Laravel 12) | ✅ |
-| 10 roles · 80 permissions · 401 role-permission grants (the count grew as Phases 4–10 added permissions; `PermissionSeeder::PERMISSIONS` is the single source of truth) | ✅ |
+| 10 roles · 95 permissions · 462 role-permission grants (the count grew as Phases 4–11 added permissions; `PermissionSeeder::PERMISSIONS` is the single source of truth) | ✅ |
 | Middleware aliases `permission` / `role` / `role_or_permission` registered | ✅ |
 | `settings` table + `SettingsService` — 12 seeded business rules | ✅ |
 | `departments`, `designations` | ✅ |
@@ -739,6 +745,68 @@ path, only an id-based read route.
 >   route, its own policy check and its own encrypted column; it is never in
 >   `EmployeeResource`, and it is never logged.
 
+### ✅ Phase 11 — Training & asset management (COMPLETE)
+
+Two registers, both configured rather than coded. What a course *is* and what
+kind of thing a laptop *is* are **rows an operator may add, rename and
+retire** — `training_types` and `asset_types` — so nothing in a service, a
+screen or a test knows that `WORKING_AT_HEIGHTS` exists. Enrolment is a
+ledger with a unique key rather than a list of names, and a hand-over is an
+**append-only history row**: the register's `status` is a projection of the
+open assignment, never a second opinion about it.
+
+**Backend**
+
+| Deliverable | Status |
+|---|---|
+| **6 migrations · 55 total · 62 tables · all `Ran`** — `training_types`, `training_programs`, `employee_trainings`, `asset_types`, `assets`, `asset_assignments` | ✅ |
+| **2 reference seeders, not fixtures** — `TrainingTypeSeeder` (8 codes) and `AssetTypeSeeder` (7 codes). **Programs are deliberately not seeded**: a catalogue is an operator's to write | ✅ |
+| `training_programs.certificate_validity_days` is **days only**, `NULL` meaning *never lapses* — `0` would mean "lapses the instant it is issued", a different claim one character away | ✅ |
+| `employee_trainings` duplicate guard: two checks before the insert (same person + same course + same date → **409** `'That person is already enrolled on this course for that date.'`, then same person + same open course → **409** `'That person already has a place on this course.'`). Recertification is a **new row**, never a rewrite of the finished one | ✅ |
+| Certificate expiry states `none / valid / expiring_soon / expired` are all **computed** by `EmployeeTraining::certificateExpiryState()` from the certificate's own dates against `hrms.expiry.default_warning_days` (30, `HRMS_DOCUMENT_WARNING_DAYS`) — nothing stores a state that can drift | ✅ |
+| `ScansExpiringRows` trait + `TrainingExpiryService`; job `ScanTrainingExpiries` **daily 06:20**, `withoutOverlapping()` + `onOneServer()`, `ShouldBeUnique`, `$tries = 1`; raises `EmployeeTrainingExpiring` / `EmployeeTrainingExpired` once per record per window through `expiry_notified_at`, and **sends no FCM** | ✅ |
+| `EmployeeTraining.status` (`enrolled, scheduled, in_progress, completed, failed, cancelled, expired`) with `isOpen()` / `isTerminal()` / `isCompletable` derived on the model, so the API and the screen cannot disagree about which states may still move | ✅ |
+| Certificates are uploaded through the **existing private-file pipeline** (`EmployeeDocumentStore`, disk `local`) and served by `GET /employee-training/{id}/file` — a second storage rule was not invented for one more PDF | ✅ |
+| `assets.status` (`available, assigned, maintenance, damaged, lost, retired`) is **separate from `current_condition`** (`new, good, fair, poor`); an asset is very often both `assigned` and `fair` | ✅ |
+| `AssetService::assign()` guards the "one open hand-over per asset" rule inside a transaction with `lockForUpdate`; `returnAsset()` sets `current_condition = returned_condition` and moves to `maintenance` when poor, else `available`. A return's `remarks` **replace** the hand-over's; a return with none leaves it standing | ✅ |
+| `AssetService::changeStatus()` checks the open-assignment rule **before** `Asset::TRANSITIONS`, so `assigned` is never offered as a status and a held asset cannot be retired out from under its holder | ✅ |
+| `purchase_cost DECIMAL(12,2)` is **omitted, not nulled**, from `AssetResource` unless the reader holds `assets.manage` — an absent key and a free asset are two different statements | ✅ |
+| Service-routed mutations everywhere (`TrainingService`, `TrainingExpiryService`, `AssetService`) so the future audit log attaches to one place per act | ✅ |
+| Permissions: **15 new → 95 total, 462 grants** — the eight `training.*` and seven `assets.*` verbs. **4 new policies → 30 total** — `EmployeeTrainingPolicy`, `TrainingProgramPolicy`, `AssetPolicy`, `AssetAssignmentPolicy`; `TrainingType` / `AssetType` are read-only and gated on the route with `abort_unless` | ✅ |
+| Routes: **24 new — 194 definitions / 199 registered** — `training-types`, `training-programs` (+ `/training-compliance`, `/expiring`), `employee-training` (+ `/expiring`, `/{row}/complete`, `/{row}/cancel`, `/{row}/file`), `asset-types`, `assets` (+ `/{asset}/assign`, `/{asset}/return`, `/{asset}/status`) and `asset-assignments`; `/training-programs/expiring` and `/training-compliance` are declared **before** `/{program}` (the Phase 7 ordering rule) | ✅ |
+| 11 FormRequests; certificate `file` rules reuse `ValidatesEmployeeDocuments`; every payload `prohibits()` the server-owned fields | ✅ |
+| Tests: backend **609 passed (4103 assertions)** on `hrms_testing` — 56 new (`TrainingManagementTest`, `TrainingComplianceTest`, `TrainingExpiryScanTest`, `AssetManagementTest`, `AssetAssignmentHistoryTest`) on the shared `BuildsTrainingAssets` scaffold · `composer validate` valid · `vendor\bin\pint --test` **PASS** (474 files) · `migrate:status` **55 Ran / 0 pending** | ✅ |
+
+**Flutter**
+
+| Deliverable | Status |
+|---|---|
+| `mobile/lib/features/training/` — **15 files**, three layers: `training_type` · `training_program` · `employee_training` · `training_repository` · `api_training_repository` · `training_controller` + nine screens (list, detail with completion/cancel, enrol, catalogue, program form, expiry report, compliance, filters) | ✅ |
+| `mobile/lib/features/assets/` — **11 files**: `asset_type` · `asset` · `asset_assignment` · `asset_repository` · `api_asset_repository` · `asset_controller` + list, detail, form, hand-over log and the three hand-over sheets | ✅ |
+| **Status and condition are two chips, in words, never one colour** — an asset can be `assigned` and `poor` at once, and a tint would be a second signal pretending to be the first | ✅ |
+| **"We did not ask" is never drawn as "it is free"** — a payload with no `assignments` says *Holders not loaded*; one that was asked and answered empty says *Nobody holds it* | ✅ |
+| **Cost is shown only when it was sent** — `Asset.costVisible` reads `containsKey('purchase_cost')`, and the row reads *Not shown to your role* rather than *Not recorded* | ✅ |
+| Expiry is words + icon everywhere: `Expires in 5 days`, `Expired 12 days ago`, `Never expires`, `No card issued` — the server's `expiry_state` and `days_until_expiry` are rendered, never re-derived | ✅ |
+| 13 new routes — `/training`, `/training/new`, `/training/expiring`, `/training/compliance`, `/training/programs` (+ `/new`, `/:id`), `/training/:id`, `/assets`, `/assets/new`, `/assets/history`, `/assets/:id`, `/assets/:id/edit` → **78 `GoRoute` entries**; `/training/programs` is declared **before** `/training/:id`, and `/assets/history` **before** `/assets/:id` | ✅ |
+| Two Home doors — **Training** (`Icons.school_outlined`, `/training`) and **Assets** (`Icons.inventory_2_outlined`, `/assets`) — each behind its own grant; the expiry report and the hand-over log are *not* doors of their own | ✅ |
+| `PermissionScope` gained 13 `can*` getters; `ApiClient.patch()` added (one caller: `PATCH /assets/{asset}/status`) | ✅ |
+| Harness `test/support/phase11.dart` — `ScriptedTraining` · `ScriptedAssets` · `scopedPhase11(...)` · `phase11Router(...)` · JSON payload builders for both trees, parsed by `rows()` so a transition merges into the payload | ✅ |
+| Tests: **654 passed** (551 before Phase 11, **+103** across 12 new files) · `dart format .` **clean (285 files)** · `flutter analyze` **clean** · full `flutter test` green | ✅ |
+
+> **What Phase 11 does not do:**
+>
+> - **No FCM.** The expiry job raises two events and writes
+>   `expiry_notified_at`; nothing is pushed to a device.
+> - **No audit logging.** Every mutation already runs through a service
+>   method, which is where that log will attach.
+> - **No training-type or asset-type CRUD screens.** The rows exist, are
+>   seeded and are read by both sides; writing them is configuration work,
+>   not a module.
+> - **No certificate verification endpoint.** The file is private, served by
+>   its id-based route, and nothing yet checks a card against its issuer.
+> - **No `POST /asset-assignments`.** A hand-over is created only by
+>   `POST /assets/{asset}/assign`, so there is no second door into the table.
+
 ### Planned Phases
 
 | Phase | Scope | Status |
@@ -754,9 +822,9 @@ path, only an id-based read route.
 | **8h** | Payroll financial-safety hardening — net-salary floor, partial/carry-forward repayments | ✅ Done |
 | **9** | Expenses: workflow approval + private receipts | ✅ Done |
 | **10** | Employee documents (types, private storage, expiry) + onboarding | ✅ Done |
-| **10b** | Training & assets — cut out of Phase 10's approved scope, not scheduled | ⬜ |
-| **11** | FCM notifications, dashboards, reports & exports | ⬜ |
-| **12** | Testing, security audit, deployment, backups | ⬜ |
+| **11** | Training management (programs, enrolment, certificates, expiry, compliance) + asset management (register, hand-over, return, history) | ✅ Done |
+| **12** | FCM notifications, full audit logging, advanced dashboards, final reporting & exports | ⬜ |
+| **13** | Testing, security audit, deployment hardening, backups | ⬜ |
 
 > **Shifts (API + screens) and background/automatic attendance sync are
 > unscheduled.** The `shifts` table (Phase 2) and the shift resolution used

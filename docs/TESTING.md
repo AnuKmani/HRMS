@@ -1,6 +1,6 @@
 # Testing
 
-> **Status:** Phase 10 — leave, certificates, LOP, holidays, timesheets,
+> **Status:** Phase 11 — leave, certificates, LOP, holidays, timesheets,
 > overtime, the site vertical slice (activity reports, the official daily
 > report, its photographs and its on-demand PDF), **the payroll
 > vertical slice** (ledger, calculation, loans and salary documents) and
@@ -8,13 +8,15 @@
 > and the three Flutter screens) are covered end to end on top of Phases 1–7,
 > plus the **payroll financial-
 > safety hardening** (a net-salary floor and partial repayments,
-> `PayrollRepaymentTest`), and now **the employee-document and onboarding
+> `PayrollRepaymentTest`), the **employee-document and onboarding
 > slice** (filing, private storage, the server's expiry answer, the nightly
 > scan, the joiner checklist, the policy-only bank-account pair — 44 backend
-> tests and 86 Flutter tests of its own). Backend **553 passed (3674
-> assertions)**, Flutter **551 passed**. This document defines the strategy
-> for the modules still to come (Phases 11–12); training and assets were cut
-> from Phase 10's approved scope and are unscheduled.
+> tests and 86 Flutter tests of its own), and now **the training and asset
+> slice** (the two vocabularies, the enrolment ledger, the certificate and
+> its computed expiry, the register, the hand-over log and the compliance
+> report — 56 backend tests and 103 Flutter tests of its own). Backend
+> **609 passed (4103 assertions)**, Flutter **654 passed**. This document
+> defines the strategy for the modules still to come (Phases 12–13).
 
 ---
 
@@ -676,6 +678,106 @@ neither exists (SECURITY §4.9), so the tests assert the events, the
 
 ---
 
+### 3.13 Training & asset management ✅ (Phase 11 — `TrainingManagementTest`, `TrainingComplianceTest`, `TrainingExpiryScanTest`, `AssetManagementTest`, `AssetAssignmentHistoryTest`)
+
+**56 tests / 369 assertions** — `TrainingManagementTest` 23,
+`AssetManagementTest` 16, `TrainingExpiryScanTest` 7,
+`AssetAssignmentHistoryTest` 6, `TrainingComplianceTest` 4. All five on
+`hrms_testing`, all five behind the shared **`BuildsTrainingAssets`**
+concern, which seeds the Role / Permission / RolePermission / Setting /
+TrainingType / AssetType seeders in that order and exposes payload builders
+whose signature is `$overrides + [defaults]` — PHP's `array + array` keeps
+the **left** operand on a key conflict, so an override goes on the left and
+a test that only cares about one field never repeats the other nine.
+
+**`TrainingManagementTest` — 23** (the vocabulary, the catalogue, the ledger,
+completion, the certificate, scope, filters)
+
+| Test | Expectation |
+|---|---|
+| `test_hr_adds_a_program_and_nothing_may_take_its_code` | `POST /training-programs` → `201`; a second program with the same `code` → `422`; **there is no `DELETE` route at all** |
+| `test_a_program_cannot_be_filed_under_a_type_that_is_not_active` | an `inactive` type id → `422` naming `training_type_id` |
+| `test_the_type_vocabulary_is_data_that_can_be_renamed` | `GET /training-types` answers a plain array in `data`; renaming a type's `name` changes the catalogues' next read with no deploy |
+| `test_the_catalogue_door_is_the_permission_and_nothing_else` | anonymous → `401`; a role without `training.view` → `403` before a query runs |
+| `test_the_catalogue_is_editable_but_never_removable` | `PUT` → `200`; a `DELETE` on the same path → `404` |
+| `test_hr_puts_somebody_on_a_course` | `POST /employee-training` → `201`, `status=enrolled`, `enrollment_date` stored as given |
+| `test_a_place_on_a_course_cannot_be_held_twice` | the same person + program + date → **`409`** with `That person already has a place on this course.` and **no row written** |
+| `test_a_finished_course_may_be_sat_again` | the same person + program on a *different* date → `201`; a terminal row is never rewritten, the new one is a second row |
+| `test_no_grant_means_no_self_service` | an Employee `POST`s an enrolment for a colleague → **`403`** |
+| `test_an_employee_reads_only_their_own_course_history` | `Visibility::employeeTrainingsFor()` with `training.view` alone returns only rows whose `employee_id` is the caller's |
+| `test_a_project_manager_reads_only_their_own_course_history` | same shape for a mid-scoped role — `.view` is not a roster |
+| `test_hr_reads_everybodys_course_history` | `training.assign` widens the same query to the workforce |
+| `test_completing_dates_the_card_from_the_programs_own_validity` | completing with **no** `certificate_expiry_date` and a program validity of 60 → the server writes `issue + 60 days` |
+| `test_a_date_the_instructor_wrote_by_hand_beats_the_default` | a stated expiry is stored verbatim — the default never overwrites a fact |
+| `test_a_program_that_promises_a_card_cannot_be_completed_without_one` | `certificate_required` + neither issue date nor file → **`422`** naming the missing field |
+| `test_a_second_completion_is_refused_and_a_refusal_writes_nothing` | a terminal row → **`409`** naming the state, and `completion_date` unchanged |
+| `test_cancelling_keeps_the_row_but_cannot_reach_a_decided_outcome` | cancel an open row → `200`, `status=cancelled`, the row is still there |
+| `test_a_completed_course_cannot_be_cancelled` | → **`409`** |
+| `test_the_card_lands_in_the_private_store_and_no_path_leaves_the_server` | the file is written under `employee-documents/{employeeId}/{uuid}.…`, `Storage::fake('local')` sees it, and **no payload anywhere contains `certificate_path` or an `employee-documents/` string** |
+| `test_an_employee_may_hand_over_their_own_card_but_not_a_colleagues` | `GET …/file` for your own row → `200` with `no-store`; a colleague's → **`403`** unless `training.certificates.view` |
+| `test_filters_pick_out_the_programme_the_person_and_the_state` | `employee_id`, `training_program_id`, `training_type_id`, `status`, `certified` each isolate the intended rows |
+| `test_the_expiry_filters_read_the_calendar_not_the_stored_status` | `expired` / `expiring_soon` are computed from dates against `hrms.expiry.default_warning_days`, so a row still stamped `completed` is found |
+| `test_the_expiry_report_is_behind_its_own_permission` | `GET /employee-training/expiring` without `training.expiry.view` → **`403`** |
+
+**`TrainingComplianceTest` — 4**
+
+| Test | Expectation |
+|---|---|
+| `test_hr_sees_the_whole_workforce` | the report's `programs[]`, `enrollments_by_status` and `totals` cover every visible row |
+| `test_the_totals_are_scoped_before_they_are_counted` | the same query for a role without `training.manage` tallies **only its own rows** — the filter runs before the fold, not after |
+| `test_certificate_states_are_computed_from_today_rather_than_stored` | `certificate_expiry_state` is `none` / `valid` / `expiring_soon` / `expired` derived per row under `Carbon::setTestNow()`, never read from a column |
+| `test_the_report_is_behind_the_same_door_as_the_list` | `GET /training-compliance` needs `training.view`, exactly like the list it summarises |
+
+**`TrainingExpiryScanTest` — 7** (the scheduled scan)
+
+| Test | Expectation |
+|---|---|
+| `test_a_lapsed_certificate_is_expired_and_said_to_be_exactly_once` | a lapsed card → state `expired`, `expiry_notified_at` set, **one event**; a second run raises nothing |
+| `test_the_window_is_the_shared_one_rather_than_a_constant` | the warning window is `hrms.expiry.default_warning_days`, not a number in the job |
+| `test_re_dating_a_certificate_earns_a_fresh_warning` | moving the date clears the marker, so the next pass warns again |
+| `test_nothing_that_never_produced_a_certificate_can_lapse` | rows with no certificate are never stamped and never raise |
+| `test_an_already_expired_certificate_is_not_reported_twice_by_the_second_kind_of_pass` | `expired` is terminal for the *scan* too — the marker blocks a re-raise |
+| `test_the_scan_is_scheduled_rather_than_left_to_somebody_pressing_a_button` | `schedule:list` shows `App\Jobs\ScanTrainingExpiries` at `20 6 * * *` from `hrms.expiry.training_scan_{hour,minute}`, with `withoutOverlapping()` and `onOneServer()` |
+| `test_the_job_runs_from_the_queue_as_well_as_from_the_cron_line` | `dispatchNow()` and a queued dispatch produce the same outcome |
+
+**Deliberately not asserted here:** FCM delivery on either event — none
+exists (SECURITY §4.11), so the tests assert the two events, the marker and
+the stamped column.
+
+**`AssetManagementTest` — 16**
+
+| Test | Expectation |
+|---|---|
+| `test_hr_registers_an_asset_and_nothing_may_take_its_code` | `POST /assets` → `201`; a duplicate `asset_code` → `422`; no `DELETE` route |
+| `test_a_new_asset_is_born_available_and_status_is_not_a_create_field` | `status` in the create payload → **`422` `prohibited`**, and the stored row is `available` |
+| `test_the_cost_is_only_shown_to_a_reader_entitled_to_the_register` | `assets.manage` → `purchase_cost` present; the same `GET` without it → **the key is absent, not `null`** |
+| `test_hr_hands_an_asset_to_somebody_and_the_register_follows` | `POST /assets/{asset}/assign` → `201`, an open `asset_assignments` row, and `assets.status = assigned` in the same transaction |
+| `test_an_asset_out_with_somebody_cannot_go_out_again` | a second `assign` → **`409`** naming the state, **no second open row** |
+| `test_a_hand_over_nobody_recorded_is_still_caught` | the uniqueness holds even when the first hand-over skipped `expected_return_date` |
+| `test_returning_records_what_came_back_and_decides_where_it_goes` | `POST …/return` closes the row, sets `current_condition = returned_condition`, and moves `good` → `available` / `poor` → `maintenance` |
+| `test_a_return_needs_something_to_return` | returning an asset with no open row → **`409`** |
+| `test_the_hand_over_acts_are_not_self_service` | `assign` / `return` without their own permission → **`403`**, before any row is written |
+| `test_status_moves_follow_the_map_and_the_two_that_are_not_moves_say_so` | a legal transition → `200`; an illegal one → **`409` naming the current state**; `assigned` is never an offered target |
+| `test_bringing_an_assigned_asset_back_is_a_return_not_a_status_change` | `PATCH …/status` on a held asset → **`409`** — the open-assignment rule is consulted *before* `Asset::TRANSITIONS` |
+| `test_retiring_an_asset_somebody_still_holds_is_refused` | same ordering, for the terminal move |
+| `test_an_edit_corrects_the_master_record_but_never_condition_or_status` | `PUT /assets/{asset}` may change `name` / `serial_number` and may **not** move `current_condition` or `status` |
+| `test_a_retired_asset_is_written_off_not_editable` | a retired row → **`409`** on update |
+| `test_filters_pick_out_the_type_the_state_the_holder_and_the_deadline` | `asset_type_id`, `status`, `condition`, `employee_id`, `assigned`, `available`, `overdue`, `purchased_from`, `purchased_to` each isolate the intended rows |
+| `test_an_employee_reads_only_what_has_been_handed_to_them` | `assets.view` without `assets.manage` returns only rows with an open assignment **to the caller** |
+
+**`AssetAssignmentHistoryTest` — 6** (the log and its door)
+
+| Test | Expectation |
+|---|---|
+| `test_a_return_closes_the_row_without_rewriting_the_hand_over` | `assigned_date`, `assigned_by` and `assigned_condition` are untouched after a return |
+| `test_a_hand_back_that_says_nothing_leaves_the_hand_over_story_in_place` | a return with no `remarks` leaves the hand-over's remarks standing |
+| `test_the_cross_employee_log_is_behind_its_own_permission` | `GET /asset-assignments` without `assets.history.view` returns only rows the caller is party to |
+| `test_your_own_hand_over_is_readable_without_the_log_permission` | your own row is still there — the log permission widens, it does not grant |
+| `test_the_asset_detail_carries_its_own_history_whole` | `GET /assets/{asset}`'s embedded `assignments[]` needs no `assets.history.view` |
+| `test_there_is_no_way_to_author_a_hand_over_directly` | `POST /asset-assignments` → **`404`**; the only door is `POST /assets/{asset}/assign` |
+
+---
+
 ## 4. Scheduler / Job Tests
 
 | Job | Test |
@@ -689,7 +791,9 @@ neither exists (SECURITY §4.9), so the tests assert the events, the
 | **Document expiry scan ✅ Phase 10** | `DocumentExpiryScanTest` (6) — run `ScanDocumentExpiries` directly, assert `status = expired`, one `DocumentExpired`/`DocumentExpiring` event per document per window, `expiry_notified_at` written before the event, and a second run raising nothing. `dispatchNow()` is used rather than `dispatchSync()`, which does not return the handler's result |
 | **Same job, registration ✅** | `php artisan schedule:list` shows `App\Jobs\ScanDocumentExpiries` at `15 6 * * *` from `hrms.expiry.scan_{hour,minute}` |
 | **Same job, queue ✅** | `test_the_job_runs_from_the_queue_as_well_as_from_the_cron_line` |
-| Training expiry reminder | ⬜ Not built — **cut from Phase 10's approved scope** |
+| **Training certificate expiry scan ✅ Phase 11** | `TrainingExpiryScanTest` (7) — run `ScanTrainingExpiries` directly, assert the computed `certificate_expiry_state`, one `EmployeeTrainingExpired`/`EmployeeTrainingExpiring` event per record per window, `expiry_notified_at` written before the event, and a second run raising nothing |
+| **Same job, registration ✅** | `php artisan schedule:list` shows `App\Jobs\ScanTrainingExpiries` at `20 6 * * *` from `hrms.expiry.training_scan_{hour,minute}` — five minutes behind the document scan so two full-table reads are not competing |
+| **Same job, queue ✅** | `test_the_job_runs_from_the_queue_as_well_as_from_the_cron_line` |
 | Missing check-out detection | **No scheduler exists** — the flag is written lazily by `AttendanceService::flagMissingCheckouts()` the moment anyone reads `GET /attendance/today`. Covered by `AttendanceCheckOutTest::test_the_missing_checkout_flag_is_written_when_the_schedule_ends_unattended`, using `Carbon::setTestNow()` rather than a run |
 | Attendance reminder | ⬜ Not built — arrives with notifications |
 
@@ -699,6 +803,12 @@ independent guards, because a queue worker restarted mid-run and an
 overlapping cron entry are different failures. The idempotency itself is in
 the data (`certificate_checked_at`), not in the lock: even a third
 concurrent run with both locks defeated converts nothing.
+
+**`ScanTrainingExpiries` uses the same three defences with `$tries = 1`
+rather than 3**: `ShouldBeUnique`, `withoutOverlapping()`, `onOneServer()`,
+and — like the document scan — idempotency in the data (`expiry_notified_at`)
+rather than in the lock. `$tries = 1` because a scan that fails has no\npartial effect worth retrying: it writes nothing until it raises its event,
+and the next scheduled pass is a fresh attempt.
 
 Use `Queue::fake()` / `Notification::fake()` / `Event::fake()` and
 `Carbon::setTestNow()`.
@@ -750,7 +860,7 @@ it cannot be pointed at development data by mistake.
 
 ## 5. Flutter Test Matrix
 
-### 5.1 Unit ✅ (Phases 3–9)
+### 5.1 Unit ✅ (Phases 3–10)
 
 | Target | Tests | File |
 |---|---|---|
@@ -782,7 +892,14 @@ it cannot be pointed at development data by mistake.
   interceptor and the controller can notice. The sign-in form's own message
   must survive.
 
-### 5.2 Widget ✅ (Phases 3–9)
+**Phase 11 added no pure-unit Flutter test, deliberately.** Both new slices
+are read-through of server-computed answers — an expiry state, a `days_out`,
+a `costVisible` flag, a status list the transition table chose — and a unit
+test that asserted those would only restate the fixture. What is worth
+holding is the *rendering* of an answer the phone did not compute, so all
+103 Phase 11 tests are widget tests below.
+
+### 5.2 Widget ✅ (Phases 3–11)
 
 | Screen | States verified |
 |---|---|
@@ -822,6 +939,17 @@ it cannot be pointed at development data by mistake.
 | Onboarding list — ✅ Phase 10 | the lock before any request; **every joiner appearing, including the one nobody has begun**; the stage filter and the incomplete-only switch travelling as query parameters; an empty directory saying what would appear; a first-load failure as a message rather than a blank page |
 | Onboarding detail — ✅ Phase 10 | the lock before any request; the checklist with **its counts and its outstanding names**; an unsatisfied `document` requirement offering **Attach… only for `documents.create`, handing its code to `/documents/new`**; the stage select only for `onboarding.manage`; completion offered only when the record is ready and **a refusal shown as the sentence the server sent**; a 403 as `You do not have permission to view onboarding.` and a 401 as "simply could not be loaded" |
 | Home / routes — ✅ Phase 10 | the documents door under `documents.view` alone, the onboarding door under `onboarding.view` alone, both under both grants side by side, **neither under either alone when both are absent**, the expiry report still needing the grant it sits behind and not being a door of its own — and the seven new paths (`/documents`, `/documents/new`, `/documents/expiring`, `/documents/{id}`, `/onboarding`, `/onboarding/{id}`) each resolving to its own screen |
+| Training list (11) — ✅ Phase 11 | the lock before any request, **`listCalls` stays 0**; a row saying **whose it is, which course, and how far the card has left**, with words as well as colour; a course nobody has sat drawing **no expiry at all** rather than a false one; *Enrol* only for `training.assign`, *Everybody's expiry* only for `training.expiry.view`, the catalogue and the report still readable on `training.view` without being doors of their own; the status filter travelling as a query parameter and **the certificate selector becoming the three booleans the API reads** (`certified`, `expired`, `expiring_soon`) rather than a client-side slice; empty and spinner; 401 and 403 both read as a message, never a blank page |
+| Training detail (11) — ✅ Phase 11 | the lock before any request; **the server's own `certificate_expiry_state` drawn, not re-derived**; a finished course showing status *and* card state side by side; a course that never issues a card drawing **no certificate section**; **the record, not the reader, deciding whether it can still move**; *Complete* only for `training.complete`, *Cancel* drawn but dead for `training.update` alone; the cancel sheet travelling with the remarks it was given; a `certificate_required` course refusing to complete until a card is attached; **completion sending no expiry date so the server dates it**; a row that moved → an error with a way back; a session that may not open it saying so and offering no retry |
+| Enrolment form (5) — ✅ Phase 11 | the `training.assign` door before the form is built; a person **and** a course both required locally; the body carrying person + course + date and nothing the server owns; **a duplicate seat arriving as one sentence about the state** (`409`) rather than a field error; the course picker asking for the **active** half of the catalogue |
+| Expiry report (6) — ✅ Phase 11 | **`training.expiry.view` is a door of its own** and no request is made without it; a row naming course, holder and the day it lapses; an already-lapsed card saying **how long ago, in words**; the window travelling as a query parameter and **opening at ninety days**; empty; a refusal as a message |
+| Compliance (7) — ✅ Phase 11 | `training.view` as the door and no totals asked for without it; **the four certificate buckets read as sentences, not tints**; all seven enrolment states drawn including the empty one; a course nobody has sat still in the catalogue; **a total without a `generated_at` not shown as one**; a refusal with a way back; an unreachable server as a message, not an empty report |
+| Course catalogue (8) — ✅ Phase 11 | the lock before any request; a row carrying code · kind · provider · length as **one joined line**; a retired course still listed **and saying so**; a certificate with no validity saying it **never expires** rather than showing `0`; *Add course* only for `training.create`; status filter as a query parameter; empty; 401/403 as messages |
+| Course form (8) — ✅ Phase 11 | the `training.create` door on a new row and the `training.update` door when editing, **the second never asking for the row**; an empty form refused locally; **touching a field dropping only its own error**; a create body carrying type + code + the certificate promise and never an id; **turning the certificate off sending no validity even when one is typed**; an edit loading the row and sending `status` beside it; a 422 landing under the field it describes |
+| Asset register (11) — ✅ Phase 11 | the lock before any request; a row saying **what it is, who has it, and both its states** — status and condition as two separate words; a held asset naming its holder in the row; a `maintenance` asset saying so in its own words; *Add asset* only for `assets.create`, the hand-over log only for `assets.history.view`; the type filter as a query parameter and **status and condition as two separate filters that both reach the API**; empty and spinner; 401/403 as messages |
+| Asset detail (18) — ✅ Phase 11 | the lock before any request; **status, condition and readiness drawn as three separate words**; **a withheld cost reading `Not shown to your role` rather than `0.00`**, and an arrived cost printed through the one `Money` formatter in the company's currency; a free asset naming its shelf, an out-on-loan one naming holder, date and deadline; *Hand out* only for `assets.assign` and only for an asset nobody holds, *Take back* only for `assets.return` and only for a held one, *Change status* only for `assets.manage`, and **no edit door on a retired asset**; the hand-out needing a holder before it sends; a hand-back carrying the condition that came back; **a status move sending the status chosen, not the one it started on**; a refusal naming the state **staying on screen after the sheet closes**; a moved row → an error with a way back; a session that may not open it saying so |
+| Hand-over log (7) — ✅ Phase 11 | **`assets.history.view` is a door of its own**; an open loan drawing a span with **nothing after the arrow**, a closed one showing both dates and what came back; **an overdue loan saying both words in its own line**; **the log opening on what is out now, with narrowing as a query** rather than an `Everything` default; empty; a refusal as a message |
+| Home / routes — ✅ Phase 11 | the training door under `training.view` alone, the assets door under `assets.view` alone, both side by side when both are held, **neither when neither is**, and *neither the expiry report nor the hand-over log nor the enrol form being a door of its own* — and all thirteen new paths (`/training`, `/training/new`, `/training/expiring`, `/training/compliance`, `/training/programs`, `/training/programs/new`, `/training/programs/{id}`, `/training/{id}`, `/assets`, `/assets/new`, `/assets/history`, `/assets/{id}`, `/assets/{id}/edit`) resolving to their own screens, with `history` and `programs` never read as row ids and `new` never mistaken for an id on either tree; a session without Phase 11 grants refused at **every** door |
 
 > **Don't read `TextFormField.obscureText`** — it is not public. Read the
 > widget's own `TextField.obscureText` field instead.
@@ -1140,6 +1268,60 @@ POST /payroll/process {year: 2026, month: 9} again    → 200, `updated: 0`
    → an employee approves their own loan or certificate → 403 (self-approval)
 ```
 
+### Scenario K — A seat and a shelf are each held once ✅ (Phase 11, tested)
+
+```
+POST /employee-training {employee: 7, training_program: 3, enrollment: today}
+                                                          → 201, enrolled
+   … the same three again                             → 409, and no row:
+        "That person already has a place on this course."
+   … the same two on a DIFFERENT date                 → 201 — recertification
+        is a NEW row; the finished one is never rewritten
+   … the same person, same program, same date arrived
+     by another route                                 → 409 again
+        "That person is already enrolled on this course for that date."
+   → the database holds the last word too:
+     UNIQUE (employee_id, training_program_id, enrollment_date), so a race
+     the pre-read loses still cannot insert twice
+   → completion with a stated expiry                  → stored verbatim
+   → completion with none, and a program validity:60  → issue + 60 days,
+        dated by the SERVER, never by the phone
+   → a certificate_required program completed with neither
+     an issue date nor a file                         → 422 naming the field
+   → a terminal row completed or cancelled again      → 409 naming the STATE
+   → the card's bytes                                 → private store, and no
+        payload anywhere contains `certificate_path`
+   → GET /employee-training/{id}/file for your own    → 200, no-store
+   … for a colleague's, without
+     training.certificates.view                       → 403
+        (training.manage does NOT open it)
+
+POST /assets/9/assign {employee: 7}                       → 201, status=assigned
+   … again, any other holder                               → 409, one open row
+   → the open row is found under SELECT … FOR UPDATE, so two writers racing
+     for the same laptop both lose rather than both winning
+PATCH /assets/9/status {status: retired}  (still held)     → 409 — the
+     open-assignment rule is consulted BEFORE Asset::TRANSITIONS
+   → an offered move off the transition table              → 409
+   → `assigned` is never an offered target: it is a projection, not a choice
+POST /assets/9/return {returned_condition: poor}           → the SAME row is
+     closed (assigned_date and assigned_by untouched), current_condition
+     moves to the returned one, status → maintenance, and its remarks
+     REPLACE the hand-over's
+   → a return with no remarks                              → the hand-over's
+     are still there — silence cannot edit what was said
+   → a return for an asset nobody holds                    → 409
+POST /asset-assignments                                    → 404 — there is no
+     second door into the history table
+
+   → assets.view without assets.manage                     → only your own kit,
+     and `purchase_cost` ABSENT from the JSON (never null)
+   → GET /asset-assignments without assets.history.view    → only the rows you
+     are party to; your own still reads
+   → GET /training-compliance without training.manage      → totals over your
+     own rows only — the filter runs BEFORE the fold
+```
+
 ---
 
 ## 7. Running Tests
@@ -1235,13 +1417,14 @@ A phase is complete only when:
 |---|---|
 | Test strategy (this document) | ✅ Written |
 | Development/testing database split (`hrms_laravel` vs `hrms_testing`) | ✅ Phase 2 safety cleanup |
-| Backend test suite | ✅ **553 passed (3674 assertions)** — 75 Phase 2 + 45 Phase 3 + 70 Phase 4 + 131 Phase 5 (incl. selfie hardening) + 62 Phase 6 (22 `LeaveRequestTest` · 11 `LeaveCertificateTest` · 13 `OvertimeTest` · 9 `TimesheetTest` · 7 `HolidayApiTest`) + **42 Phase 7** (19 `SiteActivityReportTest` · 15 `DailySiteReportTest` · 8 `DailySiteReportPdfTest`) + **44 Phase 8** (13 `PayrollTest` · 11 `LoanTest` · 9 `SalaryDocumentTest` · **11 `PayrollRepaymentTest`**) + **32 Phase 9** (**22 `ExpenseTest`** · **10 `ExpenseReceiptTest`**) + **8 currency pass** (**8 `ClientSettingsTest`**) + **44 Phase 10** (**20 `EmployeeDocumentTest`** · **12 `OnboardingTest`** · **6 `DocumentExpiryScanTest`** · **6 `EmployeeBankAccountTest`**) |
-| Flutter test suite | ✅ **551 passed** — 89 Phases 3–4 + 87 Phase 5 + 39 Phase 6 + 88 Phase 7 + **75 Phase 8** + **76 Phase 9** (70 expense · 6 home/routes) + **11 currency pass** (7 `client_settings_test` · 4 expense form) + **86 Phase 10** (documents · onboarding · 6 home/routes) |
+| Backend test suite | ✅ **609 passed (4103 assertions)** — 75 Phase 2 + 45 Phase 3 + 70 Phase 4 + 131 Phase 5 (incl. selfie hardening) + 62 Phase 6 (22 `LeaveRequestTest` · 11 `LeaveCertificateTest` · 13 `OvertimeTest` · 9 `TimesheetTest` · 7 `HolidayApiTest`) + **42 Phase 7** (19 `SiteActivityReportTest` · 15 `DailySiteReportTest` · 8 `DailySiteReportPdfTest`) + **44 Phase 8** (13 `PayrollTest` · 11 `LoanTest` · 9 `SalaryDocumentTest` · **11 `PayrollRepaymentTest`**) + **32 Phase 9** (**22 `ExpenseTest`** · **10 `ExpenseReceiptTest`**) + **8 currency pass** (**8 `ClientSettingsTest`**) + **44 Phase 10** (**20 `EmployeeDocumentTest`** · **12 `OnboardingTest`** · **6 `DocumentExpiryScanTest`** · **6 `EmployeeBankAccountTest`**) + **56 Phase 11** (**23 `TrainingManagementTest`** · **4 `TrainingComplianceTest`** · **7 `TrainingExpiryScanTest`** · **16 `AssetManagementTest`** · **6 `AssetAssignmentHistoryTest`**) |
+| Flutter test suite | ✅ **654 passed** — 89 Phases 3–4 + 87 Phase 5 + 39 Phase 6 + 88 Phase 7 + **75 Phase 8** + **76 Phase 9** (70 expense · 6 home/routes) + **11 currency pass** (7 `client_settings_test` · 4 expense form) + **86 Phase 10** (documents · onboarding · 6 home/routes) + **103 Phase 11** (56 training screens · 36 asset screens · 6 home · 5 routes) |
 | Phase 6 registration checks | ✅ `php artisan route:list` (86 route definitions at that point) · `php artisan schedule:list` shows `EnforceSickCertificateDeadlines` |
 | Phase 7 registration checks | ✅ `php artisan route:list` — **104 route definitions under `api/*`, 109 registered** (18 Phase 7) · `php artisan migrate:status` all `Ran` · `composer validate` valid · `vendor\bin\pint --test` clean |
 | Phase 8 registration checks | ✅ `php artisan route:list` — **140 route definitions under `api/*`, 145 registered** (36 Phase 8) · `php artisan migrate:status` all `Ran` (48 tables / 41 migrations) · `composer validate` valid · `vendor\bin\pint --test` clean · `dart format lib test` clean · `flutter analyze` clean |
 | Phase 9 registration checks | ✅ `php artisan route:list` — **153 route definitions under `api/*`, 158 registered** (13 new under `expense`) · `php artisan migrate:status` all `Ran` (**44** migrations) · `composer validate` valid · `vendor\bin\pint --test` **PASS (375 files)** · `dart format .` clean (**216 files**) · `flutter analyze` clean · `flutter test` **454 passed** · `php artisan test` **499 passed (3251 assertions)**, all on `hrms_testing` |
 | Phase 10 registration checks | ✅ `php artisan route:list` — **170 route definitions under `api/*`, 175 registered** (16 new: documents, onboarding, bank-account) · `php artisan migrate:status` all `Ran` (**49** migrations / **56** tables) · `composer validate` valid · `vendor\bin\pint --test` **PASS (419 files)** · `dart format .` clean (**246 files**) · `flutter analyze` clean (**No issues found**) · `flutter test` **551 passed** · `php artisan test` **553 passed (3674 assertions)**, all on `hrms_testing` |
+| Phase 11 registration checks | ✅ `php artisan route:list` — **194 route definitions under `api/*`, 199 registered** (24 new: training types, programs, enrolments, certificates, compliance, asset types, register, hand-over, returns, status, history) · `php artisan migrate:status` all `Ran` (**55** migrations / **62** tables) · `php artisan schedule:list` shows `ScanTrainingExpiries` at `20 6 * * *` · `php artisan db:seed` OK · `composer validate` valid · `vendor\bin\pint --test` **PASS (474 files)** · `dart format .` clean (**285 files**) · `flutter analyze` clean (**No issues found**) · `flutter test` **654 passed** · `php artisan test` **609 passed (4103 assertions)**, all on `hrms_testing` |
 | Currency configuration checks | ✅ `php artisan route:list` — **154 route definitions under `api/*`, 159 registered** (1 new: `GET client-settings`) · `php artisan migrate:status` all `Ran` (**44** migrations) · `composer validate` valid · `vendor\bin\pint --test` **PASS (377 files)** · `dart format .` clean (**218 files**) · `flutter analyze` clean · `flutter test` **465 passed** · `php artisan test` **509 passed (3288 assertions)**, all on `hrms_testing` (never `hrms_laravel`) — the configured default, the form's default, a claim keeping its own code, and a code outside `system.supported_currencies` refused |
 | Payroll financial-safety hardening checks | ✅ `php artisan test` **469 passed** (all on `hrms_testing`, never `hrms_laravel`) · `php artisan migrate:status` all `Ran` · `composer validate` valid · `vendor\bin\pint --test` clean · `dart format .` clean · `flutter analyze` clean · `flutter test` **378 passed** |
 | `flutter analyze` / `pint --test` / `composer validate` clean | ✅ |

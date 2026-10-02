@@ -3,11 +3,14 @@
 namespace App\Support;
 
 use App\Models\Allowance;
+use App\Models\Asset;
+use App\Models\AssetAssignment;
 use App\Models\Attendance;
 use App\Models\DailySiteReport;
 use App\Models\Employee;
 use App\Models\EmployeeDocument;
 use App\Models\EmployeeSiteAssignment;
+use App\Models\EmployeeTraining;
 use App\Models\Expense;
 use App\Models\Holiday;
 use App\Models\LeaveRequest;
@@ -1534,6 +1537,225 @@ final class Visibility
         }
 
         return $user->can('documents.manage');
+    }
+
+    /* ------------------------------------------------- Phase 11: training */
+
+    /*
+    | Training asks the same two questions employee documents ask, and for
+    | the same reason: a course history and a safety certificate say
+    | something about a person that a project manager's right to manage
+    | them does not cover.
+    |
+    | So the shape repeats deliberately rather than by accident:
+    |
+    |   `training.view`   the coarse gate — every role holds it, because
+    |                     every employee should read their own course
+    |                     history, and it is therefore worth nothing on
+    |                     its own.
+    |   `training.manage` the ONLY door onto a colleague's row. Not
+    |                     `employees.view`, not being their reporting
+    |                     manager, not `attendance.manage`.
+    |
+    | The certificate is narrower again — see maySeeCertificateFor(): the
+    | list of courses somebody sat and the PDF of the card they were
+    | handed are two different acts, exactly as claims and receipts are.
+    */
+
+    /**
+     * May this user read somebody *else's* training record?
+     */
+    public static function mayViewOthersTrainings(User $user): bool
+    {
+        if (! $user->can('training.view')) {
+            return false;
+        }
+
+        return $user->can('training.manage');
+    }
+
+    /**
+     * Restrict a training query to what this user may see.
+     *
+     * The query half of EmployeeTrainingPolicy::view(), asked in the same
+     * words so a `show` cannot answer "yes" to a row the index hid.
+     *
+     * @param  Builder<EmployeeTraining>  $query
+     * @return Builder<EmployeeTraining>
+     */
+    public static function employeeTrainingsFor(Builder $query, User $user)
+    {
+        if (self::mayViewOthersTrainings($user)) {
+            return $query;
+        }
+
+        // Fails closed to `0` rather than to a predicate that matches
+        // nothing — indexable, and honest about what it means when the
+        // account has no employee record: no record, no course history.
+        return $query->where('employee_trainings.employee_id', $user->employee?->id ?? 0);
+    }
+
+    /**
+     * Does this one enrolment fall inside what the reader may see?
+     */
+    public static function employeeTrainingIsVisible(User $user, EmployeeTraining $training): bool
+    {
+        if ($user->employee?->id === $training->employee_id) {
+            return true;
+        }
+
+        return self::mayViewOthersTrainings($user);
+    }
+
+    /**
+     * May this user open the *certificate file* behind this enrolment?
+     *
+     * Two doors in sequence rather than one, because being handed the list
+     * of courses somebody sat is not the same act as being handed the card
+     * that came out of one:
+     *
+     *  - your own — `training.view`, which is what lets an employee show a
+     *    site supervisor their working-at-heights card;
+     *  - somebody else's — `training.certificates.view`, held by HR alone.
+     *
+     * Deliberately NOT `training.manage`. A role could one day be trusted
+     * to correct somebody's enrolment dates without being handed every
+     * certificate they hold, and one permission that quietly opened both
+     * would make that impossible to express.
+     */
+    public static function maySeeCertificateFor(User $user, EmployeeTraining $training): bool
+    {
+        if ($user->employee?->id === $training->employee_id) {
+            return $user->can('training.view');
+        }
+
+        return $user->can('training.certificates.view');
+    }
+
+    /**
+     * May this user put this particular person on a course?
+     *
+     * Asked by StoreEmployeeTrainingRequest once the payload has said who
+     * the enrolment is for — an `authorize()` on the policy receives only
+     * the class, not the target.
+     *
+     * **There is no self-service door.** `training.assign` alone. The
+     * brief is explicit that an employee "cannot modify HR-managed
+     * training unless explicitly allowed", and enrolling yourself in the
+     * course that certifies you for a job is exactly the modification it
+     * means. A role that wants an employee to request a course should say
+     * so with its own permission, not by widening this one.
+     */
+    public static function mayAssignTrainingFor(User $user, Employee $employee): bool
+    {
+        return $user->can('training.assign');
+    }
+
+    /* ---------------------------------------------------- Phase 11: assets */
+
+    /*
+    | Assets are the third module in this file with the "coarse gate plus
+    | a narrower row rule" shape, and the reason is the same each time:
+    | `assets.view` has to be held by every employee (you cannot show
+    | somebody the laptop on their desk behind a permission they lack),
+    | which makes it worth nothing on its own.
+    |
+    | So the row rule is what does the work: without `assets.manage` you
+    | see the assets you have actually been handed — current and past —
+    | and nothing of the pool. With it you see everything.
+    |
+    | Deliberately NOT `employees.view`: a manager is not by that fact
+    | entitled to an inventory of what every report carries, and the
+    | brief asks for site/project visibility "only if explicitly granted"
+    | — which is exactly what `assets.manage` (absent from those roles)
+    | would be.
+    */
+
+    /**
+     * May this user see assets that are not assigned to them?
+     */
+    public static function mayViewOthersAssets(User $user): bool
+    {
+        if (! $user->can('assets.view')) {
+            return false;
+        }
+
+        return $user->can('assets.manage');
+    }
+
+    /**
+     * Restrict an asset query to what this user may see.
+     *
+     * Own hand-overs, current *and* returned. A laptop somebody had last
+     * year is still theirs to recognise in their own history; hiding it
+     * would make "your assignment history" a phrase with a hole in it.
+     *
+     * @param  Builder<Asset>  $query
+     * @return Builder<Asset>
+     */
+    public static function assetsFor(Builder $query, User $user)
+    {
+        if (self::mayViewOthersAssets($user)) {
+            return $query;
+        }
+
+        $employeeId = $user->employee?->id ?? 0;
+
+        return $query->whereIn('assets.id', function ($sub) use ($employeeId) {
+            $sub->select('asset_id')
+                ->from('asset_assignments')
+                ->where('employee_id', $employeeId);
+        });
+    }
+
+    /**
+     * Does this one asset fall inside what the reader may see?
+     */
+    public static function assetIsVisible(User $user, Asset $asset): bool
+    {
+        if (self::mayViewOthersAssets($user)) {
+            return true;
+        }
+
+        $employeeId = $user->employee?->id ?? 0;
+
+        return AssetAssignment::query()
+            ->where('asset_id', $asset->id)
+            ->where('employee_id', $employeeId)
+            ->exists();
+    }
+
+    /**
+     * Restrict an assignment-history query to what this user may see.
+     *
+     * `assets.history.view` is the cross-employee log — who has held
+     * anything, ever. Without it a caller reads only rows for their own
+     * employee record, which is the same ownership rule the asset list
+     * above applies, asked separately because the two lists have different
+     * totals and one cannot be derived from the other.
+     *
+     * @param  Builder<AssetAssignment>  $query
+     * @return Builder<AssetAssignment>
+     */
+    public static function assetAssignmentsFor(Builder $query, User $user)
+    {
+        if ($user->can('assets.history.view')) {
+            return $query;
+        }
+
+        return $query->where('asset_assignments.employee_id', $user->employee?->id ?? 0);
+    }
+
+    /**
+     * Does this one hand-over fall inside what the reader may see?
+     */
+    public static function assetAssignmentIsVisible(User $user, AssetAssignment $assignment): bool
+    {
+        if ($user->employee?->id === $assignment->employee_id) {
+            return true;
+        }
+
+        return $user->can('assets.history.view');
     }
 
     /* ------------------------------------------------------------ helpers */

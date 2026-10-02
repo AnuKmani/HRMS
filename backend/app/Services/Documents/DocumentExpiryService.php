@@ -6,6 +6,7 @@ use App\Events\EmployeeDocumentExpired;
 use App\Events\EmployeeDocumentExpiring;
 use App\Models\DocumentType;
 use App\Models\EmployeeDocument;
+use App\Services\Expiry\ScansExpiringRows;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -47,20 +48,28 @@ use Illuminate\Support\Facades\DB;
  */
 class DocumentExpiryService
 {
-    /**
-     * @return array{expired: int, warned: int}
-     */
-    public function scan(): array
-    {
-        return [
-            'expired' => $this->expirePassed(),
-            'warned' => $this->raiseWarnings(),
-        ];
-    }
+    /*
+    | The two passes themselves are ScansExpiringRows: select the ids that
+    | need acting on, then act on each one in its own transaction. What is
+    | *not* in the trait is everything that has to differ — which statuses
+    | lapse, which event class is raised, and the warning window being a
+    | property of a document *type* rather than a global. See the trait for
+    | why the split falls where it does.
+    */
+    use ScansExpiringRows;
 
-    private function expirePassed(): int
+    /**
+     * The ids whose date has already passed.
+     *
+     * Selects rows that are not yet `expired` and turns them into rows that
+     * are, which is why a second run returns an empty set and costs no
+     * transactions at all.
+     *
+     * @return iterable<int>
+     */
+    protected function expirableIds(): iterable
     {
-        $due = EmployeeDocument::query()
+        return EmployeeDocument::query()
             ->whereIn('status', [
                 EmployeeDocument::STATUS_PENDING,
                 EmployeeDocument::STATUS_VALID,
@@ -71,19 +80,9 @@ class DocumentExpiryService
             ->where('expiry_date', '<', Carbon::today()->toDateString())
             ->orderBy('id')
             ->pluck('id');
-
-        $count = 0;
-
-        foreach ($due as $id) {
-            if ($this->expireOne((int) $id)) {
-                $count++;
-            }
-        }
-
-        return $count;
     }
 
-    private function expireOne(int $id): bool
+    protected function attemptExpire(int $id): bool
     {
         return (bool) DB::transaction(function () use ($id) {
             $document = EmployeeDocument::query()
@@ -123,11 +122,16 @@ class DocumentExpiryService
         });
     }
 
-    private function raiseWarnings(): int
+    /**
+     * The ids inside their warning window that have not been reported yet.
+     *
+     * @return iterable<int>
+     */
+    protected function warnableIds(): iterable
     {
         $today = Carbon::today();
 
-        $due = EmployeeDocument::query()
+        return EmployeeDocument::query()
             ->whereIn('status', [
                 EmployeeDocument::STATUS_PENDING,
                 EmployeeDocument::STATUS_VALID,
@@ -143,19 +147,9 @@ class DocumentExpiryService
             ->with('documentType')
             ->orderBy('id')
             ->pluck('id');
-
-        $count = 0;
-
-        foreach ($due as $id) {
-            if ($this->raiseWarning((int) $id)) {
-                $count++;
-            }
-        }
-
-        return $count;
     }
 
-    private function raiseWarning(int $id): bool
+    protected function attemptWarn(int $id): bool
     {
         return (bool) DB::transaction(function () use ($id) {
             $document = EmployeeDocument::query()

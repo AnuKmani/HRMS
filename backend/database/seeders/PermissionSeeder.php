@@ -283,6 +283,94 @@ class PermissionSeeder extends Seeder
             'onboarding.view',
             'onboarding.manage',
         ],
+        /*
+        | Training (Phase 11).
+        |
+        | Eight permissions, and the shape is deliberately the one
+        | employee documents established, because training records are the
+        | same *kind* of thing about a person: their competence, their
+        | certificates, and in a construction company rather often the
+        | paper that decides whether they may stand on a site at all.
+        |
+        | `training.view` is the COARSE gate — may this role open the
+        | training screen at all? It is held by every role, because every
+        | employee should be able to read their own course history, and it
+        | is therefore worth nothing on its own. Visibility narrows every
+        | row to the caller's own unless the same account also holds
+        | `training.manage`.
+        |
+        | That narrowing is what stops a Project Manager reading a
+        | report's certificates merely because they manage that person.
+        | The brief asks for PM / Site Supervisor to see *compliance for
+        | their authorised workforce* — and that is exactly what they get:
+        | `training.view` for their own rows, and nothing about anybody
+        | else's, because `training.manage` is not in their grant. It also
+        | keeps training from becoming a side door into documents: a
+        | certificate file needs `training.certificates.view`, which is
+        | HR's alone, so compliance reading never opens somebody's
+        | Emirates ID by accident.
+        |
+        | `training.create` / `.update` are the catalogue and the
+        | correction of a record's details. `training.assign` is the act of
+        | putting somebody on a course, and `training.complete` is the act
+        | of recording that they finished it — separate because they are
+        | separate decisions, and an operator who may enrol but not pass
+        | can now be expressed.
+        |
+        | `training.certificates.view` is a third segment, for the reason
+        | `expenses.receipts.view` is one: a certificate is a file about a
+        | person, and being handed the *list* of their courses is not the
+        | same act as being handed the PDF. Held by HR alone; the person it
+        | is about reads their own back through ownership.
+        |
+        | `training.expiry.view` is the cross-employee "whose certificate
+        | is about to lapse" report — a question about the whole workforce,
+        | so a permission of its own rather than a flag on `.view`.
+        */
+        'training' => [
+            'training.view',
+            'training.create',
+            'training.update',
+            'training.manage',
+            'training.assign',
+            'training.complete',
+            'training.certificates.view',
+            'training.expiry.view',
+        ],
+        /*
+        | Company assets (Phase 11).
+        |
+        | Seven permissions, and the same "coarse gate plus a narrower
+        | row rule" shape as documents: `assets.view` is held by every
+        | role because every employee should be able to see the laptop on
+        | their desk, and Visibility then narrows the list to assets
+        | actually assigned to them unless `assets.manage` is held too.
+        |
+        | `assets.create` / `.update` are the master record. `assets.assign`
+        | and `assets.return` are the two hand-over acts and are separate
+        | permissions because they are different people in practice: a site
+        | office may hand a tool out while only HR writes an asset off.
+        |
+        | `assets.manage` is status control — maintenance, damaged, lost,
+        | retired — plus the row-scope door and the door on
+        | `purchase_cost`. Cost is deliberately not visible to a holder of
+        | `assets.view` alone: what a laptop cost is a finance fact about a
+        | company asset, not a fact the person carrying it needs.
+        |
+        | `assets.history.view` is the cross-employee assignment history.
+        | A holder of `assets.view` alone reads their *own* hand-overs
+        | through ownership, so the history of who else has held anything
+        | needs this on top.
+        */
+        'assets' => [
+            'assets.view',
+            'assets.create',
+            'assets.update',
+            'assets.manage',
+            'assets.assign',
+            'assets.return',
+            'assets.history.view',
+        ],
         'expenses' => [
             'expenses.view',
             'expenses.create',

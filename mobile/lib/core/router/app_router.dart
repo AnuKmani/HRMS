@@ -3,6 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/attendance/presentation/attendance_screen.dart';
+import '../../features/assets/presentation/asset_detail_screen.dart';
+import '../../features/assets/presentation/asset_form_screen.dart';
+import '../../features/assets/presentation/asset_history_screen.dart';
+import '../../features/assets/presentation/asset_list_screen.dart';
 import '../../features/auth/auth_controller.dart';
 import '../../features/auth/auth_state.dart';
 import '../../features/auth/login_screen.dart';
@@ -56,10 +60,17 @@ import '../../features/site_reports/presentation/site_activity_form_screen.dart'
 import '../../features/site_reports/presentation/site_activity_list_screen.dart';
 import '../../features/timesheet/presentation/timesheet_detail_screen.dart';
 import '../../features/timesheet/presentation/timesheets_list_screen.dart';
+import '../../features/training/presentation/training_compliance_screen.dart';
+import '../../features/training/presentation/training_detail_screen.dart';
+import '../../features/training/presentation/training_enroll_screen.dart';
+import '../../features/training/presentation/training_expiry_screen.dart';
+import '../../features/training/presentation/training_list_screen.dart';
+import '../../features/training/presentation/training_program_form_screen.dart';
+import '../../features/training/presentation/training_programs_screen.dart';
 
 /// The app's routes, one redirect, and a guard driven entirely by auth state.
 ///
-/// Eight phases of work now sit behind it. Two rules shape how they are
+/// Eleven phases of work now sit behind it. Two rules shape how they are
 /// laid out:
 ///
 ///  - **`new` before `:id`, and `:id` only matches digits.** A route
@@ -495,6 +506,91 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/onboarding/:id',
         builder: (context, state) =>
             OnboardingDetailScreen(employeeId: idOf(state)),
+      ),
+
+      // Phase 11: training and assets. Thirteen routes — eight for
+      // training, five for the register — and both trees obey the same two
+      // rules as every group above:
+      //
+      //  - **every fixed path is declared before `:id`.** `go_router` takes
+      //    the first route that matches, and `:id` is read with
+      //    `int.parse`, so `/training/programs` or `/assets/history`
+      //    declared after `/training/:id` would be swallowed by a route
+      //    that cannot parse its own parameter. The braces are the belt;
+      //    the ordering is the braces.
+      //
+      //  - **no route guards anything on a permission.** Each screen asks
+      //    `PermissionScope` what to offer, and each request is checked
+      //    again by the API. A redirect hiding a URL would be a second,
+      //    weaker authorisation system to keep in step with the first.
+      //
+      // Two asymmetries are deliberate:
+      //
+      //  - `/training/:id` has no `/edit`. An enrolment is not a document
+      //    you correct in a form; it is a row with a status, and the acts
+      //    on it are completing it and cancelling it, both of which happen
+      //    from the detail screen where the refusal can be shown next to
+      //    the thing it refused.
+      //
+      //  - `/assets/history` is a *different question* behind a different
+      //    permission (`assets.history.view` on top of `assets.view`), so
+      //    it is a first-class path rather than a filter on `/assets` — a
+      //    filter would have put the cross-employee log behind the same
+      //    door as the register itself.
+      GoRoute(
+        path: '/training',
+        builder: (context, state) => const TrainingListScreen(),
+      ),
+      GoRoute(
+        path: '/training/new',
+        builder: (context, state) => const TrainingEnrollScreen(),
+      ),
+      GoRoute(
+        path: '/training/expiring',
+        builder: (context, state) => const TrainingExpiryScreen(),
+      ),
+      GoRoute(
+        path: '/training/compliance',
+        builder: (context, state) => const TrainingComplianceScreen(),
+      ),
+      GoRoute(
+        path: '/training/programs',
+        builder: (context, state) => const TrainingProgramsScreen(),
+      ),
+      GoRoute(
+        path: '/training/programs/new',
+        builder: (context, state) => const TrainingProgramFormScreen(),
+      ),
+      GoRoute(
+        path: '/training/programs/:id',
+        builder: (context, state) =>
+            TrainingProgramFormScreen(programId: idOf(state)),
+      ),
+      GoRoute(
+        path: '/training/:id',
+        builder: (context, state) =>
+            TrainingDetailScreen(trainingId: idOf(state)),
+      ),
+
+      GoRoute(
+        path: '/assets',
+        builder: (context, state) => const AssetListScreen(),
+      ),
+      GoRoute(
+        path: '/assets/new',
+        builder: (context, state) => const AssetFormScreen(),
+      ),
+      GoRoute(
+        path: '/assets/history',
+        builder: (context, state) => const AssetHistoryScreen(),
+      ),
+      GoRoute(
+        path: '/assets/:id',
+        builder: (context, state) => AssetDetailScreen(assetId: idOf(state)),
+      ),
+      GoRoute(
+        path: '/assets/:id/edit',
+        builder: (context, state) => AssetFormScreen(assetId: idOf(state)),
       ),
     ],
   );

@@ -1,24 +1,25 @@
 # Database Design
 
-> **Status:** Phase 10 — core schema, GPS attendance and site movement, the
-> report families, the payroll vertical slice, the expense vertical slice and
-> now the employee-document and onboarding slice. Laravel's base tables plus
+> **Status:** Phase 11 — core schema, GPS attendance and site movement, the
+> report families, the payroll vertical slice, the expense vertical slice,
+> the employee-document and onboarding slice and now the **training and
+> asset slice**. Laravel's base tables plus
 > 10 Phase 2 migrations, the Phase 3 `users.status` column, the two Phase 5
 > migrations, the nine Phase 6 migrations, the seven Phase 7 migrations, the
 > seven Phase 8 migrations, the repayment-floor migration that adds
-> `loan_installments.deducted_amount`, the three Phase 9 expense migrations
-> and the five Phase 10 migrations all exist: `settings`,
+> `loan_installments.deducted_amount`, the three Phase 9 expense migrations,
+> the five Phase 10 migrations and the six Phase 11 migrations all exist:
+> `settings`,
 > `departments`, `designations`, `shifts`, `projects`, `employees`, `sites`,
 > `employee_site_assignments`, `attendances`, `site_visits`, the
 > leave/timesheet/overtime/holiday tables, **the seven site-report tables
 > (§2.9)**, **the seven payroll tables (§2.7)**, **the three expense
-> tables (§2.10)** and **the five document / onboarding tables (§2.11)**,
-> plus the `spatie/laravel-permission` RBAC tables — **56 tables across 49
+> tables (§2.10)**, **the five document / onboarding tables (§2.11)** and
+> **the six training / asset tables (§2.11a)**,
+> plus the `spatie/laravel-permission` RBAC tables — **62 tables across 55
 > migrations** (Phase 9 closed at 51 tables across 44 migrations; Phase 10
-> adds five of each). Tables for later phases (`trainings`,
-> `employee_trainings`, `assets`, `asset_assignments`, …) are **design only**
-> and have not been created — training and assets were cut out of Phase 10's
-> approved scope. `hrms_testing` mirrors this schema for the test suite.
+> added five of each, Phase 11 six of each). `hrms_testing` mirrors this
+> schema for the test suite.
 
 **DBMS:** MariaDB 10.4.28 (XAMPP)
 **Charset:** `utf8mb4` / collation `utf8mb4_unicode_ci`
@@ -115,8 +116,10 @@ document types are *configurable by HR*. An `ENUM` requires a schema change to a
 | `employees` | The central master record |
 | `employee_documents` | Passport, visa, Emirates ID, contract, certificates + expiry dates |
 | `employee_onboarding` | Onboarding status and missing-document tracking |
-| `trainings` | Training programmes |
+| `training_types` | The training vocabulary — codes an operator may add to |
+| `training_programs` | A course: type, code, provider, duration, certificate promise |
 | `employee_trainings` | Enrollment, completion, certificate + certificate expiry |
+| `asset_types` | The asset vocabulary — codes an operator may add to |
 | `assets` | Company asset catalogue (laptop, phone, tools, safety equipment) |
 | `asset_assignments` | Asset → employee, with dates, condition, status (history preserved) |
 
@@ -785,6 +788,181 @@ never a bare 403.
 
 ---
 
+### 2.11a Training & assets — Phase 11 ✅
+
+| Table | Purpose |
+|---|---|
+| `training_types` | The training vocabulary — codes an operator may add to |
+| `training_programs` | A course: type, code, provider, duration, certificate promise |
+| `employee_trainings` | Enrollment, completion, certificate + certificate expiry |
+| `asset_types` | The asset vocabulary — codes an operator may add to |
+| `assets` | Company asset catalogue (laptop, phone, tools, safety equipment) |
+| `asset_assignments` | Asset → employee, with dates, condition, status (history preserved) |
+
+#### Two vocabularies, and nothing hard-coded behind them
+
+`training_types` and `asset_types` are the same table twice: `id`,
+**`UNIQUE code`**, `name`, `description`, `status`, timestamps, index on
+`name`. That sameness is the point — a service, a validator, a screen and a
+test may read them but must never contain them, so a deployment can add
+`WORKING_AT_HEIGHTS` or `POWER_TOOLS` without a deploy.
+
+```
+training_types ──1──* training_programs ──1──* employee_trainings *──1── employees
+asset_types     ──1── assets                ──1──* asset_assignments *──1── employees
+```
+
+**Eight seeded training types** (`TrainingTypeSeeder`): `SAFETY_INDUCTION`,
+`HSE`, `WORKING_AT_HEIGHTS`, `FIRST_AID`, `ELECTRICAL_SAFETY`,
+`EQUIPMENT_CERTIFICATION`, `TECHNICAL`, `OTHER`. **Seven seeded asset types**
+(`AssetTypeSeeder`): `LAPTOP`, `MOBILE_PHONE`, `TABLET`, `TOOL`,
+`SAFETY_EQUIPMENT`, `MEASURING_EQUIPMENT`, `OTHER`. Both seeders are
+**upserts on `code`**, so re-seeding renames rather than duplicates.
+
+> **`training_programs` is deliberately not seeded.** A type is vocabulary —
+> eight rows that mean the same thing on every deployment — while a program
+> is a course this company actually runs, with this provider, on this date.
+> Seeding programs would mean every fresh install opens with seven courses
+> nobody runs and a compliance screen that reports on them. The seeder for
+> types is configuration; there is no seeder for programs, on purpose.
+
+#### The program, and the promise it makes
+
+`training_programs` holds `training_type_id` (**RESTRICT**), **`UNIQUE code`**,
+`name`, `description`, `provider`, `duration_days`
+(`unsignedSmallInteger`, nullable), `certificate_required`
+(`bool`, default `false`) and `certificate_validity_days`
+(`unsignedSmallInteger`, nullable).
+
+> **`certificate_validity_days` is days, and `NULL` means *never lapses*.**
+> `0` would mean "lapses the instant it is issued" — a different claim one
+> character away — so no code path ever compares it to zero.
+
+`status` (`active` / `retired`) is a **string with constants, no `ENUM`**, per
+the standing rule. A retired course keeps every enrolment it ever took;
+`retired` stops new bookings and changes nothing about the past.
+
+#### The enrolment ledger
+
+`employee_trainings` is a **ledger, not a list of names**:
+
+| Column | Type | Note |
+|---|---|---|
+| `employee_id` | FK `restrictOnDelete` | the person |
+| `training_program_id` | FK `restrictOnDelete` | the course |
+| `enrollment_date` | `date` | **part of the unique key** |
+| `training_date` | `date NULL` | when they are to sit it |
+| `completion_date` | `date NULL` | when they did |
+| `trainer` | `string(200) NULL` | who ran it |
+| `status` | `string(20)` default `enrolled` | `enrolled`, `scheduled`, `in_progress`, `completed`, `failed`, `cancelled`, `expired` |
+| `result` | `string(60) NULL` | pass / distinction / whatever the card says |
+| `certificate_number` | `string(120) NULL` | |
+| `certificate_issue_date` | `date NULL` | |
+| `certificate_expiry_date` | `date NULL` | **`NULL` = the program has no validity, or nobody filled it in** |
+| `certificate_path` | `string(500) NULL` | **private pointer**, never a URL |
+| `certificate_original_name` | `string(255) NULL` | shown on download only |
+| `certificate_mime_type` | `string(120) NULL` | |
+| `certificate_size` | `unsignedBigInteger NULL` | |
+| `remarks` | `string(1000) NULL` | |
+| `created_by` | FK `nullOnDelete` | who booked it |
+| `expiry_notified_at` | `timestamp NULL` | the scan's idempotency marker |
+
+**The unique key is `UNIQUE (employee_id, training_program_id,
+enrollment_date)`**, named by hand `employee_trainings_enrolment_unique`. It
+makes the same booking impossible twice *on the same date* while still
+allowing the same person to sit the same course again next year — which is
+what recertification is. The service still pre-reads to produce a **409 with
+a sentence a person can act on** rather than a raw `23000`; the index is what
+makes that pre-read safe to trust.
+
+`expiry_notified_at` is the same idempotency marker
+`employee_documents.expiry_notified_at` uses: read by the next run, written
+after the events are raised, so a doubled schedule raises one event per
+record per window rather than two.
+
+> **The seven statuses are `OPEN` or terminal on the model** (`isOpen()` /
+> `isTerminal()` / `isCompletable`), so the API and the screen cannot
+> disagree about which states may still move. `enrolled`, `scheduled` and
+> `in_progress` are open; `completed`, `failed`, `cancelled` and `expired`
+> are terminal.
+
+#### The register
+
+`assets` holds `asset_code` (**`UNIQUE`** — the barcode is the route key),
+`asset_type_id` (**RESTRICT**), `name`, `description`, `serial_number`,
+`manufacturer`, `model`, `purchase_date`, **`purchase_cost`
+(`decimal(12,2)`, nullable)**, **`current_condition`**, **`status`**,
+`notes`.
+
+Two columns where one would be tidier, on purpose:
+
+| Column | Values | Question it answers |
+|---|---|---|
+| `status` | `available`, `assigned`, `maintenance`, `damaged`, `lost`, `retired` | *what may happen to it next* |
+| `current_condition` | `new`, `good`, `fair`, `poor` | *what state is it in* |
+
+An asset is very often both `assigned` and `fair`. One column would force a
+choice between them, and the choice would be wrong for somebody.
+
+`status` is a **projection of `asset_assignments`** rather than an opinion of
+its own: `AssetService::assign()` opens a row and moves it to `assigned`;
+`returnAsset()` closes it and moves it to `maintenance` when the returned
+condition was `poor`, otherwise back to `available`. `Asset::TRANSITIONS`
+holds the legal moves, and `changeStatus()` checks the open-assignment rule
+**before** consulting the table — so a held asset can never be retired out
+from under its holder.
+
+`purchase_cost` is omitted from `AssetResource` unless the reader holds
+`assets.manage`. **An absent key means "not your business"; a `null` would
+mean "it was free."**
+
+#### The history
+
+`asset_assignments` is **append-only in spirit and updated in fact**: a
+return writes into the *same* row that was opened (`returned_date`,
+`returned_condition`, `returned_by`, `status → returned`), because the row
+*is* the hand-over, not a log line about it. Its `remarks` **replace** the
+hand-over's; a return filed with no remarks leaves the hand-over's standing,
+so nobody can erase what was said at hand-over time by being quiet at
+return time.
+
+| Column | Type | Note |
+|---|---|---|
+| `asset_id` / `employee_id` | FK `restrictOnDelete` | what, and to whom |
+| `assigned_date` | `date` | |
+| `expected_return_date` | `date NULL` | |
+| `returned_date` | `date NULL` | **`NULL` = still out** |
+| `assigned_condition` / `returned_condition` | `string(20)` | `returned_condition` nullable until it comes back |
+| `assigned_by` | FK `restrictOnDelete` | who handed it over |
+| `returned_by` | FK **`nullOnDelete`** | who took it back — a leaver must not take the record |
+| `status` | `string(20)` default `active` | `active` / `returned` |
+| `remarks` | `string(1000) NULL` | |
+
+`days_out` and `is_overdue` are **not columns** — they are computed per row
+from dates already present, so they cannot drift out of step with them.
+
+**"One open hand-over per asset" is enforced by a `lockForUpdate()` inside a
+transaction, not by a `UNIQUE` index**, because one asset has *many* rows
+over its life and only one of them may be open. That is also why
+`assets.status` is a projection: two writers racing to hand out the same
+laptop would otherwise both read `available`.
+
+**Certificate expiry lives in three places, only one of which is storage:**
+
+1. `certificate_expiry_date` — the **fact**, supplied by the instructor or
+   computed by the service from the program's validity;
+2. `certificate_expiry_state` — **derived on read** by
+   `EmployeeTraining::certificateExpiryState()` as `none` / `valid` /
+   `expiring_soon` / `expired` against `hrms.expiry.default_warning_days`
+   (30, `HRMS_DOCUMENT_WARNING_DAYS`);
+3. `expiry_notified_at` — **the scan's memory**, so the nightly job says each
+   thing once per window rather than every night.
+
+Nothing stores a *state* that can drift, and nothing computes a *date* on the
+client.
+
+---
+
 ## 3. Relationship Summary
 
 **Implemented (Phase 2) — solid lines exist in the database today:**
@@ -915,14 +1093,50 @@ retired definition must not take a settled claim's history with it. The
 receipt table is the second and last `cascadeOnDelete` in the schema after
 the report photos — a receipt cannot outlive the claim it is evidence for.
 
-**Still designed but not yet created (Phases 10–12):**
+**Added in Phase 11 ✅:**
 
 ```
-employees ──*── employee_documents
-           ├──*── employee_trainings *── trainings
-           ├──*── asset_assignments *── assets
-           └──*── notifications
+training_types ──*── training_programs ──*── employee_trainings *── employees
+                                             │
+                                             ├─── created_by (users, SET NULL)
+                                             └─── certificate bytes (private store, not a table)
+
+asset_types ──*── assets ──*── asset_assignments *── employees
+                                 │                        │
+                                 ├─ assigned_by (users, RESTRICT)   └─ returned_by (users, SET NULL)
+                                 └─ current holder is the OPEN row, not a column
 ```
+
+Every foreign key here is `RESTRICT` toward the employee, the program, the
+type and the asset: a course that has been sat, or a laptop that has been
+handed out, is a historical fact and hard-deleting the master record should
+throw rather than erase it. Two are `nullOnDelete` and both are the same
+idea — `created_by` and `returned_by` are *people*, and a leaver's account
+being removed must not take an enrolment or a hand-over with it.
+
+**There is no `status` column on `assets` that anybody may set freely and no
+holder column on `assets` either.** The register's `status` is a
+*projection* of whether `asset_assignments` has an open row — which is why
+the uniqueness of that open row is enforced with `lockForUpdate()` inside
+`AssetService::assign()` rather than with a `UNIQUE` index (one asset, one
+holder, but *many* rows over its life) — and why the history table is
+append-only rather than an update target.
+
+`employee_trainings` carries the uniqueness that a ledger needs and a list
+does not: **`UNIQUE (employee_id, training_program_id, enrollment_date)`**,
+plus `(status, certificate_expiry_date)` for the nightly scan and
+`(employee_id, status)` for "my records". The certificate's bytes live in the
+same private store as a passport, addressed by `certificate_path` — a column
+holding a *pointer*, never a URL and never a filename a client chose.
+
+**Still designed but not yet created (Phases 12–13):**
+
+```
+employees ──*── notifications
+```
+
+`employee_documents`, `employee_trainings` and `asset_assignments` were in
+this box until Phases 10 and 11 built them — see §2.11 and §2.11a.
 
 **Relationships deliberately *not* added:** there is no
 `employees.many-to-many sites` pivot, no `departments → projects`, and no
@@ -1247,6 +1461,23 @@ was touched.
 / 44 migrations**; Phase 10 adds exactly five of each, and no earlier
 migration was touched.
 
+### Phase 11 migrations (all `Ran`)
+
+| # | Migration | Creates | Why it looks like this |
+|---|---|---|---|
+| 45 | `2026_10_01_100001_create_training_types_table` | `training_types` | **UNIQUE `code`** plus an index on `name` — the same shape as `document_types`, because it is the same *job*: a vocabulary the services and the screens must never need to know the members of. `status` is a `string(20)` with constants, no `ENUM`, per the standing rule |
+| 46 | `2026_10_01_100002_create_training_programs_table` | `training_programs` | **UNIQUE `code`** so a course is identified by what an operator typed, not by an id nobody sees. `certificate_validity_days` is an **`unsignedSmallInteger`, nullable, and `NULL` means "never lapses"** — `0` would mean "lapses the instant it is issued", a different claim one character away. `restrictOnDelete` toward `training_types` |
+| 47 | `2026_10_01_100003_create_employee_trainings_table` | `employee_trainings` | **`UNIQUE (employee_id, training_program_id, enrollment_date)`** — named by hand (`employee_trainings_enrolment_unique`) so a 409 can be produced by the index rather than by a race-prone pre-read, and so recertification is a *new row* instead of a rewrite. `created_by` is `nullOnDelete` (a leaver must not take the record with them); `employee_id` and `training_program_id` are `restrictOnDelete`. Three indexes: the unique, `(status, certificate_expiry_date)` for the nightly scan, `(employee_id, status)` for "my records" |
+| 48 | `2026_10_01_100004_create_asset_types_table` | `asset_types` | Deliberately byte-for-byte the same shape as `training_types`: two vocabularies that behave alike should not be documented twice |
+| 49 | `2026_10_01_100005_create_assets_table` | `assets` | **UNIQUE `asset_code`** — the barcode is the route key, and two assets sharing one would make `GET /assets/{asset}` ambiguous. `purchase_cost` is `decimal(12,2)`, **nullable, and omitted from the resource** unless the reader holds `assets.manage`. `current_condition` and `status` are **two columns on purpose**: an asset is very often both `assigned` and `fair`, and one column would force a choice between them. Indexes on `name` and `serial_number` for the search nobody has built yet |
+| 50 | `2026_10_01_100006_create_asset_assignments_table` | `asset_assignments` | Append-only: a return **updates the open row** rather than adding a second one, and `remarks` on it is replaced by the return's. `restrictOnDelete` toward the asset, the employee and `assigned_by`; `nullOnDelete` toward `returned_by`, same reasoning as `created_by`. Indexes `(asset_id, status)` — "is this asset held?" is the query the lock protects — `(employee_id, status)` and `assigned_date` for the history log. **No `days_out` and no `is_overdue` column**: both are computed per row from dates already present, so they cannot drift |
+
+**62 tables** total in `hrms_laravel`, across **55 migrations** (3 framework,
+1 Sanctum, 10 Phase 2, 1 Phase 3, 2 Phase 5, 9 Phase 6, 7 Phase 7, 7 Phase 8,
+1 repayment floor, 3 Phase 9, 5 Phase 10, 6 Phase 11). The Phase 10 close was
+**56 tables / 49 migrations**; Phase 11 adds exactly six of each, and no
+earlier migration was touched.
+
 ### Why two foreign keys are "deferred"
 
 Two relationships are circular and cannot be declared while their target table
@@ -1360,6 +1591,19 @@ and retracting one is what `status` and a later approval step are for.
 | `expenses` | `(employee_id, expense_date)` — `exp_emp_date_idx` · `(expense_category_id, status)` — `exp_cat_status_idx` | "My claims", and "what is pending in this category" |
 | `expenses` | `(project_id, expense_date)` — `exp_project_date_idx` · `(site_id, expense_date)` — `exp_site_date_idx` · `(status)` | The two date-range views a project or a site asks for, plus the status filter the list and the summary both apply |
 | `expense_receipts` | `(expense_id)` (the FK) | One claim's evidence in order; receipts are never listed on their own |
+| `training_types` | **UNIQUE** `(code)` · `(name)` | The vocabulary's lookup key, and the label the picker sorts on |
+| `training_programs` | **UNIQUE** `(code)` · `(name)` | A course is found by the code an operator typed, and the catalogue's default sort is its name |
+| `employee_trainings` | **UNIQUE** `(employee_id, training_program_id, enrollment_date)` — `employee_trainings_enrolment_unique` | One seat per person per course per date; the second duplicate guard, held by the database rather than only by a pre-read |
+| `employee_trainings` | `(status, certificate_expiry_date)` | The nightly scan's own query: what is open, and what is about to lapse |
+| `employee_trainings` | `(employee_id, status)` | "My records" without a `WHERE` that scans the whole ledger |
+| `employee_trainings` | `(certificate_expiry_date)` | "Whose card is about to lapse?" across everybody, which is a different question from the composite above |
+| `asset_types` | **UNIQUE** `(code)` · `(name)` | Same two as `training_types` |
+| `assets` | **UNIQUE** `(asset_code)` | The barcode is the route key; a shared one would make `GET /assets/{asset}` ambiguous |
+| `assets` | `(name)` · `(serial_number)` | The two things an operator will search for once search is built |
+| `assets` | `(status)` | The register's default sort and its status filter |
+| `asset_assignments` | `(asset_id, status)` | **"Is this asset held?"** — the query `AssetService` takes `lockForUpdate()` on, and the one that makes the open-hand-over rule hold |
+| `asset_assignments` | `(employee_id, status)` | "What is this person holding?" — the same query asked the other way round |
+| `asset_assignments` | `(assigned_date)` | The history log's date window |
 
 Composite indexes were chosen for the two filters that appear together most
 often in HR reports: *department × status* and *site × start date*. The two
@@ -1482,9 +1726,7 @@ assert the exact vocabulary:
 
 ## 10. Not Yet Created (Future Phases)
 
-`audit_logs`, `notifications`, `notification_preferences`, `employee_documents`,
-`employee_onboarding`, `trainings`, `employee_trainings`, `assets`,
-`asset_assignments`, `device_tokens`.
+`audit_logs`, `notifications`, `notification_preferences`, `device_tokens`.
 
 **Phase 8 built seven of these** (`payrolls`, `payroll_items`, `allowances`,
 `payroll_adjustments`, `loans`, `loan_installments`,
@@ -1495,16 +1737,25 @@ there is no stored document to expire, cache or leak.
 **Phase 9 built `expenses` and `expense_receipts`** — the two that had been
 sitting on this list since Phase 2 — together with `expense_categories`,
 which was designed alongside them and seeded with six rows. All three are
-documented in **§2.10**. Everything still named above remains design only.
+documented in **§2.10**.
 
 **Phase 10 built `employee_documents` and `employee_onboarding`** — both
 named on this list since Phase 2 — together with `document_types`,
 `onboarding_requirements` and `employee_bank_accounts`, which were designed
 alongside them (nine types, eight requirements). All five are documented in
-**§2.11**. `audit_logs`, `notifications`, `notification_preferences`,
-`trainings`, `employee_trainings`, `assets`, `asset_assignments` and
-`device_tokens` remain design only: **training and assets were cut out of
-Phase 10's approved scope**, and FCM is still unstarted.
+**§2.11**.
+
+**Phase 11 built `employee_trainings` and `asset_assignments`** — also named
+here since Phase 2 — together with `training_types`, `training_programs`,
+`asset_types` and `assets`, which were designed alongside them (eight seeded
+training types, seven seeded asset types, **no seeded programs**: a catalogue
+is an operator's to write). All six are documented in **§2.11a**. The table
+this document used to call `trainings` is **`training_programs`**: it is a
+catalogue row, not a delivery of one, and the delivery is what
+`employee_trainings` holds.
+
+`audit_logs`, `notifications`, `notification_preferences` and
+`device_tokens` remain design only — FCM and the audit log are Phase 12.
 
 > **Deliberately absent:** `leave_documents` — a medical certificate is a file
 > on the private disk with its metadata on `leave_requests` (§2.6).

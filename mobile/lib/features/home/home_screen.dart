@@ -184,6 +184,28 @@ class HomeScreen extends ConsumerWidget {
           'Where new joiners stand',
         ),
 
+      // Phase 11. Two doors, two permissions, and neither implies the
+      // other: `training.view` reads a course history (and `Visibility`
+      // narrows it to your own unless you hold `training.manage`), while
+      // `assets.view` reads the register (and narrows it to the kit handed
+      // to you without `assets.manage`). A Site Engineer holding the first
+      // and HR holding the second are two people reading two different
+      // pages — so they are two tiles, not one behind the other.
+      if (scope.canViewTraining)
+        _Module(
+          'Training',
+          Icons.school_outlined,
+          '/training',
+          'Courses, certificates and expiry',
+        ),
+      if (scope.canViewAssets)
+        _Module(
+          'Assets',
+          Icons.inventory_2_outlined,
+          '/assets',
+          'Company kit and who is holding it',
+        ),
+
       _Module(
         'Holidays',
         Icons.calendar_month_outlined,

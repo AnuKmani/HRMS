@@ -1,8 +1,8 @@
 # Security
 
-> **Status:** Phase 10 — authentication, rate limiting, the password policy, an
-> **80-permission** catalogue, row-level policies (26 at Phase 10, incl.
-> `ExpensePolicy`), GPS attendance
+> **Status:** Phase 11 — authentication, rate limiting, the password policy, a
+> **95-permission** catalogue, row-level policies (30 at Phase 11, incl.
+> `AssetPolicy` and `EmployeeTrainingPolicy`), GPS attendance
 > controls (server-authoritative geofence, private selfie storage, location and
 > camera permissions), server-side selfie sanitisation (§4.3), the approval and
 > leave controls (no self-approval, current-step-only decisions, private
@@ -22,16 +22,24 @@
 > claims, five statuses (`draft → pending → approved | rejected | cancelled`)
 > reachable only through `ExpenseService`, a figure a client sends treated as
 > a suggestion and re-validated on the server (§6), and receipt files on
-> private storage whose path never leaves the API (§4.8) — and now the
+> private storage whose path never leaves the API (§4.8) — the
 > **employee-document and onboarding slice**: seven more permissions
-> (**80 in all, 401 grants**) where **`documents.manage` and
+> where **`documents.manage` and
 > `onboarding.manage` are held by exactly three roles**, row scope that
 > fails closed to your own file, the server's own answer to "is this
 > expired" on every row (§4.9), identity documents on private storage under
 > a minted name with images re-encoded and PDFs sniffed (§4.9), a nightly
 > scan that cannot notify twice, and **bank details in a 1:1 side table on
 > `encrypted` casts, outside every generic resource and behind two routes
-> with no `permission:` at all** (§4.10). Transport hardening
+> with no `permission:` at all** (§4.10) — and now the **training and asset
+> slice**: fifteen more permissions (**95 in all, 462 grants**) where
+> **`training.certificates.view` and `assets.manage` are held by the same
+> three roles**, an enrolment ledger whose duplicate is refused by the
+> database as well as by the service, a certificate on private storage whose
+> route is gated *not* by `training.manage` (§4.11), a nightly scan that
+> cannot notify twice, and **an asset's `purchase_cost` omitted from the
+> resource rather than nulled**, so a missing figure can never be read as a
+> free one (§4.11). Transport hardening
 > and audit logging remain phased ahead (§5, §8). Individual controls are
 > marked with their phase below.
 
@@ -114,8 +122,8 @@ Two layers, both mandatory:
 
 ### 3.1 Permission layer (`spatie/laravel-permission`)
 
-**Implemented in Phase 2 ✅, extended in Phases 4–10** — `spatie/laravel-permission`
-**^6.25**, 10 roles, **80 permissions**, **401 grants**. Phase 4 added
+**Implemented in Phase 2 ✅, extended in Phases 4–11** — `spatie/laravel-permission`
+**^6.25**, 10 roles, **95 permissions**, **462 grants**. Phase 4 added
 `employees.salary.view`; Phase 5 granted the existing `attendance.view` to the
 `Employee` role so a person can read back the day they recorded; Phase 6 added 11
 (`approvals.view/manage`, `leave.balance.view/manage`, `holidays.manage`,
@@ -133,7 +141,9 @@ could not express), taking the catalogue **70 → 73** and the grant map
 **332 → 364**; **Phase 10 added 7** (the six `documents.*` verbs listed in
 §3.1b, with `documents.view` already in the catalogue, plus the new
 `onboarding.{view,manage}` pair), taking the catalogue **73 → 80** and the
-grant map **364 → 401**.
+grant map **364 → 401**; **Phase 11 added 15** (the eight `training.*` and
+seven `assets.*` verbs listed in §3.1c), taking the catalogue **80 → 95**
+and the grant map **401 → 462**.
 
 > **Version pin matters:** v7/v8 of this package require PHP `^8.3`. This environment
 > runs **PHP 8.2.4**, so Composer correctly resolves to **6.25.0** (supports Laravel
@@ -170,6 +180,11 @@ reports.view          reports.export
 documents.view        documents.manage
 expenses.view         expenses.approve     expenses.manage
 expenses.create       expenses.update      expenses.receipts.view
+training.view         training.create      training.update       training.manage
+training.assign       training.complete    training.certificates.view
+training.expiry.view
+assets.view           assets.create        assets.update         assets.manage
+assets.assign         assets.return        assets.history.view
 settings.view         settings.manage
 roles.view            roles.manage
 users.view            users.manage
@@ -329,6 +344,65 @@ middleware at all**; `EmployeePolicy::viewBankAccount` / `updateBankAccount`
 decide per row, and there is no role in the catalogue whose *job* is to read
 everybody's IBAN. The route exists as its own family precisely so that
 `EmployeeResource` cannot leak the columns by forgetting a `hidden()`.
+
+### 3.1c Training & asset permissions — ✅ Phase 11
+
+**Phase 11 added fifteen** — the eight `training.*` verbs and the seven
+`assets.*` verbs — for **95 permissions / 462 grants** in all.
+
+| Permission | Roles holding it (of 10) |
+|---|---|
+| `training.view` | every role — **10** (your own course history is the base case) |
+| `assets.view` | every role — **10** (your own kit is the base case) |
+| `training.expiry.view` | HR Admin, HR Executive, Payroll Admin, Super Admin — **4** |
+| `assets.history.view` | HR Admin, HR Executive, Management, Super Admin — **4** |
+| `training.create` | HR Admin, HR Executive, Super Admin — **3** |
+| `training.update` | the same three — **3** |
+| `training.manage` | the same three — **3** |
+| `training.assign` | the same three — **3** |
+| `training.complete` | the same three — **3** |
+| `training.certificates.view` | the same three — **3** |
+| `assets.create` | the same three — **3** |
+| `assets.update` | the same three — **3** |
+| `assets.manage` | the same three — **3** |
+| `assets.assign` | the same three — **3** |
+| `assets.return` | the same three — **3** |
+
+Five edges of that matrix are the whole design:
+
+- **Ten roles hold `training.view`, and that is a door — not a browsing
+  right.** `Visibility::employeeTrainingsFor()` answers *your own rows* with
+  `.view` alone and *the workforce's* only when `training.assign` or
+  `training.complete` follows. So an Employee sees their own card, a Site
+  Supervisor sees their own team's rows because they hold neither, and only
+  HR sees the roster. `training.view` on ten roles means ten roles may ask
+  "where do I stand?", not ten roles may ask about everybody.
+- **`training.certificates.view` is a separate grant from `training.manage`,
+  and the file route asks for it specifically.** A manager who may note that
+  a report is *uncertified* is not thereby handed the certificate itself —
+  and the asymmetry is deliberate: `training.manage` **does not** open
+  `GET /employee-training/{training}/file`. The permission that does is held
+  by exactly the three roles whose job includes reading somebody's
+  competence paper.
+- **`training.expiry.view` is the same shape as `documents.expiry.view`.**
+  "Whose card is about to lapse across the whole company" is a different
+  question from "show me my own", and Payroll Admin gets it for the reason
+  Payroll Admin gets the document one: a lapsed safety card is a payroll
+  fact. The rows behind it are still narrowed unless `training.manage`
+  follows.
+- **`assets.manage` is the door onto the pool *and* onto `purchase_cost`.**
+  Without it `Visibility` narrows `assets.view` to the assets assigned to
+  you, and `AssetResource` **omits** `purchase_cost` entirely. Finance,
+  Management and every Employee hold `assets.view` and do not hold
+  `assets.manage`, so the cost of a colleague's laptop is not readable by
+  browsing their desk. Management is the one non-HR role holding
+  `assets.history.view`, because a hand-over log is a control document, not
+  a personal file.
+- **`assets.assign` and `assets.return` are split from each other.** The
+  act of giving something away and the act of taking it back are two
+  different trust decisions, and a role that may do one should be
+  expressible without the other — the same reason `training.complete` is
+  split from `training.update`.
 
 ### 3.2 Resource layer (Policies)
 
@@ -512,6 +586,51 @@ Four things this slice does that are worth naming:
 **Status:** ✅ **Document, onboarding and bank-account policies live
 (Phase 10)** — three new files, two new abilities on `EmployeePolicy`,
 row scope from `App\Support\Visibility`.
+
+### 3.2c Training & asset policies — ✅ Phase 11
+
+Four new files, for **30 policies** in all. Same rule as every slice since
+Phase 4: each one reads row scope through `App\Support\Visibility`, which is
+the only place the rule is written.
+
+| Policy | Abilities | Row scope |
+|---|---|---|
+| `EmployeeTrainingPolicy` | `viewAny`, `view`, `create`, `update`, `complete`, `cancel`, `viewCertificate`, `expiryReport` | `employeeTrainingsFor()` = your own rows, or `training.assign` / `training.complete`. `viewCertificate` = **your own card**, or `training.certificates.view` — **`training.manage` is deliberately not a third door** |
+| `TrainingProgramPolicy` | `viewAny`, `view`, `create`, `update`, `retire` | A catalogue is shared, not personal: `training.view` reads it, and `training.create` / `training.update` write it. `retire` is separate from `update` because taking a course off the shelf must not be confusable with correcting its spelling |
+| `AssetPolicy` | `viewAny`, `view`, `create`, `update`, `assign`, `returnAsset`, `changeStatus` | `assetsFor()` = the assets you hold, or `assets.manage`. `assign` / `returnAsset` / `changeStatus` are three abilities rather than one `update`, because handing a laptop out, taking it back and writing it off are three different acts |
+| `AssetAssignmentPolicy` | `viewAny`, `view`, `history` | the rows you are party to, or `assets.history.view`. `history` is its own ability because the cross-employee log is a different question from "what am I holding" |
+
+**`TrainingType` and `AssetType` have no policy file at all, and that is a
+decision rather than an omission.** They are read-only vocabularies:
+`GET /training-types` and `GET /asset-types`
+answer a table rather than a record, there is no row to own, and a policy
+file with one `viewAny()` would be a place where a future `destroy()` could
+be forgotten. The routes instead ask the permission directly —
+`abort_unless($request->user()?->can('training.view') === true, 403)` —
+which fails closed and cannot be forgotten, because it is the same line the
+rest of the route already carries.
+
+**Four things this slice does that are worth naming:**
+
+- **The certificate's gate is not the row's gate.** `viewCertificate` asks
+  two questions where `view` asks one: may this person see this enrolment,
+  and may they read *this* card. `training.manage` satisfies the first and
+  is deliberately withheld from the second, so correcting a date never
+  becomes a way of reading everybody's competence paper.
+- **A refusal is 409 with a sentence, never a 403 with a shrug.** The
+  service refuses *states* — an asset already held, a transition the table
+  does not allow, a person already holding a place on that course — and the
+  policy refuses *people*. Conflating them would tell an HR coordinator
+  they are "forbidden" when the truth is "that laptop is with somebody",
+  and those two lead to different next actions.
+- **`expiryReport` is its own ability**, as it is on the document policy:
+  the one query in the slice that is about everybody.
+- **Nothing in either policy decides a date.** Certificate expiry is derived
+  by the model against configuration (§4.11), so an authorisation change can
+  never quietly change when a card expires.
+
+**Status:** ✅ **Training and asset policies live (Phase 11)** — four new
+files, thirty policies in all, row scope from `App\Support\Visibility`.
 
 ---
 
@@ -836,6 +955,73 @@ A different kind of secret from a document, and shaped like one:
 > with the new) and belongs in the deployment runbook, not in a routine
 > `.env` refresh.
 
+### 4.11 Training certificates, asset costs & the hand-over log — ✅ Phase 11
+
+**The certificate does not get a new storage rule, and that is the control.**
+It is uploaded through `EmployeeDocumentStore` — the same private disk, the
+same six validation rules read from `ValidatesEmployeeDocuments`, the same
+server-minted `employee-documents/{employeeId}/{uuid}.{ext}`, the same
+bytes-follow extension, the same `StreamedResponse` with a
+`[A-Za-z0-9 _-]` download name — because a second storage rule invented for
+one more PDF is how the first one eventually gets bypassed.
+
+- **The path never leaves the API.** `EmployeeTrainingResource` reports
+  `has_certificate`, `certificate_original_name`, `certificate_mime_type`,
+  `certificate_size` and `certificate_file_url`; `certificate_path` is not
+  in any payload and there is no `/storage` route to it.
+- **The file's gate is not the row's gate.**
+  `GET /employee-training/{training}/file` runs `training.view` as the
+  coarse door and then `EmployeeTrainingPolicy::viewCertificate` per row:
+  **your own card**, or `training.certificates.view`. **`training.manage`
+  does not open it** — the right to correct an enrolment date is not the
+  right to read everybody's competence paper — and `Visibility::maySeeCertificateFor()`
+  is where that asymmetry is written once.
+- **Replaced, not accumulated.** Completing an already-completed row with a
+  new file calls `store()`'s `remove()` on the old bytes first, so a
+  superseded card does not sit on the disk with nothing pointing at it.
+- **The completion payload refuses what the server owns.** `status`,
+  `expiry_notified_at`, `created_by`, `employee_id` and
+  `training_program_id` are all `prohibited`, so no client can walk its own
+  enrolment to `completed`, backdate the window it will later be graded
+  against, or re-attribute somebody else's record.
+- **Nothing about a card is inferred on the client.**
+  `certificate_expiry_state` (`none | valid | expiring_soon | expired`) and
+  `days_until_expiry` are derived server-side by
+  `EmployeeTraining::certificateExpiryState()` against
+  `hrms.expiry.default_warning_days` (30, `HRMS_DOCUMENT_WARNING_DAYS`), and
+  the Flutter screen renders that answer rather than recomputing it. Nothing
+  stores a *state* that can drift.
+
+**The nightly scan still cannot notify twice.** `ScanTrainingExpiries`
+(daily 06:20, `withoutOverlapping()`, `onOneServer()`, `ShouldBeUnique`,
+`$tries = 1`) raises `EmployeeTrainingExpiring` / `EmployeeTrainingExpired`
+once per record per window through `expiry_notified_at`, exactly as the
+document scan does — and **delivers nothing**: there is no FCM subscriber on
+these events, which is the same deliberate absence Phase 10 documented.
+
+**An asset's cost is withheld rather than hidden.** `purchase_cost`
+(`decimal(12,2)`) is **omitted from `AssetResource` unless the reader holds
+`assets.manage`**. An absent key means "not your business"; a `null` would
+mean "it was free" — and a client that rendered `null` as `AED 0.00` would
+be telling a lie about a finance figure. Flutter records which arrived
+(`costVisible = json.containsKey('purchase_cost')`) and prints *Not shown to
+your role* rather than *Not recorded*.
+
+**The hand-over log is read-only, and only through one door.**
+`GET /asset-assignments` needs `assets.view` **and** is narrowed by
+`assets.history.view` for any row you are not party to. There is **no
+`POST /asset-assignments`**: a row is created only by
+`POST /assets/{asset}/assign`, so there is no second door that could be
+forgotten. And `asset_assignments.remarks` is **replaced** by a return's
+remarks and left standing when a return carries none — nobody can erase
+what was said at hand-over time by being quiet at return time.
+
+> **⚠ A hand-over's remarks are not sensitive in the `encrypted` sense and
+> are deliberately not encrypted.** They are ordinary text on an ordinary
+> column, gated by `assets.history.view`, because the threat this slice
+> defends against is *who may read the log*, not *who may read the disk* —
+> and a column that cannot be queried cannot be reported on either.
+
 ---
 
 ## 5. Transport Security
@@ -943,7 +1129,7 @@ literal.
 | `POST /attendance/check-in` · `check-out` · `site-visits/start` · `site-visits/{id}/end` | 30 / min | authenticated user id | ✅ Phase 5 |
 | Document / onboarding / bank-account writes (8 routes) | none | — | ✅ Phase 10, **deliberately** |
 | General API | 60 / min | client IP | ⬜ Planned |
-| Exports (PDF/Excel) | 10 / min | client IP | ⬜ Phase 11 |
+| Exports (PDF/Excel) | 10 / min | client IP | ⬜ Phase 12 |
 
 **Phase 6 added no limiter, deliberately (also API_DOCUMENTATION §3).** Leave,
 overtime, holiday and timesheet writes are cheap and already behind
@@ -1057,6 +1243,15 @@ with `manually_adjusted` reserved as a status so the future override writes
 a recognisable value rather than quietly overwriting a `present`. Adding
 logging later is one call inside the service, not a rewrite.
 
+**Phase 11 made the same preparation for both new modules.** Every training
+and asset write goes through `TrainingService`, `TrainingExpiryService` or
+`AssetService` — a store, an enrol, a completion, a cancellation, an assign,
+a return, a status change — so the future activity log is one call in
+`AssetService::assign()` rather than one call in each of eighteen
+controllers. The events the expiry jobs already raise
+(`EmployeeTrainingExpiring` / `EmployeeTrainingExpired`) are the other half
+of that readiness: the hook exists and the delivery does not.
+
 The honest gaps: **attendance override is not audited because attendance
 override does not exist yet**, and **login success/failure is still not
 recorded anywhere** — see §2. Reading a selfie is authorised by
@@ -1151,7 +1346,7 @@ including the Phase 3 keys (`PASSWORD_RESET_ENABLED`, `LOGIN_RATE_LIMIT_*`,
 | Base URL | Baked in with `--dart-define` — no runtime setting that could repoint the app at an attacker's server | ✅ Phase 3 |
 | Credentials in UI | Password masked by default; never logged, never placed in `AuthState` | ✅ Phase 3 |
 | Session invalidation | Any request presenting a rejected token drops the local session and returns to `/login` | ✅ Phase 3 |
-| Screenshotting of sensitive screens | Consider `flutter_windowsecure` for salary screens | ⬜ Phase 11 |
+| Screenshotting of sensitive screens | Consider `flutter_windowsecure` for salary screens | ⬜ Phase 12 |
 | Certificate pinning | Optional, for high-security deployments | ⬜ Optional |
 | Debug logging | Disabled in release builds | ⬜ Phase 13 |
 | Root/jailbreak detection | Optional, warn-only (not a substitute for server-side auth) | ⬜ Optional |
@@ -1271,8 +1466,9 @@ Management, and by neither Payroll Admin, Finance nor `Employee`; 8 new permissi
 | 8 | **Payroll, loans & salary documents** — 36 routes, each behind `permission:` **and** a policy; a one-way money ladder (`draft → calculated → reviewed → processed → locked`) with no reverse and no delete, so no permission authorises a capability the services refuse; `payroll.lock` held by **Payroll Admin alone**, `payroll.process` by three roles, `payroll.summary.view` returning totals with **no names**; every figure `DECIMAL(12,2)` and printed by one formatter (§5 of ARCHITECTURE), no float column anywhere; salary-slip and certificate PDFs rendered on demand behind `no-store` with **no stored file, no path and no URL** (§4.7); loan schedule minted at approval with a `payroll_id` on every installment it takes, so a run cannot take a payment twice; `employee_id` required on create and prohibited on update; salary never present in an employee resource or a log line; 11 new permissions (**70 total / 332 grants**), 5 new policies (22 total), 3 new settings (16 total); **deliberately no new rate limiter (§7)**. **Not delivered: payroll and salary-document audit rows — still outstanding (§8), and the UAE/statutory overtime rate is a generic multiplier, not a validated statutory configuration** |
 | 9 | **Expense claims & receipts** — 13 new routes under `expense`, each behind `permission:` **and** `ExpensePolicy`; the claimant always from the authenticated user, with `employee_id` and `status` **`prohibited`** in `StoreExpenseRequest` (`422`, never silently ignored); statuses `draft → pending → approved \| rejected \| cancelled` reachable only through `ExpenseService`, every transition in a DB transaction, an illegal transition `409` and a field failure `422` with an `errors` map; money a decimal string end to end (`DECIMAL(12,2)`, `App\Support\Money`), amount `numeric`, `> 0`, `<= 99999999.99`, re-validated at the request **and** against the category ceiling at create, update and submit; the site must belong to the named project *and* to somewhere the claimant is placed; approval chain `ApprovalWorkflow::SUBJECT_EXPENSE` with seeded `EXP-STD` (step 1 `reporting_manager`, step 2 `permission: expenses.manage`), no self-approval, current-link-only, one decision per link; receipts on private storage at `expense-receipts/{expenseId}/{uuid}.{ext}` behind `viewReceipt`, MIME/extension/size/content validated, **no storage path and no file URL in any response** (`url` is the id-based route), 5120 KB and 10 per claim, `ExpenseReceiptStore` the only writer; 3 new permissions (**73 total / 364 grants**) and 1 new policy; **deliberately no new rate limiter (§7)**. **Not delivered: expense decision audit rows — still outstanding (§8)** |
 | 10 | **Employee documents & onboarding** — 16 new routes; `employee-documents` behind `permission:` **and** `EmployeeDocumentPolicy` (row scope that fails closed to your own file, `employees.view` deliberately not a third door in), `document-types` behind `documents.view`, onboarding behind `onboarding.{view,manage}` with the row scope narrowing a non-manager to *themselves*, and the bank-account pair behind **no `permission:` at all** (`EmployeePolicy::{viewBankAccount,updateBankAccount}` is the only gate); `employee_id` on a store call answers `403` when the caller may neither file their own nor manage others'; uploads validated five ways (extension, `finfo` MIME, byte ceiling, content sniff, re-checked in the store), images **re-encoded through `SelfieSanitizer`** so no identity document keeps its EXIF GPS, PDFs stored byte-for-byte behind a `%PDF-` sniff, private disk at `employee-documents/{employeeId}/{uuid}.{ext}`, **no path in any response** (`file_url` is the id-based route), download `attachment` + `nosniff` + `no-store` + a `[A-Za-z0-9 _-]` filename; `expiry_state`/`days_until_expiry` **computed by the server per type window**, the `expired` filter driven by the date rather than the stored status, `ScanDocumentExpiries` scheduled and idempotent through `expiry_notified_at` with two events raised and **no FCM**; onboarding completion refused **409 naming what is outstanding**; `employee_bank_accounts` on `encrypted` casts outside every generic resource, **never logged**, with the `APP_KEY` rotation hazard documented (§4.10); 7 new permissions (**80 total / 401 grants**) with `documents.manage` + `onboarding.manage` held by exactly three roles, 3 new policies (26 total); **deliberately no new rate limiter (§7)**. **Training and assets were cut from this phase's approved scope. Not delivered: document and onboarding audit rows — still outstanding (§8)** |
-| 11 | Notifications/FCM, dashboards, exports — planned |
-| 12 | Full security audit, penetration-style test pass, deployment hardening |
+| 11 | **Training & asset management** — 24 new routes, each behind `permission:` **and** a policy, with `TrainingType` / `AssetType` gated on the route alone (no policy file, `abort_unless` failing closed) and the two type endpoints answering a plain array; an enrolment ledger with **`UNIQUE (employee_id, training_program_id, enrollment_date)`** as well as two service pre-reads, so a duplicate is refused by the database *and* explained in a sentence; recertification is a new row, never a rewrite; `employee_training` payloads `prohibit` `status`, `expiry_notified_at`, `created_by`, `employee_id` and `training_program_id`; certificate bytes through the **existing** `EmployeeDocumentStore` behind `GET /employee-training/{training}/file`, gated by `viewCertificate` = **your own card or `training.certificates.view`, never `training.manage`** (§4.11), replaced rather than accumulated; certificate expiry `none\|valid\|expiring_soon\|expired` **derived server-side** against `hrms.expiry.default_warning_days`, `ScanTrainingExpiries` scheduled, idempotent through `expiry_notified_at`, two events raised and **no FCM**; `assets.status` a **projection** of the open `asset_assignments` row rather than a second opinion, `AssetService::changeStatus()` consulting the open-assignment rule **before** `Asset::TRANSITIONS`, and `assign()` holding a `lockForUpdate()` inside a transaction because "one open hand-over" cannot be a `UNIQUE` index; a return writes into the row the hand-over opened, its `remarks` replacing the original and a silent return leaving it standing; **no `POST /asset-assignments`** — one door into the table; `purchase_cost` **omitted, not nulled**, from `AssetResource` without `assets.manage` (§4.11); `Visibility::{employeeTrainingsFor, assetsFor}` failing closed to own rows, with compliance tallied **after** the filter; 15 new permissions (**95 total / 462 grants**) where `training.certificates.view` and `assets.manage` are held by exactly three roles, 4 new policies (30 total); **deliberately no new rate limiter (§7)**. **Not delivered: FCM delivery, the type CRUD screens and the audit rows for training and asset acts — all Phase 12 (§8)** |
+| 12 | Notifications/FCM, full audit logging, dashboards, exports — planned |
+| 13 | Full security audit, penetration-style test pass, deployment hardening |
 
 ### Selfie hardening pass (after Phase 5, before Phase 6)
 

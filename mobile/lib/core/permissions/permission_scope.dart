@@ -318,6 +318,90 @@ class PermissionScope {
   /// signing off their own requirements is the same self-verification
   /// `documents.verify` refuses.
   bool get canManageOnboarding => can('onboarding.manage');
+
+  /* --------------------------------------------------------- training */
+
+  /// Reading the catalogue and your own course history. The row-level half
+  /// — *whose* history — is `Visibility::employeeTrainingsFor()`'s answer
+  /// and not this one: a holder without [canManageTraining] sees their own
+  /// courses and nobody else's.
+  bool get canViewTraining => can('training.view');
+
+  /// The back office for other people: enrolling, editing and retiring.
+  /// Without it [canViewTraining] is a person reading their own course
+  /// history, which is exactly what the seeders intend for an Employee and a
+  /// Project Manager.
+  bool get canManageTraining => can('training.manage');
+
+  /// Adding a course to the catalogue. Never implied by
+  /// [canManageTraining]: `training.manage` is the door onto the *only*
+  /// action it guards (retiring), and a role that may place people on a
+  /// course is not by that fact allowed to invent one.
+  bool get canCreatePrograms => can('training.create');
+
+  bool get canUpdatePrograms => can('training.update');
+
+  /// Correcting an enrolment — including cancelling it. The same grant
+  /// `training.update` that [canUpdatePrograms] uses, because both are "fix
+  /// a training record": one permission, two names for the two doors it
+  /// opens, rather than one gate asked to guess which of the two a caller
+  /// meant.
+  bool get canEditEnrolments => can('training.update');
+
+  /// Putting somebody on a course. Separate from [canManageTraining]
+  /// because it is the act with a person attached to it, and the seeders
+  /// grant it only to HR.
+  bool get canAssignTraining => can('training.assign');
+
+  /// Recording a pass — and, with a program that promises a card, the card
+  /// itself. Never implied by [canAssignTraining]: whoever booked the seat
+  /// is not automatically whoever signs off that it was passed.
+  bool get canCompleteTraining => can('training.complete');
+
+  /// Opening the *card* rather than the row it belongs to. Reading a list
+  /// of courses somebody sat is a different act from being handed the
+  /// document that came out of one — see
+  /// `EmployeeTrainingPolicy::viewCertificate()`.
+  bool get canViewTrainingCertificates => can('training.certificates.view');
+
+  /// The cross-employee "whose card is about to lapse" report. Deliberately
+  /// not implied by [canViewTraining]: the question is about everybody, and
+  /// the seeders withhold it from the roles that should only ever read their
+  /// own file.
+  bool get canViewTrainingExpiry => can('training.expiry.view');
+
+  /* ------------------------------------------------------------ assets */
+
+  /// Reading the register. Without [canManageAssets] `Visibility` narrows it
+  /// to the assets actually handed to you, so a Site Engineer holding this
+  /// and a HR Executive holding both read two completely different pages of
+  /// the same URL.
+  bool get canViewAssets => can('assets.view');
+
+  bool get canCreateAssets => can('assets.create');
+
+  /// Correcting the master record — never condition and never status, which
+  /// have their own doors.
+  bool get canUpdateAssets => can('assets.update');
+
+  /// The row-scope gate and the status control. Deliberately absent from
+  /// [canViewAssets]: without it the register is "what has been handed to
+  /// me", and with it the register is everything.
+  bool get canManageAssets => can('assets.manage');
+
+  /// Handing one out. Never implied by [canManageAssets] or
+  /// [canUpdateAssets] — a person who may write the register down is not by
+  /// that fact allowed to put company property in somebody's hands.
+  bool get canAssignAssets => can('assets.assign');
+
+  /// Taking one back. Split from [canAssignAssets] so a deployment can
+  /// grant one without the other; the seeders give HR both.
+  bool get canReturnAssets => can('assets.return');
+
+  /// The cross-employee "who has held what" log. On top of [canViewAssets]
+  /// rather than implied by it: every hand-over the company ever wrote is a
+  /// different question from "show me the register".
+  bool get canViewAssetHistory => can('assets.history.view');
 }
 
 /// Recomputed whenever the session changes, so a permission revoked by a

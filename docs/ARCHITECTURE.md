@@ -1,14 +1,16 @@
 # Architecture
 
-> **Status:** Phase 10 — RBAC, authentication, the business slices through
+> **Status:** Phase 11 — RBAC, authentication, the business slices through
 > attendance and leave, the site vertical slice (activity reports, the
 > official daily report and its on-demand PDF), the payroll vertical slice
 > (ledger, calculation, loans and salary documents), the expense vertical
 > slice (claims, private receipts, the approval engine reused for a third
-> subject) and now **the employee-document and onboarding slice**
+> subject), the employee-document and onboarding slice
 > (configurable document types, private storage, server-computed expiry,
-> the joiner checklist) are implemented and documented as built. Sections
-> marked ⬜ are planned but not yet built.
+> the joiner checklist) and now **the training and asset slice**
+> (two configurable vocabularies, an enrolment ledger with a certificate
+> behind it, and an append-only hand-over history) are implemented and
+> documented as built. Sections marked ⬜ are planned but not yet built.
 
 ---
 
@@ -607,11 +609,25 @@ details are gated again on top, by `EmployeePolicy::viewBankAccount` /
 `updateBankAccount` on two routes that carry no `permission:` middleware at
 all — there is no role whose job is to read everybody's IBAN.
 
+**Phase 11 added fifteen** — eight `training.*` verbs
+(`view`, `create`, `update`, `manage`, `assign`, `complete`,
+`certificates.view`, `expiry.view`) and seven `assets.*` verbs (`view`,
+`create`, `update`, `manage`, `assign`, `return`, `history.view`) — leaving
+**95 permissions / 462 grants**. The slice's own asymmetry, visible in
+`RolePermissionSeeder`: **all fifteen reach three roles** (HR Admin, HR
+Executive, Super Admin) while `training.view` and `assets.view` reach ten.
+Two edges matter more than the rest. `training.certificates.view` is
+separate from `training.manage`, and the file route asks for it
+specifically — holding the right to correct an enrolment date is not the
+right to read somebody else's competence paper. And `assets.manage` is both
+the row-scope gate and the only door onto `purchase_cost`, so Finance and
+Management, who read the register, do not read what anything in it cost.
+
 **Super Admin** holds `['*']` — every permission, resolved from the catalogue at seed
 time rather than hard-coded, so a newly added permission is granted automatically.
 Every other role is an explicit allow-list: anything absent is **denied**. The mapping
 is `RolePermissionSeeder::MAP`, and `RbacTest` asserts both directions (Super Admin has
-all 80; `Employee` is denied `payroll.manage`, `payroll.process`, `payroll.lock`, `employees.delete`, `attendance.manage`,
+all 95; `Employee` is denied `payroll.manage`, `payroll.process`, `payroll.lock`, `employees.delete`, `attendance.manage`,
 `leave.approve`, `audit.view`).
 
 `employees.salary.view` — added in Phase 4 — is the one permission that is *not*
@@ -759,6 +775,91 @@ re-encryption pass, which is called out in `docs/SECURITY.md` §4.
 default to *your own rows*; `onboardingEmployeesFor()` / `onboardingIsVisible()`
 = own or `onboarding.manage`. Every one of them is a single place to read and
 a single place to test.
+
+### 3.9 Phase 11 ✅ — Training & asset management
+
+Two registers in one slice, because they have the same shape: a **thing that
+exists** (`training_programs`, `assets`), a **vocabulary describing it**
+(`training_types`, `asset_types`) and a **ledger of what happened to it**
+(`employee_trainings`, `asset_assignments`). Nothing else about them is
+alike, and the architecture is mostly about keeping the differences honest.
+
+**Configuration, not rules — §2.2 taken literally.** The code contains no
+list of training types and no list of asset types. `TrainingTypeSeeder` and
+`AssetTypeSeeder` write eight and seven rows; `GET /training-types` and
+`GET /asset-types` read them back as **plain arrays** (a vocabulary is not a
+paginated resource); a program's `code`, a course's `duration_days` and an
+asset's `purchase_cost` are columns a form fills in. A deployment that needs
+`POWER_TOOLS` adds a row.
+
+**Three writers, and no controller writes a column.** `TrainingService`,
+`TrainingExpiryService` and `AssetService` are the only mutation paths.
+That is what makes three otherwise-unrelated guarantees cheap:
+
+- *the 409 ordering* — `AssetService::changeStatus()` consults the
+  open-assignment rule **before** `Asset::TRANSITIONS`, so `assigned` is
+  never a legal answer to "change the status" and a held asset cannot be
+  retired out from under its holder. A controller that checked the table
+  first would have had to remember this;
+- *the uniqueness race* — `assign()` opens its row inside a transaction
+  under `lockForUpdate()`, because "one open hand-over per asset" cannot be
+  a `UNIQUE` index (many rows per asset over a life, only one open) and
+  cannot be a pre-read either;
+- *the audit log that is coming* — Phase 12 attaches to one method per act
+  rather than to eighteen controllers.
+
+**A service refuses a state; a form request refuses a payload.** The split
+is the same one Phase 9 drew, and it is why a bad state is a **409 naming
+the state** while a bad field is a **422 naming the field**. Two duplicate
+enrolments, an asset already held, a status the transition table does not
+allow and a certificate-required program with no certificate are all
+refusals with a sentence a person can act on.
+
+**Expiry is derived, and the derivation lives on the model.**
+`EmployeeTraining::certificateExpiryState()` folds the certificate's own
+dates against `hrms.expiry.default_warning_days` (30) into `none | valid |
+expiring_soon | expired`, and both the API and the Flutter screen **render
+that answer** rather than recomputing it — a server that says *expiring soon*
+and a phone that says *valid* is two answers to one question, and only one
+of them can be patched. The nightly `ScanTrainingExpiries` job
+(`dailyAt`, `withoutOverlapping()`, `onOneServer()`, `ShouldBeUnique`,
+`$tries = 1`) reads `employee_trainings` only, and writes nothing but
+`expiry_notified_at` — the marker that makes a doubled schedule raise one
+event per record per window instead of two. It raises
+`EmployeeTrainingExpiring` / `EmployeeTrainingExpired` and **delivers
+nothing**: the events are hooks for Phase 12.
+
+**The register's status is a projection, and the history is the source.**
+`assets.status` is not an opinion anybody types; it is what
+`asset_assignments` implies — `assign()` opens a row and sets `assigned`,
+`returnAsset()` closes it and sets `maintenance` (when the returned condition
+was `poor`) or `available`. The return **writes into the row the hand-over
+opened**, because that row *is* the hand-over; its `remarks` replace the
+original, and a return filed with none leaves the original standing. That is
+the difference between a history and a diary: you cannot quietly edit what
+was said at hand-over time by saying nothing at return time.
+
+**One voucher, one envelope.** A certificate is uploaded through
+`EmployeeDocumentStore` — the same private store, the same six validation
+rules, the same server-minted uuid name — and read back by exactly one route,
+`GET /employee-training/{training}/file`, whose gate is deliberately *not*
+`training.manage`: the right to correct an enrolment date is not the right
+to read everybody's competence paper.
+
+**Row scope is two more functions, and they fail closed.**
+`Visibility::employeeTrainingsFor()` answers *your own rows* with
+`training.view` and *the workforce's* only with `training.assign` /
+`training.complete`; `Visibility::assetsFor()` narrows `assets.view` without
+`assets.manage` to the assets you hold. `GET /training-compliance` tallies
+**after** that filter, so a manager's compliance totals are never the whole
+company's by accident — the kind of leak that a summary endpoint commits
+silently because nobody wrote a `WHERE` for a screen that was only ever
+going to be used by one role.
+
+**No FCM, no audit logging, no type CRUD — deliberately.** Both expiry jobs
+already emit events, every mutation already runs through a service, and both
+vocabularies are readable and seedable. Each of the three is a *hook*, and
+Phase 12 will fill it; none of them is a gap that needs a placeholder now.
 
 ---
 
@@ -909,8 +1010,15 @@ mobile/lib/
 │   ├── documents/                      # ← Phase 10, three-layer: document list,
 │   │                                   #    expiry report, upload/edit form (camera,
 │   │                                   #    gallery, PDF), detail with verify/reject
-│   └── onboarding/                     # ← Phase 10, three-layer: joiner directory,
-│                                       #    checklist detail, stage + completion
+│   ├── onboarding/                     # ← Phase 10, three-layer: joiner directory,
+│   │                                   #    checklist detail, stage + completion
+│   ├── training/                       # ← Phase 11, three-layer: enrolment list,
+│   │                                   #    detail + completion/cancel sheet, enrol
+│   │                                   #    form, course catalogue + course form,
+│   │                                   #    expiry report, compliance summary
+│   └── assets/                         # ← Phase 11, three-layer: register list,
+│                                       #    detail, add/edit form, hand-over log,
+│                                       #    the three hand-over sheets
 └── main.dart
 ```
 
@@ -1465,3 +1573,5 @@ The following are explicitly **out of scope** unless later requested:
 | Phase 9 | **Expense management** — 3 migrations (**51 tables / 44 migrations**: `expense_categories`, `expenses`, `expense_receipts`), `ExpenseService` (every mutation in a transaction; field errors as `ValidationException`, illegal state as `409` naming the state) + `ExpenseReceiptStore` (private `expense-receipts/{expenseId}/{uuid}.{ext}`, config `hrms.storage.expense_receipt_{directory,max_kilobytes}`), a thin `ExpenseController`, 4 FormRequests (`StoreExpense`, `UpdateExpense`, `ActOnExpense`, `StoreExpenseReceipts`), `ExpensePolicy` (11 abilities, including `viewReceipt`), `Visibility::{expensesFor, expenseIsVisible, mayViewOthersExpenses, mayClaimExpenseAt}` + a private `directReportIds()`, and the Phase 6 approval engine reused for a third subject (`ApprovalWorkflow::SUBJECT_EXPENSE`, `ApprovalRecord::TYPE_EXPENSE`, union widened to `LeaveRequest\|OvertimeRequest\|Expense`, seeded `EXP-STD`) — 3 permissions (**73 total / 364 grants**), 6 seeded categories, 4 workflows / 9 steps (17 settings unchanged), 13 routes (**153 definitions / 158 registered**), Flutter `features/expenses/` (list, form, detail, receipt capture); backend **499 tests / 3251 assertions** (Phase 9: `ExpenseTest` 20 + `ExpenseReceiptTest` 10) |
 | Post-Phase 9 expense configuration | **Configurable currency** — `system.currency` reseeded `INR → AED` (read by payroll, both PDFs, `PayrollResource`, `LoanResource` and the new-claim default) plus `system.supported_currencies` (`json`, `["AED"]`, **18 settings total**); **`GET /client-settings`** (`ClientSettingsController`, sanctum only, no `permission:`, explicit allow-list of `default_currency` + `supported_currencies`, reconciled so the default it offers is always accepted); `StoreExpenseRequest` upper-cases `currency` in `prepareForValidation()` then validates it against the configured list (`allowedCurrencies()`), `UpdateExpenseRequest` unions that with the code the claim was already filed in so narrowing the setting cannot trap a draft; Flutter `core/config/client_settings.dart` (`ClientSettings` · `ClientSettingsSource` · `clientSettingsProvider`) pre-fills a new claim, shows one code read-only and offers several only when several are configured, opens the field on a fetch failure, and never fetches anything for an edit — a filed claim keeps its currency, and nothing converts; **1 route (154 definitions / 159 registered)**; backend **509 tests / 3288 assertions** (`ClientSettingsTest` 8 + `ExpenseTest` +2), Flutter **465 tests** (+11) |
 | Phase 10 | **Employee documents & onboarding** — 5 migrations (**56 tables / 49 migrations**: `document_types`, `employee_documents`, `onboarding_requirements`, `employee_onboarding`, `employee_bank_accounts`), configuration instead of rules (`document_types.requires_*` + `expiry_warning_days`, `onboarding_requirements.kind = document\|data\|bank` matched **by code**), `EmployeeDocumentService` / `DocumentExpiryService` (authoritative `valid\|expiring_soon\|expired` per type) / `OnboardingService` (`draft → pending_documents → hr_review → completed`, materialised on first read, **409 naming what is outstanding** on completion) + `EmployeeDocumentStore` (private `employee-documents/{employeeId}/{uuid}.{ext}`, config `hrms.storage.document_{directory,max_kilobytes}`, images re-encoded through `SelfieSanitizer`, `%PDF-` sniff, `StreamedResponse` with a `[A-Za-z0-9 _-]` download name), `ScanDocumentExpiries` scheduled at `hrms.expiry.scan_{hour,minute}` and idempotent through `expiry_notified_at` with `DocumentExpiring`/`DocumentExpired` raised and **no FCM**, 5 FormRequests, 5 Resources, `Visibility::{mayViewOthersDocuments, employeeDocumentsFor, employeeDocumentIsVisible, onboardingEmployeesFor, onboardingIsVisible, mayFileDocumentsFor}` failing closed to own rows — **3 new policies (26 total)**: `EmployeeDocumentPolicy`, `DocumentTypePolicy`, `EmployeeOnboardingPolicy`, plus `EmployeePolicy::{viewBankAccount, updateBankAccount}` on two routes with **no `permission:` middleware** and `employee_bank_accounts` on `encrypted` casts outside `EmployeeResource` — 7 permissions (**80 total / 401 grants**, `documents.manage` + `onboarding.manage` held by exactly three roles), 2 seeders (9 document types, 8 requirements), 18 settings unchanged, 16 routes (**170 definitions / 175 registered**), Flutter `features/{documents,onboarding}/` + `DocumentFilePicker` on **`file_picker`** (the only package added), 7 `GoRoute`s (**65 total**), two Home doors, `PermissionScope` +10 getters, `ApiClient.putMultipart()`; backend **553 tests / 3674 assertions** (Phase 10: `EmployeeDocumentTest` 20 + `OnboardingTest` 12 + `DocumentExpiryScanTest` 6 + `EmployeeBankAccountTest` 6), Flutter **551 tests** (+86) |
+
+| Phase 11 | **Training & asset management** — 6 migrations (**62 tables / 55 migrations**: `training_types`, `training_programs`, `employee_trainings`, `asset_types`, `assets`, `asset_assignments`), configuration instead of rules (`training_types` / `asset_types` seeded 8 + 7 codes, **no seeded programs**), `TrainingService` / `TrainingExpiryService` / `AssetService` (every mutation through a service, **409 naming the state** before `422` naming the field, `lockForUpdate()` around "one open hand-over per asset", `Asset::TRANSITIONS` consulted *after* the open-assignment rule) — an **enrolment ledger** with `UNIQUE (employee_id, training_program_id, enrollment_date)` so recertification is a new row, and a certificate uploaded through the **existing** `EmployeeDocumentStore` behind `GET /employee-training/{training}/file` (**§3.9**), certificate expiry derived per row by `EmployeeTraining::certificateExpiryState()` as `none|valid|expiring_soon|expired` against `hrms.expiry.default_warning_days`, `ScanTrainingExpiries` scheduled at `hrms.expiry.training_scan_{hour,minute}` idempotent through `expiry_notified_at` with `EmployeeTrainingExpiring`/`EmployeeTrainingExpired` raised and **no FCM**, 11 FormRequests, 6 Resources, `Visibility::{employeeTrainingsFor, assetsFor, assetAssignmentIsVisible, maySeeCertificateFor}` failing closed to own rows — **4 new policies (30 total)**: `EmployeeTrainingPolicy`, `TrainingProgramPolicy`, `AssetPolicy`, `AssetAssignmentPolicy`, with `TrainingType` / `AssetType` gated on the route only — 15 permissions (**95 total / 462 grants**: eight `training.*`, seven `assets.*`), 2 seeders, 18 settings unchanged, 24 routes (**194 definitions / 199 registered**), Flutter `features/{training,assets}/` (26 files), 13 `GoRoute`s (**78 total**), two Home doors, `PermissionScope` +16 getters, `ApiClient.patch()`; backend **609 tests / 4103 assertions** (Phase 11: `TrainingManagementTest`, `TrainingComplianceTest`, `TrainingExpiryScanTest`, `AssetManagementTest`, `AssetAssignmentHistoryTest` on the shared `BuildsTrainingAssets` scaffold), Flutter **654 tests** (+103) |

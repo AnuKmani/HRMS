@@ -1,14 +1,16 @@
 # User Guide
 
-> **Status:** Phase 10 — sign-in, the organisation screens, GPS attendance with
+> **Status:** Phase 11 — sign-in, the organisation screens, GPS attendance with
 > site visits, **leave, the holiday calendar, timesheets and overtime**, the
 > **site activity reports and the official daily site report (with its PDF)**,
 > **payroll: the ledger, salary slips, loans and salary certificates**,
 > **expense claims: filling one in, the receipt from the camera, the two-step
-> approval chain and the filters that find an old claim**, and now
+> approval chain and the filters that find an old claim**,
 > **your own documents: filing a passport or an Emirates ID, seeing how long
 > it has left, HR verifying it — and the joiner checklist that says what a
-> new starter still owes** exist and are usable.
+> new starter still owes**, and now **your training record and the company
+> property handed to you: courses, certificates, when a card lapses, who is
+> compliant, and who is holding what** exist and are usable.
 > This guide describes the workflows each role will have once the corresponding
 > phase ships. Sections are marked with the phase that delivers them; ✅ means
 > it is in the app today.
@@ -62,9 +64,13 @@ open — Employees, Departments, Designations, Projects, Sites (Phase 4),
 Attendance (Phase 5), Leave, Timesheets, Overtime and Holidays (Phase 6),
 since **Phase 7** **Site activity** and **Daily site reports**, and since
 **Phase 8** **Payroll**, **Salary slips**, **Loans** and **Salary
-certificates** — and nothing else. A role that cannot open a module is not
+certificates**, since **Phase 9** **Expenses**, since **Phase 10**
+**Documents** and **Onboarding**, and since **Phase 11** **Training** and
+**Assets** — and nothing else. A role that cannot open a module is not
 shown a door it would be refused behind. **Holidays is the one tile drawn
 for everyone**: reading the calendar is not a privilege anyone grants you.
+**Training** and **Assets** are drawn for every role too — but each list
+shows a different page depending on what else you hold (see §3.7b).
 
 The two report tiles are gated separately on purpose: `Site activity` is
 drawn for anyone who may file their own, while `Daily site reports` is not
@@ -419,7 +425,7 @@ describes the filter and not the page you happened to scroll to.
 >   description does not touch the code it was filed with, and no later
 >   change to the setting re-prices what is already on record.
 > - **No notifications.** Nothing tells you that a claim is waiting, was
->   approved or was refused (Phase 11); open the list to see where it stands.
+>   approved or was refused (Phase 12); open the list to see where it stands.
 > - **No audit trail rows for expense decisions.** The chain and the remarks
 >   are the record of who said what; a separate audit-log entry per decision is
 >   not written yet.
@@ -522,7 +528,49 @@ private storage under a name the server chose; the picture you see on screen
 was re-encoded on arrival, so no GPS location travels with a photograph of
 your passport.
 
-### 3.8 Dashboard ⬜ Phase 11
+### 3.7b Your training record & company kit ✅ Phase 11
+
+Two things about you that are not paperwork and not pay: the courses you
+have been on, and anything the company has handed you.
+
+**Finding your courses.** The home screen offers **Training** to anyone who
+holds `training.view` — which is every role. Inside:
+
+| Screen | What it is for |
+|---|---|
+| **Training** | Every course you are on. Each row says *whose* it is, *which course*, when, and how far the card has left |
+| **Course catalogue** | The courses this company runs — code, kind, provider, length, and whether it issues a certificate (`/training/programs`) |
+| **Compliance** | Who has sat what, in totals by course and by state (`training.view` — but a person without `training.manage` sees **only their own rows** in those totals) |
+
+**The words matter, and they come from the server.** A card says *Expires in
+5 days*, *Expired 12 days ago*, *Valid*, or *No expiry date* — always words
+and an icon, never a colour on its own, and always the **server's** answer
+rather than your phone's clock. A course that issues no certificate draws no
+expiry at all: a blank is honest, a `0` is a lie.
+
+**Opening your own card.** Tapping a record that has a certificate downloads
+it **by that record's own id** — a PDF goes to the phone's viewer, an image
+draws from the bytes the server sent. You may always open *your own*. A
+colleague's card needs `training.certificates.view` (HR Admin, HR
+Executive, Super Admin) — **holding `training.manage` does not open it**,
+which is why your manager can book you onto a course without being able to
+read your competence paper.
+
+**What you cannot do from here.** Enrolling, recording a completion and
+cancelling are HR's doors (`training.assign`, `training.complete`,
+`training.update`). The list is read-only for you — and so is the course
+catalogue: courses are added and edited by HR (`training.create`,
+`training.update`), and a course is retired rather than deleted, so
+everything you have ever sat stays on the list.
+
+**Your assets.** The home screen offers **Assets** to anyone who holds
+`assets.view` — also every role. For you the register shows **only what has
+been handed to you**, along with its condition, the date it went out and
+when it is due back. Anything else on the shelf is not yours to see, and
+neither is what it cost: `purchase_cost` is left out of your copy of the
+record entirely rather than shown as a zero.
+
+### 3.8 Dashboard ⬜ Phase 12
 
 - Today's attendance and current site
 - Check-in / check-out times and working hours
@@ -600,7 +648,7 @@ Similar to Site Supervisor, focused on technical reporting:
 
 ## 6. Project Manager
 
-> ✅ Phase 4 (project & site management) · ✅ Phase 5 (attendance & visits on your projects) · ⬜ Phase 11 (dashboard)
+> ✅ Phase 4 (project & site management) · ✅ Phase 5 (attendance & visits on your projects) · ⬜ Phase 12 (dashboard)
 
 **Dashboard:**
 - Projects and sites
@@ -707,6 +755,103 @@ requirement flips to *Met*.
 calls on the employee record, are encrypted at rest, and never appear in a
 generic employee payload or a log line.
 
+### 8.2 Training & certification ✅ Phase 11
+
+**Home → Training** (needs `training.view`, which everybody has; without
+`training.assign` / `training.manage` the list shows **your own courses and
+nobody else's**).
+
+| Screen | What it is for |
+|---|---|
+| **Training** | Every enrolment: who, which course, when, and where it stands. Filter by person, course, kind, state, *Certified*, *Expired* or *Expiring* |
+| **Course catalogue** | The courses this company runs — `/training/programs` |
+| **Expiring** | Whose cards are about to lapse across the whole company, in a window you choose (opens at 90 days) — `training.expiry.view` |
+| **Compliance** | Totals: courses × enrolment states × certificate buckets, for everybody or for your own rows |
+| **Enrol** | Put somebody on a course |
+
+**The vocabulary is yours to write.** Kinds of training (`Safety Induction`,
+`Working at Heights`, `First Aid`, …) are rows, not code — read them from
+the **Training types** picker and rename them if your company words them
+differly. Same for asset types. Nothing in the app knows what
+`WORKING_AT_HEIGHTS` is.
+
+**Adding a course.** *Add course* (`training.create`) asks for a code, a
+name, the kind, a provider, a length in days, and two promises: whether it
+issues a certificate, and — if so — how many days it stays valid. **No
+validity means the card never expires.** A course is retired, never
+deleted: everything anybody has ever sat stays on the catalogue.
+
+**Enrolling.** *Enrol* (`training.assign`) needs a person, a course and a
+date. Put the same person on the same course twice and the server refuses
+with a sentence — *"That person already has a place on this course."* — and
+**nothing is written**. Somebody who finished it last year can be booked
+again next year: that is a new record, and the old one is never touched.
+
+**Recording a result.** Open an enrolment → *Complete* (`training.complete`):
+
+- **Completion date** defaults to today; **result** and **trainer** are
+  yours to type.
+- Leave the **certificate expiry blank** and the server dates the card from
+  the course's own validity. Type a date and that one wins — an instructor
+  who dated the card by hand overrides the default.
+- If the course promises a certificate, you must attach it (PDF, JPEG, PNG
+  or WebP, under 10 MB) or give an issue date. The app says which before it
+  sends anything.
+- A course that has been completed, failed or cancelled cannot be
+  completed again — the server says so, and the sentence stays on screen.
+
+**Cancelling** needs `training.update`, keeps the record, and cannot be
+aimed at something already decided.
+
+**The certificate itself.** The file sits on private storage under a name
+the server chose, and it opens **through that record's own id**. You may
+open your own card with nothing but `training.view`; a colleague's needs
+`training.certificates.view` — **`training.manage` deliberately does not
+open it**.
+
+### 8.3 Company assets ✅ Phase 11
+
+**Home → Assets** (needs `assets.view`, which everybody has; without
+`assets.manage` the register shows **only the items handed to you**).
+
+| Screen | What it is for |
+|---|---|
+| **Assets** | Every item: what it is, its code, who has it, its **status** and its **condition** — two separate things, always both shown. Filter by kind, status, condition, holder, *Available* / *Assigned*, overdue, or purchase date |
+| **An asset** | Its master record, its cost (HR and Finance only), and every hand-over it has ever had |
+| **Hand-over log** | Who has held what, and when — opens on **what is out right now** (`assets.history.view`) |
+| **Add asset** | Register a new item |
+
+**Two words, not one.** *Status* answers **what may happen to it next**
+(Available, Assigned, Maintenance, Damaged, Lost, Retired); *condition*
+answers **what state it is in** (New, Good, Fair, Poor). An item is very
+often both *Assigned* and *Fair*, and collapsing them into one chip would
+have to pick — so the screen never does.
+
+**Registering.** *Add asset* (`assets.create`) takes a
+code, a kind, a name, a serial number and — if you hold `assets.manage` — a
+purchase cost. **Status is not a field you fill in**: a new item is
+*Available* because that is what a new item is.
+
+**Handing one out.** *Hand out* (`assets.assign`) needs a holder and a date,
+and is only offered while nobody else holds it. Take it out twice and the
+server refuses — *"An asset is already with somebody."* — with **one open
+hand-over**, never two.
+
+**Taking one back.** *Take back* (`assets.return`) records the condition it
+came back in. **Poor** sends it to *Maintenance*; anything else returns it
+to *Available*. Whatever you write as the return's remarks **replaces**
+what was said at hand-over — and if you write nothing, the hand-over's
+remarks stay, so silence cannot quietly erase them.
+
+**Changing status.** *Change status* (`assets.manage`) follows a fixed map:
+an item nobody holds can be marked *Available*, *Maintenance*, *Damaged*,
+*Lost* or *Retired*; **an item somebody still holds cannot be retired out
+from under them** — the server refuses and names the state.
+
+**The cost.** `purchase_cost` appears only if you hold `assets.manage`.
+Everyone else sees *Not shown to your role* — never `0.00`, because
+"withheld" and "free" are different statements.
+
 ---
 
 ## 9. Payroll Admin
@@ -785,7 +930,7 @@ writes neither back.
 
 ## 11. Management
 
-> ⬜ Phase 11 (dashboards) · ✅ Phase 6 (leave and overtime approval) · ✅ Phase 8 (payroll summary)
+> ⬜ Phase 12 (dashboards) · ✅ Phase 6 (leave and overtime approval) · ✅ Phase 8 (payroll summary)
 
 **Dashboard:**
 - Total workforce
@@ -822,7 +967,7 @@ offered the salary-slip or ledger views.
 
 ## 13. Notifications
 
-> ⬜ Phase 11 — **none of the rows below are delivered today.**
+> ⬜ Phase 12 — **none of the rows below are delivered today.**
 
 **Nothing in this application sends a notification yet.** No push (no FCM), no
 email, no in-app bell. Phase 6 added *hooks* rather than delivery: an LOP
@@ -838,6 +983,11 @@ scan** (06:15) walks every document with an expiry date and raises
 it knows when it has already said something and will not say it twice — but
 no listener is attached, so nothing reaches anybody yet. Today the expiry
 report (**Documents → Expiring**) is how HR sees it.
+
+Phase 11 added the same hook for **training certificates**: a second nightly
+scan (06:20) raises `EmployeeTrainingExpiring` / `EmployeeTrainingExpired`
+once per record per window and again delivers nothing. The screen that
+stands in for delivery is **Training → Expiring**.
 
 Until then, a pending request is visible to its approver by opening their
 queue, and a sick-leave deadline is visible on the request itself.
@@ -990,6 +1140,52 @@ The menu you see is built from your role's permissions. For example:
   list, and read only through their own two routes where the policy decides
   row by row — there is no role whose job is to read everybody's IBAN.
 
+**Training & asset permissions ✅ Phase 11 — and who holds each:**
+
+| Permission | What it lets you do | Held by |
+|---|---|---|
+| `training.view` | Open **Training** — and always **your own** course history, whatever else you hold | **10 roles** — every role |
+| `assets.view` | Open **Assets** — without `assets.manage` the register is **the items handed to you** and nothing else | **10 roles** — every role |
+| `training.expiry.view` | Open **Expiring** — everybody in the company whose card is about to lapse | **4 roles** — HR Admin, HR Executive, Payroll Admin, Super Admin |
+| `assets.history.view` | Open the **hand-over log** — who has held what, across everybody | **4 roles** — HR Admin, HR Executive, Management, Super Admin |
+| `training.create` | Add a course to the catalogue | **3 roles** — HR Admin, HR Executive, Super Admin |
+| `training.update` | Correct a course, or cancel an enrolment | The same **3** |
+| `training.manage` | Retire a course — **and the row-scope gate for the whole roster** | The same **3** |
+| `training.assign` | Put somebody on a course | The same **3** |
+| `training.complete` | Record a pass, and the card that came out of it | The same **3** |
+| `training.certificates.view` | Open **somebody else's** certificate — your own needs nothing but `training.view` | The same **3** |
+| `assets.create` | Register an item | The same **3** |
+| `assets.update` | Correct the master record — never condition, never status | The same **3** |
+| `assets.manage` | Change a status, see the **whole** register, and read `purchase_cost` | The same **3** |
+| `assets.assign` | Hand an item out | The same **3** |
+| `assets.return` | Take one back | The same **3** |
+
+**What these grants do and do not mean:**
+
+- **Ten roles hold `training.view`, and that is a door — not a roster.**
+  Without `training.assign` or `training.complete` behind it, the list is
+  *your own courses and nobody else's*. An Employee and a Project Manager
+  see exactly the same page of it: themselves.
+- **A course is a fact, not a draft.** Courses are added and edited by
+  three roles and are **retired, never deleted** — everything anybody has
+  ever sat stays on the catalogue and on their record.
+- **Booking a seat and signing off that it was passed are different
+  grants.** Whoever put somebody on a course does not automatically get to
+  record that they passed it.
+- **`training.certificates.view` opens other people's cards, and
+  `training.manage` does not.** Holding the right to correct an enrolment
+  date is not the right to read everybody's competence paper — the asymmetry
+  is deliberate, and the file route checks it separately.
+- **`assets.view` is a different page for different people.** With
+  `assets.manage` you read the register; without it you read what has been
+  handed to you. Same URL, two completely different questions.
+- **`purchase_cost` is withheld, never zeroed.** A reader without
+  `assets.manage` receives a record that simply does not contain the figure,
+  so it can never be printed as `0.00`.
+- **Management holds the log and not the register.** It has
+  `assets.history.view` — a control document — without `assets.manage`, so
+  it may see who held what without being able to move an item.
+
 Four things worth knowing about the new modules:
 
 - **Holidays need no permission to read.** Everyone sees the calendar;
@@ -1081,5 +1277,7 @@ permission — contact your administrator.
 | **Employee documents (upload, verify, expiry)** | **10** | ✅ |
 | **Onboarding checklist & stages** | **10** | ✅ |
 | **Bank details (own record, HR only)** | **10** | ✅ |
-| Training & assets | — | ⬜ **Cut from Phase 10's approved scope — unscheduled** |
-| Notifications, dashboards, reports | 11 | ⬜ |
+| **Training: catalogue, enrolments, certificates, expiry & compliance** | **11** | ✅ |
+| **Company assets: register, hand-overs, returns & history** | **11** | ✅ |
+| Notifications, dashboards, reports | 12 | ⬜ |
+| Final testing, security & deployment hardening | 13 | ⬜ |

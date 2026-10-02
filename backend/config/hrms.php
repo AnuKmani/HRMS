@@ -306,7 +306,22 @@ return [
     | as `scheduling.tick_minute` is: a typo in .env must not make the
     | scheduler throw at load time and quietly stop every scheduled task.
     |
-    | Nothing here decides *who is told*. The scan raises an event; turning
+    | `default_warning_days` governs **training certificates too**. A
+    | training certificate is not a document type and has no per-row window
+    | of its own, so both EmployeeDocument's fallback and
+    | EmployeeTraining::warningDays() read this one number — which is
+    | deliberate: two windows that mean the same thing would let a report
+    | disagree with the chip drawn beside it. Documents still override it
+    | per type; training does not, and that asymmetry is the point.
+    |
+    | `training_scan_*` is five minutes after the document scan rather than
+    | at the same instant: they are different tables and both are safe to
+    | run concurrently, but staggering them keeps two full-table scans out
+    | of the same second and keeps `schedule:list` readable. Five minutes is
+    | a deployment choice, not a constraint — the two scans never read each
+    | other's rows.
+    |
+    | Nothing here decides *who is told*. Each scan raises an event; turning
     | that into a push notification is a later phase, and FCM is not wired
     | up yet by design.
     |
@@ -318,6 +333,10 @@ return [
         'scan_hour' => max(0, min(23, (int) env('HRMS_DOCUMENT_SCAN_HOUR', 6))),
 
         'scan_minute' => max(0, min(59, (int) env('HRMS_DOCUMENT_SCAN_MINUTE', 15))),
+
+        'training_scan_hour' => max(0, min(23, (int) env('HRMS_TRAINING_SCAN_HOUR', 6))),
+
+        'training_scan_minute' => max(0, min(59, (int) env('HRMS_TRAINING_SCAN_MINUTE', 20))),
     ],
 
 ];

@@ -1,19 +1,22 @@
 # Flutter Guide
 
-> **Status:** Phase 10 — the organisation, auth and attendance slices plus
+> **Status:** Phase 11 — the organisation, auth and attendance slices plus
 > `leave/`, `holidays/`, `timesheet/`, `overtime/`, `site_reports/`,
 > **`payroll/`, `loans/` and `salary_certificates/`** (the ledger, the run
 > report and its ladder, salary slips handed to the OS viewer, a loan
 > schedule, and a certificate that is asked for, decided and exported), and
 > **`expenses/`** (a claim filed against a date, a category, a place and
 > a project, receipts from the camera, the same approval engine as leave,
-> and money kept as a decimal string from the API to the screen), and now
+> and money kept as a decimal string from the API to the screen),
 > **`documents/` and `onboarding/`** (a file picked from the camera, the
 > gallery or the phone's disk and posted as bytes; the server's own answer
 > to "how long has this got" drawn rather than derived; the joiner
-> checklist and its stages), all
-> in the same `data / domain / presentation` shape. `dart format .` clean
-> (246 files), `flutter analyze` clean, `flutter test` **551 passed**. This
+> checklist and its stages), and now
+> **`training/` and `assets/`** (an enrolment ledger read through one list,
+> a course catalogue, a certificate the server has already dated, a
+> compliance summary, a register of company property and its hand-over log),
+> all in the same `data / domain / presentation` shape. `dart format .` clean
+> (285 files), `flutter analyze` clean, `flutter test` **654 passed**. This
 > guide explains the concepts and patterns the app uses, written for someone
 > who knows PHP/Laravel but is new to Flutter/Dart. Sections that were
 > written as a plan in earlier phases — the offline queue, the location and
@@ -840,6 +843,41 @@ moment the two disagreed about what `pending` means.
 hands a PDF to `pdfOpenerProvider.openBytes(...)`, while an image draws from
 the bytes that same route returned.
 
+### 11.6 Three things the training and asset screens add (Phase 11 ✅)
+
+| Seam / rule | Where | Why it is one |
+|---|---|---|
+| `ApiClient.patch(path, {body})` | `core/network/api_client.dart` | Exactly one endpoint in this API needs it — `PATCH /assets/{asset}/status`. Adding a verb is a deliberate act: `put` is an update of a *resource*, `post` is an *action*, and "move this along a state machine" is neither. One caller, one method, no `patch()` that everything drifts toward |
+| **Two words for two columns** | `features/assets/presentation/asset_sheets.dart`, `asset_detail_screen.dart` | `status` and `current_condition` are drawn separately, always. An asset is very often both *assigned* and *fair*, and a screen that printed one chip would have to choose — so the detail shows status, condition **and** readiness as three separate words, and the register's filters ship `status` and `condition` as two query parameters rather than one dropdown. The status dropdown **never offers `Assigned`**: it is a projection of an open hand-over, not a choice anybody makes |
+| **A withheld figure reads as withheld** | `features/assets/domain/asset.dart`, `asset_detail_screen.dart` | `Asset.costVisible = json.containsKey('purchase_cost')`, decided when the row is parsed rather than when it is drawn. Absent → *Not shown to your role*; present → `Money.format(...)` in the company's currency. The client never sees `null`, so it can never render a missing cost as `AED 0.00` — the lie a `null` would invite |
+
+**The server's answer is drawn, not recomputed** — the same rule the
+document expiry label follows, extended to two new answers.
+`certificate_expiry_state` (`none` / `valid` / `expiring_soon` / `expired`)
+and `days_until_expiry` arrive on the enrolment row, and the expiry chips,
+the compliance buckets and the *"Expired 12 days ago"* line are all built
+from *them*; a phone that recomputed from `DateTime.now()` would disagree
+with the nightly scan whenever the two clocks did. Likewise `days_out` and
+`is_overdue` arrive on a hand-over row: the log's *"23 days out"* and its
+overdue line are the server's arithmetic, and `spanLabel` only assembles
+them (`'2026-09-01 →'` while open, `'2026-09-01 → 2026-09-20'` once back).
+
+**Every mutation goes through a bottom sheet, and a refusal stays on
+screen.** `_StatusSheet`, `_AssignSheet`, `_ReturnSheet`, `_CompletionSheet`
+and `_CancelSheet` each build their own body, send it through the
+repository, and — when the server answers **409** — put the sentence it sent
+into the sheet rather than dismissing it. That is the whole reason the
+backend refuses states with a sentence instead of a bare code: *"That
+laptop is with Ada Lovelace."* is actionable, and a sheet that closed
+immediately would have thrown it away.
+
+**A mutation's door is read from the row, not from the URL.** The completion
+button is offered when `is_completable` **and** `training.complete` both say
+so; cancellation needs `is_editable` **and** `training.update`; *Hand out*
+needs `assets.assign` **and** a row whose status is not `assigned`. The
+server would refuse the same combinations with a 409, but drawing a button
+that is certain to fail teaches people the app is broken.
+
 ---
 
 ## 12. Project structure
@@ -1135,6 +1173,64 @@ screen filling in another's first page, rather than the user retyping both.
 never produces a `401` flash, and `didUpdateWidget` reloads when the id in
 the route changes.
 
+### 12.5 `features/training/` and `features/assets/` — the folders, the screens, the wiring (Phase 11 ✅)
+
+```
+features/training/                        # 15 files
+├── domain/      # EmployeeTraining · TrainingProgram · TrainingCompliance
+│                #   · TrainingType · TrainingRepository
+│                #   ← no Flutter import, no JSON, no HTTP
+├── data/        # ApiTrainingRepository
+│                #   ← the only place that knows the envelope, and the one
+│                #     multipart `file` the completion sheet can attach
+└── presentation/# training_controller · list · detail · enroll form ·
+                 #   expiry report · compliance · programs · program form
+                 #   + training_sheets (complete · cancel)
+
+features/assets/                          # 11 files
+├── domain/      # Asset · AssetAssignment · AssetType · AssetRepository
+├── data/        # ApiAssetRepository
+└── presentation/# asset_controller · list · detail · form · history
+                 #   + asset_sheets (hand out · take back · change status)
+```
+
+**One list screen, two lists.** `trainingListProvider` is the enrolment
+ledger and `trainingProgramsProvider` is the catalogue; they are separate
+`PagedListController`s because they are different questions with different
+grants (`training.assign` to book somebody, `training.create` to add a
+course) and different query strings. `assetListProvider` and
+`assetHistoryProvider` are the same shape — and **the log opens on
+`{'status': 'active'}`, not on everything**, because the question a
+hand-over log is asked first is always "what is out right now?"; narrowing
+to `Everything` is one tap away and travels as a query parameter.
+
+**The screen-local certificate selector is not a client-side slice.** The
+three-way *All / Certified / Expiring* dropdown on the training list is
+translated by `TrainingListController.fetch()` into the three booleans the
+API reads (`certified`, `expired`, `expiring_soon`) and sent, so the
+narrowing happens in SQL next to the server's own warning window — the same
+trade the document expiry selector made in §12.4.
+
+**The catalogues are read from the server and never hard-coded.**
+`trainingTypesPickerProvider` and `assetTypesPickerProvider` fetch
+`GET /training-types` / `GET /asset-types`, whose `data` is a **plain
+array**, and both pickers guard their `DropdownButton.value` against a list
+that has not arrived yet (an unset `value` in `items` asserts). No screen
+contains a list of course kinds or of kinds of property.
+
+**The enrol form and the course form share `_touch(String field)`.** It
+clears exactly one field's error when that field changes, so a 422 that
+landed on `training_date` disappears when `training_date` is corrected and
+not before — the same helper under three different names in
+`training_enroll_screen`, `training_program_form` and `asset_form_screen`.
+
+**The certificate travels as bytes and a name, never a path.** The
+completion sheet posts `file` through the repository's own multipart call;
+`EmployeeTraining` then reports `has_certificate`,
+`certificate_original_name`, `certificate_size` and `certificate_file_url`,
+and the detail screen fetches the bytes **by id** through
+`TrainingRepository.file(int)` — never from `file_url`.
+
 ---
 
 ## 13. Running the app
@@ -1305,5 +1401,15 @@ flutter build appbundle         # build an AAB for Play Store
 | Onboarding checklist *Attach…* tile handing `{typeCode, employeeId}` to `/documents/new` | ✅ Phase 10 |
 | Harness `test/support/phase10.dart` — `ScriptedDocuments` · `ScriptedOnboarding` · `scopedPhase10(...)` · `phase10Router(...)` · JSON payload builders `documentRow` / `documentTypeRow` / `checklistItem` / `onboardingRow` parsed by `rows()` so a transition merges into the payload · re-exports from `phase4`/`phase9` | ✅ Phase 10 |
 | **Phase 10 validation summary** — `dart format .` **clean** (246 files) · `flutter analyze` **clean (No issues found)** · `flutter test` **551 passed** (465 before Phase 10, **+86** across 10 new files) | ✅ Phase 10 |
+| `features/training/` — `EmployeeTraining` · `TrainingProgram` · `TrainingCompliance` · `TrainingType` · `TrainingRepository` · `ApiTrainingRepository` · `training_controller` + `trainingListProvider` / `trainingExpiryProvider` / `trainingProgramsProvider` / `trainingProgramsPickerProvider` / `trainingTypesPickerProvider` · list · detail · enrol form · expiry report · compliance · catalogue · course form · `TrainingSheets` (**15 files**, 3 layers) | ✅ Phase 11 |
+| `features/assets/` — `Asset` · `AssetAssignment` · `AssetType` · `AssetRepository` · `ApiAssetRepository` · `asset_controller` + `assetListProvider` / `assetHistoryProvider` / `assetTypesPickerProvider` · list · detail · form · hand-over log · `AssetSheets` (**11 files**, 3 layers) | ✅ Phase 11 |
+| PermissionScope: `canViewTraining` · `canManageTraining` · `canCreatePrograms` · `canUpdatePrograms` · `canEditEnrolments` · `canAssignTraining` · `canCompleteTraining` · `canViewTrainingCertificates` · `canViewTrainingExpiry` · `canViewAssets` · `canCreateAssets` · `canUpdateAssets` · `canManageAssets` · `canAssignAssets` · `canReturnAssets` · `canViewAssetHistory` (**16 getters**) · home doors **Training** (`Icons.school_outlined`, `training.view`) and **Assets** (`Icons.inventory_2_outlined`, `assets.view`), each drawn on its own grant | ✅ Phase 11 |
+| Router: **78 `GoRoute` entries** — Phase 11 adds 13: `/training/expiring`, `/training/compliance`, `/training/programs` and `/training/programs/new` **declared before** `/training/:id`, `/training/programs/:id`; and `/assets/history` and `/assets/:id/edit` **declared before** `/assets/:id`, so `history`, `programs` and `new` are never parsed as row ids | ✅ Phase 11 |
+| `ApiClient.patch(path, {body})` — one caller: `PATCH /assets/{asset}/status` | ✅ Phase 11 |
+| `Asset.costVisible` decided at parse time from `json.containsKey('purchase_cost')` — a withheld cost draws *Not shown to your role*, never `0.00` | ✅ Phase 11 |
+| Certificate expiry and loan duration drawn from the server's own answer (`certificate_expiry_state`, `days_until_expiry`, `days_out`, `is_overdue`) — **never recomputed on the phone** | ✅ Phase 11 |
+| Private certificate fetching by id (`TrainingRepository.file(int)` → `ApiClient.bytes`), a PDF handed to `pdfOpenerProvider` — **`certificate_file_url` is a route, not an image** | ✅ Phase 11 |
+| Harness `test/support/phase11.dart` — `ScriptedTraining` · `ScriptedAssets` · `scopedPhase11(...)` · `phase11Router(...)` · JSON payload builders `trainingRow` / `programRow` / `trainingTypeRow` / `assetRow` / `assignmentRow` / `assetTypeRow` / `compliancePayload` · per-verb `errors` / `counters` / `last*` records · re-exports from `phase4`/`phase9` | ✅ Phase 11 |
+| **Phase 11 validation summary** — `dart format .` **clean** (285 files) · `flutter analyze` **clean (No issues found)** · `flutter test` **654 passed** (551 before Phase 11, **+103** across 12 new files) | ✅ Phase 11 |
 | Local database (Drift) + relational offline cache | ⬜ Not started — Phase 5 proved the queue does not need it (§10); revisit when a module is genuinely relational |
 | Shared widgets under `core/widgets/` | ⬜ The list and form widgets live in `core/presentation/` today; the split is worth it once a second, differently-shaped widget set appears |

@@ -53,6 +53,17 @@ class RolePermissionSeeder extends Seeder
             'documents.verify', 'documents.delete',
             'documents.expiry.view', 'documents.manage',
             'onboarding.view', 'onboarding.manage',
+            // The whole of both new modules: HR owns the training
+            // catalogue, puts people on courses, records who finished,
+            // opens their certificates and reads the expiry report — and
+            // is the master record's steward for company property, from
+            // creating an asset to writing one off.
+            'training.view', 'training.create', 'training.update',
+            'training.manage', 'training.assign', 'training.complete',
+            'training.certificates.view', 'training.expiry.view',
+            'assets.view', 'assets.create', 'assets.update',
+            'assets.manage', 'assets.assign', 'assets.return',
+            'assets.history.view',
             // Expenses: this role both files its own claims (`create` /
             // `update` mirror `leave.create`) and is the back office for
             // everybody else's — `.manage` is the permission EXP-STD's
@@ -91,6 +102,17 @@ class RolePermissionSeeder extends Seeder
             'documents.verify', 'documents.delete',
             'documents.expiry.view', 'documents.manage',
             'onboarding.view', 'onboarding.manage',
+            // Exactly HR Admin's training and asset grants. Running a
+            // course roster and keeping the tool store straight are this
+            // role's day-to-day, and withholding `training.manage` from it
+            // while handing it `documents.verify` would be an arbitrary
+            // split rather than a deliberate one.
+            'training.view', 'training.create', 'training.update',
+            'training.manage', 'training.assign', 'training.complete',
+            'training.certificates.view', 'training.expiry.view',
+            'assets.view', 'assets.create', 'assets.update',
+            'assets.manage', 'assets.assign', 'assets.return',
+            'assets.history.view',
             'settings.view',
             // Files her own claims and is told who each one is waiting on,
             // but is not the financial sign-off: `.manage` is withheld, so
@@ -142,6 +164,19 @@ class RolePermissionSeeder extends Seeder
             'reports.view', 'reports.export',
             'documents.view', 'documents.expiry.view',
             'onboarding.view',
+            // Their own course history, and the cross-employee certificate
+            // expiry report — the same pairing `documents.expiry.view`
+            // gets, for the same reason: a lapsed safety card is a payroll
+            // fact (a certified operator commands a different rate), but
+            // the report is the useful half and the individual rows stay
+            // narrowed to this role's own unless `training.manage` follows.
+            'training.view', 'training.expiry.view',
+            // Their own kit, and nothing about anyone else's: `assets.view`
+            // is the coarse gate, Visibility narrows it to assets assigned
+            // to this role's own employee record, and `assets.manage` is
+            // what would open the rest — deliberately absent, along with
+            // `purchase_cost`, which is a finance fact rather than a payroll one.
+            'assets.view',
             'settings.view',
             'audit.view',
         ],
@@ -168,6 +203,20 @@ class RolePermissionSeeder extends Seeder
             // is not a licence to open their Emirates ID.
             'documents.view', 'documents.create', 'documents.update',
             'onboarding.view',
+            // Compliance reading for their own workforce, and nothing
+            // more. The brief asks for PM / Site Supervisor to see
+            // training compliance "only if explicitly permitted" and never
+            // to reach unrelated private documents — so the grant is the
+            // coarse gate alone. Visibility then keeps the rows to this
+            // role's own, `training.manage` (the door onto somebody
+            // else's) is absent, and `training.certificates.view` is
+            // absent again: a manager who may note that a report is
+            // uncertified is not handed the certificate itself, nor an
+            // Emirates ID by a side road.
+            'training.view',
+            // Their own kit. `assets.manage` — the door onto the pool, and
+            // onto `purchase_cost` — is absent for the same reason.
+            'assets.view',
             // Files their own claims like anyone else, and acts on the
             // supervisor link of a chain for the team they manage — never
             // the financial sign-off, which `.manage` withholds from this
@@ -196,6 +245,10 @@ class RolePermissionSeeder extends Seeder
             'daily_site_reports.pdf',
             'documents.view', 'documents.create', 'documents.update',
             'onboarding.view',
+            // Own rows only, exactly as for Project Manager: read the
+            // training list, never a colleague's certificate.
+            'training.view',
+            'assets.view',
             // Claims are self-service exactly like leave is: read the door,
             // file your own, edit your own draft — never approve, because
             // this role is not an approver step on any chain that ships.
@@ -226,6 +279,11 @@ class RolePermissionSeeder extends Seeder
             'daily_site_reports.pdf',
             'documents.view', 'documents.create', 'documents.update',
             'onboarding.view',
+            // Own rows only. A supervisor is exactly the person the brief
+            // warns should see compliance without being handed unrelated
+            // private files — so the coarse gate and nothing behind it.
+            'training.view',
+            'assets.view',
             // As above, plus `.approve`: a supervisor is the
             // `reporting_manager` link of EXP-STD, so they need the coarse
             // gate on POST /expenses/{id}/approve to even reach the policy
@@ -270,6 +328,14 @@ class RolePermissionSeeder extends Seeder
             'reports.view', 'reports.export',
             'documents.view',
             'onboarding.view',
+            // Read-only, like every other module this role touches:
+            // their own course history and their own kit, narrowed by
+            // Visibility because `training.manage` and `assets.manage`
+            // are both absent. `purchase_cost` is likewise withheld —
+            // Finance may see an asset's cost through the master record it
+            // actually maintains, not by browsing a colleague's desk.
+            'training.view',
+            'assets.view',
             'audit.view',
         ],
 
@@ -297,6 +363,15 @@ class RolePermissionSeeder extends Seeder
             'daily_site_reports.view', 'daily_site_reports.pdf',
             'documents.view',
             'onboarding.view',
+            // Read-only on training, plus the one extra the brief calls
+            // out: "summary/read access if granted". `assets.history.view`
+            // lets this role read who has held what — a hand-over log is a
+            // control document, not a personal file — while `assets.manage`
+            // stays absent, so the master record and `purchase_cost`
+            // remain HR's. `training.certificates.view` is absent for the
+            // same reason it is absent from every non-HR role.
+            'training.view',
+            'assets.view', 'assets.history.view',
             // Deliberately `.view` and nothing else. Management reads
             // expense records but does not file them, does not approve them
             // and does not open the receipts attached to them — read-only is
@@ -345,6 +420,16 @@ class RolePermissionSeeder extends Seeder
             // and the detail both narrow to the caller's own employee row
             // unless `onboarding.manage` is held.
             'onboarding.view',
+            // Their own course history and their own kit, and nothing
+            // else. Both doors are coarse gates that Visibility then
+            // narrows to this person's own rows: `training.manage` and
+            // `assets.manage` are absent, which is what stops an employee
+            // reading a colleague's certificate or browsing the pool —
+            // and `training.assign`, `training.complete` and
+            // `assets.assign` are absent again, because HR puts people on
+            // courses and hands out the tools, not the other way round.
+            'training.view',
+            'assets.view',
             // Their own claims, and nothing else. `expenses.view` is the
             // coarse gate that lets GET /expenses through at all —
             // Visibility then narrows every row to their own, because this

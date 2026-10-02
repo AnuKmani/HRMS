@@ -2,6 +2,9 @@
 
 use App\Http\Controllers\Api\V1\AllowanceController;
 use App\Http\Controllers\Api\V1\ApprovalWorkflowController;
+use App\Http\Controllers\Api\V1\AssetAssignmentController;
+use App\Http\Controllers\Api\V1\AssetController;
+use App\Http\Controllers\Api\V1\AssetTypeController;
 use App\Http\Controllers\Api\V1\AttendanceController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ClientSettingsController;
@@ -13,6 +16,7 @@ use App\Http\Controllers\Api\V1\EmployeeBankAccountController;
 use App\Http\Controllers\Api\V1\EmployeeController;
 use App\Http\Controllers\Api\V1\EmployeeDocumentController;
 use App\Http\Controllers\Api\V1\EmployeeSiteAssignmentController;
+use App\Http\Controllers\Api\V1\EmployeeTrainingController;
 use App\Http\Controllers\Api\V1\ExpenseController;
 use App\Http\Controllers\Api\V1\HolidayController;
 use App\Http\Controllers\Api\V1\LeaveBalanceController;
@@ -33,6 +37,8 @@ use App\Http\Controllers\Api\V1\SiteActivityReportController;
 use App\Http\Controllers\Api\V1\SiteController;
 use App\Http\Controllers\Api\V1\SiteVisitController;
 use App\Http\Controllers\Api\V1\TimesheetController;
+use App\Http\Controllers\Api\V1\TrainingProgramController;
+use App\Http\Controllers\Api\V1\TrainingTypeController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -828,5 +834,174 @@ Route::prefix('v1')->group(function () {
         Route::get('employees/{employee}/bank-account', [EmployeeBankAccountController::class, 'show']);
 
         Route::put('employees/{employee}/bank-account', [EmployeeBankAccountController::class, 'update']);
+
+        /* ------------------------------------ Phase 11: training, assets */
+
+        // Two new modules, twelve coarse gates across them, and the
+        // row-level answer always from the policy rather than from the
+        // middleware — the same split documents, leave and expenses keep.
+        //
+        //   training              `training.view`        read the catalogue and
+        //                                               the list; Visibility
+        //                                               narrows every row to your
+        //                                               own unless
+        //                                               `training.manage` too.
+        //                       `training.create`      add a program.
+        //                       `training.update`      correct one; also the gate
+        //                                               on cancelling an enrolment.
+        //                       `training.manage`      the ONLY door onto a
+        //                                               colleague's course record.
+        //                       `training.assign`      put somebody on a course —
+        //                                               deliberately with no
+        //                                               self-service half.
+        //                       `training.complete`    record a pass, and the gate
+        //                                               on the certificate upload.
+        //                       `training.certificates.view`
+        //                                               a colleague's certificate
+        //                                               FILE. Your own needs only
+        //                                               `training.view`, so
+        //                                               `training.manage` does not
+        //                                               open it either.
+        //                       `training.expiry.view` the cross-employee "whose
+        //                                               card is about to lapse"
+        //                                               report.
+        //
+        //   assets                `assets.view`          read the register; without
+        //                                               `assets.manage` Visibility
+        //                                               narrows it to the assets
+        //                                               you have actually been
+        //                                               handed, current and past.
+        //                       `assets.create`        add to the register.
+        //                       `assets.update`        correct the master record.
+        //                       `assets.manage`        status control, the row-scope
+        //                                               door, and the door on
+        //                                               `purchase_cost`.
+        //                       `assets.assign`        hand one out.
+        //                       `assets.return`        take one back — split from
+        //                                               `assign` because in practice
+        //                                               different people do them.
+        //                       `assets.history.view`  the cross-employee
+        //                                               hand-over log.
+
+        // --- training types --------------------------------------------
+        // The vocabulary behind the picker, unpaginated and unscoped: a
+        // training type describes no person, so the whole table is one
+        // answer for everybody who may open the training screen at all.
+        Route::get('training-types', [TrainingTypeController::class, 'index'])
+            ->middleware('permission:training.view');
+
+        // --- training programs -----------------------------------------
+        // The catalogue. No row scope anywhere in this group — a program is
+        // configuration, not a record about a person — and no DELETE,
+        // because a cohort that ran cannot be un-run. Retire instead.
+        Route::get('training-programs', [TrainingProgramController::class, 'index'])
+            ->middleware('permission:training.view');
+
+        Route::post('training-programs', [TrainingProgramController::class, 'store'])
+            ->middleware('permission:training.create');
+
+        Route::get('training-programs/{program}', [TrainingProgramController::class, 'show'])
+            ->whereNumber('program')
+            ->middleware('permission:training.view');
+
+        Route::put('training-programs/{program}', [TrainingProgramController::class, 'update'])
+            ->whereNumber('program')
+            ->middleware('permission:training.update');
+
+        // --- employee training -----------------------------------------
+        // `expiring` before `{training}` — the Phase 7 ordering rule, and
+        // `whereNumber` on the dynamic half so a literal could not be
+        // swallowed by it either way round.
+        Route::get('employee-training/expiring', [EmployeeTrainingController::class, 'expiring'])
+            ->middleware('permission:training.expiry.view');
+
+        Route::get('employee-training', [EmployeeTrainingController::class, 'index'])
+            ->middleware('permission:training.view');
+
+        Route::post('employee-training', [EmployeeTrainingController::class, 'store'])
+            ->middleware('permission:training.assign');
+
+        // Two POSTs rather than a PUT with a `status`: each is a distinct
+        // act with its own permission (`.complete` vs `.update`) and its
+        // own refusal, and a `status` field in a payload is a second way to
+        // say the same thing and a first way to say a different one.
+        Route::post('employee-training/{training}/complete', [EmployeeTrainingController::class, 'complete'])
+            ->whereNumber('training')
+            ->middleware('permission:training.complete');
+
+        Route::post('employee-training/{training}/cancel', [EmployeeTrainingController::class, 'cancel'])
+            ->whereNumber('training')
+            ->middleware('permission:training.update');
+
+        // The bytes, and the only route to them. `training.view` is the
+        // coarse door; EmployeeTrainingPolicy::viewCertificate is the real
+        // one — your own card, or `training.certificates.view` — and it is
+        // deliberately NOT the same answer as the row beside it.
+        Route::get('employee-training/{training}/file', [EmployeeTrainingController::class, 'file'])
+            ->whereNumber('training')
+            ->middleware('permission:training.view');
+
+        Route::get('employee-training/{training}', [EmployeeTrainingController::class, 'show'])
+            ->whereNumber('training')
+            ->middleware('permission:training.view');
+
+        Route::put('employee-training/{training}', [EmployeeTrainingController::class, 'update'])
+            ->whereNumber('training')
+            ->middleware('permission:training.update');
+
+        // The compliance summary sits at the top level rather than under
+        // `employee-training/`, because it answers about the *workforce*
+        // and its own URL keeps `employee-training/{training}` unambiguous
+        // for a reader skimming a log of calls.
+        Route::get('training-compliance', [EmployeeTrainingController::class, 'compliance'])
+            ->middleware('permission:training.view');
+
+        // --- asset types ------------------------------------------------
+        // Same reasoning as training-types: the vocabulary behind the
+        // picker, whole and unscoped.
+        Route::get('asset-types', [AssetTypeController::class, 'index'])
+            ->middleware('permission:assets.view');
+
+        // --- assets -----------------------------------------------------
+        // `{asset}` is `whereNumber` and `asset_code` — the barcode a
+        // label will carry — is therefore NOT part of any URL. Codes are
+        // human-chosen strings that may contain anything; ids are the
+        // only thing that is safe to put in a route.
+        Route::get('assets', [AssetController::class, 'index'])
+            ->middleware('permission:assets.view');
+
+        Route::post('assets', [AssetController::class, 'store'])
+            ->middleware('permission:assets.create');
+
+        Route::post('assets/{asset}/assign', [AssetController::class, 'assign'])
+            ->whereNumber('asset')
+            ->middleware('permission:assets.assign');
+
+        Route::post('assets/{asset}/return', [AssetController::class, 'returnAsset'])
+            ->whereNumber('asset')
+            ->middleware('permission:assets.return');
+
+        Route::patch('assets/{asset}/status', [AssetController::class, 'changeStatus'])
+            ->whereNumber('asset')
+            ->middleware('permission:assets.manage');
+
+        Route::get('assets/{asset}', [AssetController::class, 'show'])
+            ->whereNumber('asset')
+            ->middleware('permission:assets.view');
+
+        Route::put('assets/{asset}', [AssetController::class, 'update'])
+            ->whereNumber('asset')
+            ->middleware('permission:assets.update');
+
+        // --- asset assignments ------------------------------------------
+        // Read-only, and `assets.history.view` is the cross-employee door
+        // on top of `assets.view`. Writing happens on the two routes
+        // above, through AssetService, where the lock is.
+        Route::get('asset-assignments', [AssetAssignmentController::class, 'index'])
+            ->middleware('permission:assets.view');
+
+        Route::get('asset-assignments/{assignment}', [AssetAssignmentController::class, 'show'])
+            ->whereNumber('assignment')
+            ->middleware('permission:assets.view');
     });
 });

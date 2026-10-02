@@ -32,6 +32,13 @@ class DatabaseSeeder extends Seeder
             // writing a null foreign key if the type is missing.
             DocumentTypeSeeder::class,
             OnboardingRequirementSeeder::class,
+            // Two more vocabularies: a training program must be able to
+            // name its kind, and an asset must be able to name its kind,
+            // both from a row rather than from a constant. Programs and
+            // assets themselves are never seeded — they are offerings and
+            // property a company decides about, not a shipped vocabulary.
+            TrainingTypeSeeder::class,
+            AssetTypeSeeder::class,
             DevelopmentDataSeeder::class,
         ]);
     }

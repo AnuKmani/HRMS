@@ -102,6 +102,7 @@ class DateField extends StatelessWidget {
     this.onChanged,
     this.firstDate,
     this.lastDate,
+    this.helper,
   });
 
   final String label;
@@ -117,6 +118,17 @@ class DateField extends StatelessWidget {
 
   final DateTime? firstDate;
   final DateTime? lastDate;
+
+  /// A note about *what the date means*, drawn under the box exactly where
+  /// `LabeledTextField` draws its own.
+  ///
+  /// Present for the same reason `LabeledTextField` has one: several of the
+  /// forms in this app hinge on a date that is a real choice rather than a
+  /// required field — "leave this empty and the server works it out" is a
+  /// sentence a person needs while the box is still on screen, and burying
+  /// it in a doc comment nobody taps would leave them to discover the rule
+  /// from a 422.
+  final String? helper;
 
   @override
   Widget build(BuildContext context) {
@@ -159,6 +171,11 @@ class DateField extends StatelessWidget {
               isDense: true,
             ),
           ),
+          if (helper != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(helper!, style: theme.textTheme.bodySmall),
+            ),
         ],
       ),
     );
