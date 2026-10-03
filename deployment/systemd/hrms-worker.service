@@ -1,0 +1,62 @@
+# HRMS Queue Worker Systemd Service
+#
+# Install: sudo cp /path/to/hrms-worker.service /etc/systemd/system/
+# Enable: sudo systemctl daemon-reload && sudo systemctl enable hrms-worker@1 hrms-worker@2
+# Start: sudo systemctl start hrms-worker@1 hrms-worker@2
+# Status: sudo systemctl status hrms-worker@1
+
+[Unit]
+Description=HRMS Queue Worker %i
+After=network.target mariadb.service redis.service
+Requires=mariadb.service
+Wants=redis.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/hrms/backend
+
+# Queue worker command
+# --sleep=3: wait 3 seconds between polling for jobs
+# --tries=3: retry failed jobs up to 3 times
+# --timeout=120: max execution time per job in seconds
+# --max-jobs=1000: restart worker after 1000 jobs (prevents memory leaks)
+# --max-time=3600: restart worker after 1 hour (prevents memory leaks)
+# --queue=high,default,low: priority queues (adjust as needed)
+ExecStart=/usr/bin/php /var/www/hrms/backend/artisan queue:work --sleep=3 --tries=3 --timeout=120 --max-jobs=1000 --max-time=3600
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=5
+
+# Graceful shutdown
+TimeoutStopSec=60
+KillSignal=SIGTERM
+SendSIGKILL=yes
+
+# Environment
+Environment=APP_ENV=production
+Environment=APP_DEBUG=false
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/hrms/backend/storage /var/www/hrms/backend/bootstrap/cache /var/log
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hrms-worker-%i
+
+[Install]
+WantedBy=multi-user.target

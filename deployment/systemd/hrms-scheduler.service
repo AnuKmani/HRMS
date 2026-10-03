@@ -1,0 +1,40 @@
+# HRMS Laravel Scheduler Systemd Timer
+#
+# Install: sudo cp hrms-scheduler.service hrms-scheduler.timer /etc/systemd/system/
+# Enable: sudo systemctl daemon-reload && sudo systemctl enable hrms-scheduler.timer
+# Start: sudo systemctl start hrms-scheduler.timer
+# Status: sudo systemctl status hrms-scheduler.timer
+
+[Unit]
+Description=HRMS Laravel Scheduler (runs every minute)
+After=network.target mariadb.service
+Requires=mariadb.service
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/hrms/backend
+
+# Run the scheduler - this triggers any scheduled tasks that are due
+ExecStart=/usr/bin/php /var/www/hrms/backend/artisan schedule:run
+
+# Environment
+Environment=APP_ENV=production
+Environment=APP_DEBUG=false
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/hrms/backend/storage /var/www/hrms/backend/bootstrap/cache /var/log
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hrms-scheduler
+
+[Install]
+WantedBy=multi-user.target

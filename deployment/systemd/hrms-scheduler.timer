@@ -1,0 +1,24 @@
+# HRMS Laravel Scheduler Timer
+#
+# Runs the scheduler every minute
+# Install: sudo cp hrms-scheduler.timer /etc/systemd/system/
+# Enable: sudo systemctl daemon-reload && sudo systemctl enable hrms-scheduler.timer
+# Start: sudo systemctl start hrms-scheduler.timer
+# Status: sudo systemctl status hrms-scheduler.timer
+
+[Unit]
+Description=Run HRMS Laravel Scheduler every minute
+Requires=hrms-scheduler.service
+
+[Timer]
+# Run every minute
+OnCalendar=*:0/1
+
+# Run immediately if missed
+Persistent=true
+
+# Randomize start slightly to avoid thundering herd (if multiple servers)
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target
