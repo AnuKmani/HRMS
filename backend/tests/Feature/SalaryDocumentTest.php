@@ -97,6 +97,10 @@ class SalaryDocumentTest extends TestCase
 
         $this->become($mineUser);
 
+        // Your own slip waits for HR to release it…
+        $this->get("/api/v1/salary-slips/{$myId}/pdf")->assertForbidden();
+        Payroll::query()->whereKey($myId)->update(['slip_request_status' => Payroll::SLIP_APPROVED]);
+        // …and then downloads. Somebody else's never does.
         $this->get("/api/v1/salary-slips/{$myId}/pdf")->assertOk();
         $this->get("/api/v1/salary-slips/{$theirId}/pdf")->assertForbidden();
 

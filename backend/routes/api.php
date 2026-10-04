@@ -28,6 +28,7 @@ use App\Http\Controllers\Api\V1\LeaveRequestController;
 use App\Http\Controllers\Api\V1\LeaveTypeController;
 use App\Http\Controllers\Api\V1\LoanController;
 use App\Http\Controllers\Api\V1\MovementController;
+use App\Http\Controllers\Api\V1\MyEarningsController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\NotificationPreferenceController;
 use App\Http\Controllers\Api\V1\OnboardingController;
@@ -41,6 +42,7 @@ use App\Http\Controllers\Api\V1\ReportExportController;
 use App\Http\Controllers\Api\V1\RoleController;
 use App\Http\Controllers\Api\V1\SalaryCertificateRequestController;
 use App\Http\Controllers\Api\V1\SalarySlipController;
+use App\Http\Controllers\Api\V1\SalarySlipRequestController;
 use App\Http\Controllers\Api\V1\SiteActivityReportController;
 use App\Http\Controllers\Api\V1\SiteController;
 use App\Http\Controllers\Api\V1\SiteVisitController;
@@ -270,6 +272,9 @@ Route::prefix('v1')->group(function () {
 
         Route::get('attendance/today', [AttendanceController::class, 'today']);
 
+        // Your own day rate and month-to-date estimate (own record only).
+        Route::get('attendance/my-earnings', MyEarningsController::class)
+            ->middleware('permission:attendance.view');
         Route::get('attendance', [AttendanceController::class, 'index'])
             ->middleware('permission:attendance.view');
 
@@ -602,6 +607,17 @@ Route::prefix('v1')->group(function () {
         Route::get('salary-slips', [SalarySlipController::class, 'index'])
             ->middleware('permission:salary_slips.view');
 
+        // Employee asks for their payslip; HR releases it. The PDF route below
+        // lets an employee's own slip through only once released.
+        Route::post('salary-slips/{payroll}/request', [SalarySlipRequestController::class, 'request'])
+            ->whereNumber('payroll')
+            ->middleware('permission:salary_slips.view');
+        Route::post('salary-slips/{payroll}/approve', [SalarySlipRequestController::class, 'approve'])
+            ->whereNumber('payroll')
+            ->middleware('permission:salary_slips.manage');
+        Route::post('salary-slips/{payroll}/reject', [SalarySlipRequestController::class, 'reject'])
+            ->whereNumber('payroll')
+            ->middleware('permission:salary_slips.manage');
         Route::get('salary-slips/{payroll}/pdf', [SalarySlipController::class, 'pdf'])
             ->whereNumber('payroll')
             ->middleware('permission:salary_slips.view');

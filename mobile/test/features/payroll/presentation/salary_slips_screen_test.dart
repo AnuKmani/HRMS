@@ -72,7 +72,10 @@ void main() {
 
     expect(find.byKey(const ValueKey('slip-note')), findsOneWidget);
     expect(
-      find.text('Rendered on demand — no copy is kept on this device.'),
+      find.text(
+        'Tap Request to ask HR for your payslip, then download it once '
+        'released. No copy is kept on this device.',
+      ),
       findsOneWidget,
     );
   });

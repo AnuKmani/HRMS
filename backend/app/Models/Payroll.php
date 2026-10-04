@@ -34,6 +34,13 @@ class Payroll extends Model
 {
     use HasFactory;
 
+    /** An employee's request to download their payslip, decided by HR. */
+    public const SLIP_REQUESTED = 'requested';
+
+    public const SLIP_APPROVED = 'approved';
+
+    public const SLIP_REJECTED = 'rejected';
+
     public const STATUS_DRAFT = 'draft';
 
     public const STATUS_CALCULATED = 'calculated';
@@ -88,6 +95,8 @@ class Payroll extends Model
     ];
 
     protected $casts = [
+        'slip_requested_at' => 'datetime',
+        'slip_decided_at' => 'datetime',
         'period_start' => 'date',
         'period_end' => 'date',
         'payroll_year' => 'integer',

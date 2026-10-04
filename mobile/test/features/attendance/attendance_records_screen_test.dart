@@ -4,9 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/data/page_result.dart';
+import 'package:mobile/core/permissions/permission_scope.dart';
 import 'package:mobile/features/attendance/data/attendance_records_repository.dart';
 import 'package:mobile/features/attendance/domain/attendance_record.dart';
 import 'package:mobile/features/attendance/presentation/attendance_records_screen.dart';
+
+import '../../support/fakes.dart';
 
 // A 1×1 transparent PNG: enough for Image.memory to decode.
 final _png = Uint8List.fromList(<int>[
@@ -104,6 +107,14 @@ void main() {
       ProviderScope(
         overrides: [
           attendanceRecordsRepositoryProvider.overrideWithValue(records),
+          // HR: reads everyone's day, so the list opens on today.
+          permissionScopeProvider.overrideWithValue(
+            PermissionScope(
+              buildUser(
+                permissions: const ['attendance.view', 'employees.view'],
+              ),
+            ),
+          ),
         ],
         child: const MaterialApp(home: AttendanceRecordsScreen()),
       ),

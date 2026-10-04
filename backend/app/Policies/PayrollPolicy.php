@@ -4,6 +4,7 @@ namespace App\Policies;
 
 use App\Models\Payroll;
 use App\Models\User;
+use App\Services\SettingsService;
 use App\Support\Visibility;
 
 /**
@@ -140,10 +141,19 @@ class PayrollPolicy
             return false;
         }
 
-        if ($user->employee?->id === $payroll->employee_id) {
+        // HR and payroll read anyone's slip, their own included, without
+        // asking anybody.
+        if (Visibility::mayViewOthersSalarySlips($user)) {
             return true;
         }
 
-        return Visibility::mayViewOthersSalarySlips($user);
+        if ($user->employee?->id !== $payroll->employee_id) {
+            return false;
+        }
+
+        // Your own slip, once HR has released it — unless the business has
+        // switched the release step off.
+        return ! app(SettingsService::class)->bool('payroll.slip_download_requires_approval', true)
+            || $payroll->slip_request_status === Payroll::SLIP_APPROVED;
     }
 }

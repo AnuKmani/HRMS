@@ -7,7 +7,10 @@ import '../../../core/data/page_result.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/presentation/list_state.dart';
 import '../../../core/presentation/paged_list_view.dart';
+import '../../../core/permissions/permission_scope.dart';
+import '../../auth/auth_controller.dart';
 import '../data/attendance_records_repository.dart';
+import '../data/my_earnings.dart';
 import '../domain/attendance_record.dart';
 
 final attendanceRecordsProvider =
@@ -17,11 +20,13 @@ final attendanceRecordsProvider =
 
 class AttendanceRecordsController
     extends PagedListController<AttendanceRecord> {
-  /// Opens on today: "who is in right now?" is the question HR asks first.
+  /// HR opens on today — "who is in right now?" is the question HR asks
+  /// first. Someone reading only their own history opens on all of it.
   @override
-  Map<String, Object?> get initialQuery => <String, Object?>{
-    'date': _isoDate(DateTime.now()),
-  };
+  Map<String, Object?> get initialQuery =>
+      ref.read(permissionScopeProvider).canViewEmployees
+      ? <String, Object?>{'date': _isoDate(DateTime.now())}
+      : const <String, Object?>{};
 
   @override
   Future<PageResult<AttendanceRecord>> fetch({
@@ -141,35 +146,49 @@ class _CheckInsTab extends ConsumerWidget {
     final date = state.query['date'] as String?;
     final status = state.query['status'] as String? ?? '';
 
+    final ownEmployee = ref.watch(
+      authControllerProvider.select((auth) => auth.user?.employee),
+    );
+    final month = (date ?? _isoDate(DateTime.now())).substring(0, 7);
+
     return PagedListView<AttendanceRecord>(
       provider: attendanceRecordsProvider,
       emptyMessage: date == null
           ? 'No attendance recorded yet.'
           : 'Nobody has checked in on $date.',
       emptyHint: 'Records appear here as people check in.',
-      filter: Row(
+      filter: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: _DateFilter(
-              date: date,
-              onChanged: (value) => controller.setFilter('date', value),
-            ),
-          ),
-          const SizedBox(width: 8),
-          DropdownButton<String>(
-            key: const ValueKey('records-status'),
-            value: status,
-            items: const [
-              DropdownMenuItem(value: '', child: Text('All')),
-              DropdownMenuItem(value: 'present', child: Text('Present')),
-              DropdownMenuItem(value: 'late', child: Text('Late')),
-              DropdownMenuItem(value: 'incomplete', child: Text('Left early')),
-              DropdownMenuItem(
-                value: 'missing_checkout',
-                child: Text('No check-out'),
+          if (ownEmployee != null) _EarningsBanner(month: month),
+          Row(
+            children: [
+              Expanded(
+                child: _DateFilter(
+                  date: date,
+                  onChanged: (value) => controller.setFilter('date', value),
+                ),
+              ),
+              const SizedBox(width: 8),
+              DropdownButton<String>(
+                key: const ValueKey('records-status'),
+                value: status,
+                items: const [
+                  DropdownMenuItem(value: '', child: Text('All')),
+                  DropdownMenuItem(value: 'present', child: Text('Present')),
+                  DropdownMenuItem(value: 'late', child: Text('Late')),
+                  DropdownMenuItem(
+                    value: 'incomplete',
+                    child: Text('Left early'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'missing_checkout',
+                    child: Text('No check-out'),
+                  ),
+                ],
+                onChanged: (value) => controller.setFilter('status', value),
               ),
             ],
-            onChanged: (value) => controller.setFilter('status', value),
           ),
         ],
       ),
@@ -326,6 +345,97 @@ Widget _row(String label, String value) => Padding(
   ),
 );
 
+/// "This month: 12 days × AED 1,000 = AED 12,000" — the employee's own
+/// estimate, from the server, for the month being looked at.
+class _EarningsBanner extends ConsumerWidget {
+  const _EarningsBanner({required this.month});
+
+  final String month;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final earnings = ref.watch(myEarningsProvider(month)).value;
+    if (earnings == null || !earnings.available) {
+      return const SizedBox.shrink();
+    }
+    final theme = Theme.of(context);
+
+    return Container(
+      key: const ValueKey('earnings-banner'),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF22C55E).withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Earned in $month (estimate)',
+            style: theme.textTheme.labelLarge,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            formatMoney(earnings.currency, earnings.total ?? 0),
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          Text(
+            '${earnings.daysWorked} day${earnings.daysWorked == 1 ? '' : 's'} × '
+            '${formatMoney(earnings.currency, earnings.dailyRate ?? 0)} a day',
+            style: theme.textTheme.bodySmall,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Your payslip adds allowances and overtime and takes off leave '
+            'and deductions.',
+            style: theme.textTheme.bodySmall,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DayPay extends ConsumerWidget {
+  const _DayPay({required this.record});
+
+  final AttendanceRecord record;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (record.attendanceDate.length < 7) return const SizedBox.shrink();
+    final earnings = ref
+        .watch(myEarningsProvider(record.attendanceDate.substring(0, 7)))
+        .value;
+    final pay = earnings?.payByAttendance[record.id];
+    if (earnings == null || pay == null) return const SizedBox.shrink();
+
+    return Container(
+      key: const ValueKey('day-pay'),
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF22C55E).withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.payments_outlined, color: Color(0xFF15803D)),
+          const SizedBox(width: 10),
+          const Expanded(child: Text("This day's pay (estimate)")),
+          Text(
+            formatMoney(earnings.currency, pay),
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _RecordSheet extends ConsumerWidget {
   const _RecordSheet({required this.record});
 
@@ -360,6 +470,13 @@ class _RecordSheet extends ConsumerWidget {
             _row('Checked in', _hhmm(record.checkInAt)),
             _row('Checked out', _hhmm(record.checkOutAt)),
             _row('Worked', _minutes(record.workingMinutes)),
+            if (ref.watch(
+                  authControllerProvider.select(
+                    (auth) => auth.user?.employee?.id,
+                  ),
+                ) ==
+                record.employeeId)
+              _DayPay(record: record),
             if (record.lateMinutes > 0)
               _row('Late by', _minutes(record.lateMinutes)),
             if (record.checkInLatitude != null &&

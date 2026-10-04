@@ -71,6 +71,11 @@ class PayrollResource extends JsonResource
             'net_salary' => $resource->net_salary,
 
             'status' => $resource->status,
+            // The employee's request to download this payslip, and whether
+            // the caller may download it right now.
+            'slip_request_status' => $resource->slip_request_status,
+            'slip_requested_at' => $resource->slip_requested_at?->toIso8601String(),
+            'can_download' => (bool) $request->user()?->can('slip', $resource),
 
             // --- who moved it, when --------------------------------------
             'reviewed_at' => $resource->reviewed_at?->toIso8601String(),

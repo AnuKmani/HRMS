@@ -140,6 +140,43 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
           .read(attendanceControllerProvider.notifier)
           .checkIn(bytes, purpose: purpose),
     );
+
+    // Only for a check-in the server accepted — not a refusal, and not one
+    // queued offline, which has not happened yet.
+    final after = ref.read(attendanceControllerProvider);
+    if (!mounted ||
+        after.submitError != null ||
+        after.notice != 'Checked in.') {
+      return;
+    }
+    final at = DateTime.tryParse(after.today?.attendance?.checkInAt ?? '')
+        ?.toLocal();
+    final time = at == null
+        ? 'now'
+        : '${at.hour.toString().padLeft(2, '0')}:'
+              '${at.minute.toString().padLeft(2, '0')}';
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        key: const ValueKey('checked-in-dialog'),
+        icon: const Icon(Icons.check_circle, color: Colors.green, size: 52),
+        title: const Text('You are checked in'),
+        content: Text(
+          'Checked in at $time at ${site.name}.\n\n'
+          'Remember to tap CHECK OUT in the evening before you leave. '
+          'If you go to another site during the day, use SITE VISIT.',
+          textAlign: TextAlign.center,
+        ),
+        actions: [
+          FilledButton(
+            key: const ValueKey('checked-in-ok'),
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _startVisit() async {

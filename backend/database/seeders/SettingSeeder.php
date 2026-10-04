@@ -130,6 +130,16 @@ class SettingSeeder extends Seeder
         // (DECIMAL(12,2)) rather than a rule an operator could break by
         // setting it to 7.
         [
+            // On by default: an employee asks, HR releases, then the slip
+            // downloads. Off restores immediate download of your own slip.
+            'key' => 'payroll.slip_download_requires_approval',
+            'value' => '1',
+            'type' => 'boolean',
+            'group' => 'payroll',
+            'label' => 'Payslip download needs HR approval',
+            'description' => 'Employees request their payslip and HR approves it before it can be downloaded.',
+        ],
+        [
             // `fixed` divides the month by `payroll.lop_divisor` (30 by
             // default - the calendar-month convention). `working_days`
             // divides it by the number of working days the period actually

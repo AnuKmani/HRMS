@@ -38,6 +38,8 @@ class Payroll {
     required this.canRecalculate,
     required this.canLock,
     required this.currency,
+    this.slipRequestStatus,
+    this.canDownload = true,
     this.items = const <PayrollItem>[],
     this.reviewedAt,
     this.processedAt,
@@ -84,6 +86,18 @@ class Payroll {
   final String netSalary;
 
   final String status;
+
+  /// The employee's request to download this payslip: null (not asked),
+  /// `requested`, `approved` or `rejected`.
+  final String? slipRequestStatus;
+
+  /// Whether this session may open the PDF now. A server that predates the
+  /// release step sends nothing, which reads as "yes" — exactly what that
+  /// server would allow.
+  final bool canDownload;
+
+  bool get slipRequested => slipRequestStatus == 'requested';
+  bool get slipRejected => slipRequestStatus == 'rejected';
   final String? blockedReason;
   final bool canRecalculate;
   final bool canLock;
@@ -158,6 +172,8 @@ class Payroll {
     canRecalculate: json['can_recalculate'] != false,
     canLock: json['can_lock'] == true,
     currency: json['currency'] as String? ?? 'INR',
+    slipRequestStatus: json['slip_request_status'] as String?,
+    canDownload: json['can_download'] != false,
     items: json['items'] is List
         ? (json['items']! as List)
               .whereType<Map<String, dynamic>>()

@@ -52,6 +52,13 @@ void main() {
       expect(harness.repository.checkInCalls, 1);
       expect(harness.camera.captures, 1);
       expect(harness.repository.checkIns.last.purpose, 'Inspection');
+
+      // Then the reminder to check out in the evening.
+      expect(find.byKey(const ValueKey('checked-in-dialog')), findsOneWidget);
+      expect(find.textContaining('CHECK OUT in the evening'), findsOneWidget);
+      await tap(tester, find.byKey(const ValueKey('checked-in-ok')));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(const ValueKey('checked-in-dialog')), findsNothing);
     });
 
     testWidgets('check-out submits by itself, once', (tester) async {
