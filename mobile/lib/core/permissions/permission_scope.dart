@@ -39,6 +39,12 @@ class PermissionScope {
     return true;
   }
 
+  /* ------------------------------------------------------- dashboard */
+
+  /// The summary at the top of the dashboard. Which of its numbers appear
+  /// is the server's per-block answer; this only decides whether to ask.
+  bool get canViewDashboard => can('dashboard.view');
+
   /* ------------------------------------------------------- employees */
 
   bool get canViewEmployees => can('employees.view');

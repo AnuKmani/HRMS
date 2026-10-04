@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import '../../core/permissions/permission_scope.dart';
 import '../auth/auth_controller.dart';
 import '../auth/auth_models.dart';
+import '../dashboard/my_summary.dart';
+import '../dashboard/my_summary_card.dart';
 import '../notifications/presentation/notifications_controller.dart';
 
 /// Where a signed-in user lands, and the way into each module.
@@ -286,6 +288,8 @@ class HomeScreen extends ConsumerWidget {
               style: theme.textTheme.bodySmall,
             ),
           ),
+          if (scope.canViewDashboard)
+            MySummaryCard(onOpen: (path) => _open(context, ref, path)),
           if (modules.isEmpty)
             Padding(
               key: const ValueKey('no-modules'),
@@ -316,11 +320,14 @@ class HomeScreen extends ConsumerWidget {
   }
 
   /// Every way off the dashboard comes back through here, so the bell's
-  /// number is re-read on return — approving a leave request or opening a
+  /// number and the summary are re-read on return — approving a leave request or opening a
   /// payslip can change it without the inbox ever being visited.
   Future<void> _open(BuildContext context, WidgetRef ref, String path) async {
     await context.push(path);
-    if (context.mounted) ref.invalidate(unreadNotificationsProvider);
+    if (!context.mounted) return;
+    ref
+      ..invalidate(unreadNotificationsProvider)
+      ..invalidate(mySummaryProvider);
   }
 
   String? _subtitle(EmployeeBrief? employee) {

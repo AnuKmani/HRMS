@@ -11,6 +11,7 @@ import 'package:mobile/features/account/forgot_password_screen.dart';
 import 'package:mobile/features/account/sessions_screen.dart';
 import 'package:mobile/features/auth/auth_repository.dart';
 import 'package:mobile/core/storage/device_identity.dart';
+import 'package:mobile/features/dashboard/my_summary.dart';
 import 'package:mobile/features/home/home_screen.dart';
 import 'package:mobile/features/notifications/data/notifications_repository.dart';
 import 'package:mobile/features/notifications/domain/app_notification.dart';
@@ -117,6 +118,19 @@ class FakeAccount implements AccountRepository {
   }
 }
 
+class FakeSummary implements MySummaryRepository {
+  FakeSummary(this.json);
+
+  final Map<String, dynamic> json;
+  int calls = 0;
+
+  @override
+  Future<MySummary> fetch() async {
+    calls++;
+    return MySummary.fromJson(json);
+  }
+}
+
 Map<String, dynamic> notificationRow(
   int id, {
   bool read = false,
@@ -142,6 +156,7 @@ void main() {
   late InMemoryTokenStore tokenStore;
   late FakeNotifications notifications;
   late FakeAccount account;
+  late FakeSummary summary;
 
   setUp(() {
     auth = FakeAuthRepository(user: buildUser(name: 'Grace Hopper'));
@@ -152,6 +167,14 @@ void main() {
       notificationRow(3),
     ]);
     account = FakeAccount();
+    summary = FakeSummary({
+      'role': 'employee',
+      'blocks': {
+        'attendance': {'checked_in_at': null, 'checked_out_at': null},
+        'leave': {'pending': 2, 'approved_upcoming': 0},
+        'notifications': {'unread': 2},
+      },
+    });
   });
 
   Future<void> pumpApp(WidgetTester tester, {bool signedIn = true}) async {
@@ -167,6 +190,7 @@ void main() {
           ),
           notificationsRepositoryProvider.overrideWithValue(notifications),
           accountRepositoryProvider.overrideWithValue(account),
+          mySummaryRepositoryProvider.overrideWithValue(summary),
         ],
         child: const HrmsApp(),
       ),
@@ -186,6 +210,37 @@ void main() {
         ),
         findsOneWidget,
       );
+    });
+  });
+
+  group('summary', () {
+    testWidgets('draws only the blocks the server sent, and opens them', (
+      tester,
+    ) async {
+      auth.user = buildUser(
+        permissions: const ['dashboard.view', 'leave.view'],
+      );
+      await pumpApp(tester);
+
+      expect(find.byKey(const ValueKey('my-summary')), findsOneWidget);
+      expect(find.text('Not checked in'), findsOneWidget);
+      expect(find.text('2'), findsWidgets);
+      expect(find.byKey(const ValueKey('summary-payslip')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('summary-leave-available')),
+        findsNothing,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('summary-leave-pending')));
+      await advance(tester);
+      expect(find.byType(HomeScreen), findsNothing);
+    });
+
+    testWidgets('is not asked for without dashboard.view', (tester) async {
+      await pumpApp(tester);
+
+      expect(summary.calls, 0);
+      expect(find.byKey(const ValueKey('my-summary')), findsNothing);
     });
   });
 
