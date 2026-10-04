@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/permissions/permission_scope.dart';
 import '../auth/auth_controller.dart';
 import '../auth/auth_models.dart';
+import '../notifications/presentation/notifications_controller.dart';
 
 /// Where a signed-in user lands, and the way into each module.
 ///
@@ -24,6 +25,9 @@ class HomeScreen extends ConsumerWidget {
     final user = auth.user;
     final subtitle = _subtitle(user?.employee);
     final theme = Theme.of(context);
+    // A failed count is not worth an error on the dashboard: the bell just
+    // goes without a number until the next successful refresh.
+    final unread = ref.watch(unreadNotificationsProvider).value ?? 0;
 
     final modules = <_Module>[
       // First, and not gated on a permission: recording your own day is not
@@ -219,6 +223,22 @@ class HomeScreen extends ConsumerWidget {
         title: const Text('HRMS'),
         actions: [
           IconButton(
+            key: const ValueKey('open-notifications'),
+            tooltip: 'Notifications',
+            icon: Badge(
+              isLabelVisible: unread > 0,
+              label: Text(unread > 99 ? '99+' : '$unread'),
+              child: const Icon(Icons.notifications_outlined),
+            ),
+            onPressed: () => _open(context, ref, '/notifications'),
+          ),
+          IconButton(
+            key: const ValueKey('change-password'),
+            tooltip: 'Change password',
+            icon: const Icon(Icons.password),
+            onPressed: () => _open(context, ref, '/account/password'),
+          ),
+          IconButton(
             tooltip: 'Sign out',
             icon: const Icon(Icons.logout),
             onPressed: () => ref.read(authControllerProvider.notifier).logout(),
@@ -269,12 +289,20 @@ class HomeScreen extends ConsumerWidget {
                   title: Text(module.label),
                   subtitle: Text(module.subtitle),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () => context.push(module.path),
+                  onTap: () => _open(context, ref, module.path),
                 ),
               ),
         ],
       ),
     );
+  }
+
+  /// Every way off the dashboard comes back through here, so the bell's
+  /// number is re-read on return — approving a leave request or opening a
+  /// payslip can change it without the inbox ever being visited.
+  Future<void> _open(BuildContext context, WidgetRef ref, String path) async {
+    await context.push(path);
+    if (context.mounted) ref.invalidate(unreadNotificationsProvider);
   }
 
   String? _subtitle(EmployeeBrief? employee) {
