@@ -19,6 +19,7 @@ class CheckInSubmission {
     required this.clientEventId,
     required this.deviceReference,
     required this.selfieBytes,
+    this.purpose,
     this.source = 'online',
   });
 
@@ -27,6 +28,9 @@ class CheckInSubmission {
   final String clientEventId;
   final String deviceReference;
   final Uint8List selfieBytes;
+
+  /// What the employee is on site to do today, in their own words.
+  final String? purpose;
 
   /// `online` when the request goes straight out, `offline` when it was
   /// queued on the device and is being replayed now. Never `manual` — the

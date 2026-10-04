@@ -81,6 +81,22 @@ final class ClientInput
             : Attendance::SOURCE_ONLINE;
     }
 
+    /**
+     * A free-text field as the employee typed it, trimmed; null when blank.
+     */
+    public static function text(array $data, string $key): ?string
+    {
+        $value = $data[$key] ?? null;
+
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $value = trim($value);
+
+        return $value === '' ? null : $value;
+    }
+
     public static function deviceReference(array $data): ?string
     {
         $value = $data['device_reference'] ?? null;

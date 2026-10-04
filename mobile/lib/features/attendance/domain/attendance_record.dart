@@ -33,6 +33,7 @@ class AttendanceRecord {
     this.checkOutAccuracy,
     this.checkOutDistance,
     this.hasSelfie = false,
+    this.checkInPurpose,
     this.scheduledStartAt,
     this.scheduledEndAt,
     this.source,
@@ -73,6 +74,9 @@ class AttendanceRecord {
   final double? checkOutDistance;
 
   final bool hasSelfie;
+
+  /// What the employee said they were on site to do, at check-in.
+  final String? checkInPurpose;
 
   final String? scheduledStartAt;
   final String? scheduledEndAt;
@@ -129,6 +133,7 @@ class AttendanceRecord {
       checkOutAccuracy: _decimal(json['check_out_accuracy']),
       checkOutDistance: _decimal(json['check_out_distance']),
       hasSelfie: json['has_selfie'] == true,
+      checkInPurpose: json['check_in_purpose'] as String?,
       scheduledStartAt: json['scheduled_start_at'] as String?,
       scheduledEndAt: json['scheduled_end_at'] as String?,
       source: json['source'] as String?,
@@ -150,6 +155,15 @@ class SiteVisit {
     this.siteName,
     this.startDistance,
     this.endDistance,
+    this.employeeId,
+    this.employeeName,
+    this.employeeCode,
+    this.projectName,
+    this.remarks,
+    this.startLatitude,
+    this.startLongitude,
+    this.endLatitude,
+    this.endLongitude,
   });
 
   final int id;
@@ -163,10 +177,24 @@ class SiteVisit {
   final double? startDistance;
   final double? endDistance;
 
+  /// Present on list rows (`GET /site-visits` embeds them); the caller's own
+  /// day leaves them out because it is always theirs.
+  final int? employeeId;
+  final String? employeeName;
+  final String? employeeCode;
+  final String? projectName;
+  final String? remarks;
+  final double? startLatitude;
+  final double? startLongitude;
+  final double? endLatitude;
+  final double? endLongitude;
+
   bool get isOpen => endedAt == null;
 
   factory SiteVisit.fromJson(Map<String, dynamic> json) {
     final site = json['site'];
+    final employee = json['employee'];
+    final project = json['project'];
 
     return SiteVisit(
       id: _int(json['id']) ?? 0,
@@ -179,6 +207,17 @@ class SiteVisit {
       siteName: site is Map ? site['name'] as String? : null,
       startDistance: _decimal(json['start_distance']),
       endDistance: _decimal(json['end_distance']),
+      employeeId: _int(json['employee_id']),
+      employeeName: employee is Map ? employee['full_name'] as String? : null,
+      employeeCode: employee is Map
+          ? employee['employee_code'] as String?
+          : null,
+      projectName: project is Map ? project['name'] as String? : null,
+      remarks: json['remarks'] as String?,
+      startLatitude: _decimal(json['start_latitude']),
+      startLongitude: _decimal(json['start_longitude']),
+      endLatitude: _decimal(json['end_latitude']),
+      endLongitude: _decimal(json['end_longitude']),
     );
   }
 }

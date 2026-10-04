@@ -23,6 +23,13 @@ abstract class AttendanceRecordsRepository {
     Map<String, Object?> query = const <String, Object?>{},
   });
 
+  /// `GET /site-visits` — trips between sites during the day, scoped by the
+  /// same row rule as attendance.
+  Future<PageResult<SiteVisit>> visits({
+    int page = 1,
+    Map<String, Object?> query = const <String, Object?>{},
+  });
+
   /// The check-in selfie as image bytes. Behind the same row-level rule as
   /// the record itself, so a 403 here means "not yours to see".
   Future<Uint8List> selfie(int attendanceId);
@@ -47,6 +54,19 @@ class ApiAttendanceRecordsRepository implements AttendanceRecordsRepository {
       envelope,
       AttendanceRecord.fromJson,
     );
+  }
+
+  @override
+  Future<PageResult<SiteVisit>> visits({
+    int page = 1,
+    Map<String, Object?> query = const <String, Object?>{},
+  }) async {
+    final envelope = await _client.get(
+      '/site-visits',
+      query: <String, Object?>{...query, 'page': page},
+    );
+
+    return PageResult<SiteVisit>.fromEnvelope(envelope, SiteVisit.fromJson);
   }
 
   @override

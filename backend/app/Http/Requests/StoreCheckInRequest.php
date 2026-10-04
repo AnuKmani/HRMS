@@ -48,6 +48,10 @@ class StoreCheckInRequest extends FormRequest
         return [
             'site_id' => ['required', 'integer', 'exists:sites,id'],
 
+            // What the employee is on site to do today. Optional so an
+            // offline check-in queued by an older build still replays.
+            'purpose' => ['nullable', 'string', 'max:150'],
+
             'latitude' => ['required', 'numeric', 'min:-90', 'max:90'],
             'longitude' => ['required', 'numeric', 'min:-180', 'max:180'],
 

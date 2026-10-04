@@ -150,6 +150,40 @@ class AttendanceCheckInTest extends TestCase
         $this->assertStringNotContainsString('..', $attendance->check_in_selfie_path);
     }
 
+    public function test_the_purpose_given_at_check_in_is_kept_and_returned(): void
+    {
+        $world = $this->world();
+        Sanctum::actingAs($world['user']);
+
+        $this->post('/api/v1/attendance/check-in', $this->payload($world['site'], [
+            'purpose' => '  Chiller installation, level 3  ',
+        ]))
+            ->assertCreated()
+            ->assertJsonPath('data.check_in_purpose', 'Chiller installation, level 3');
+
+        $this->assertSame('Chiller installation, level 3', Attendance::query()->sole()->check_in_purpose);
+    }
+
+    public function test_a_check_in_without_a_purpose_is_still_accepted(): void
+    {
+        $world = $this->world();
+        Sanctum::actingAs($world['user']);
+
+        $this->post('/api/v1/attendance/check-in', $this->payload($world['site']))->assertCreated();
+
+        $this->assertNull(Attendance::query()->sole()->check_in_purpose);
+    }
+
+    public function test_a_purpose_longer_than_150_characters_is_rejected(): void
+    {
+        $world = $this->world();
+        Sanctum::actingAs($world['user']);
+
+        $this->postJson('/api/v1/attendance/check-in', $this->payload($world['site'], [
+            'purpose' => str_repeat('a', 151),
+        ]))->assertStatus(422)->assertJsonValidationErrors('purpose');
+    }
+
     public function test_the_session_decides_who_is_recorded_not_the_payload(): void
     {
         $world = $this->world();

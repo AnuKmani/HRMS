@@ -30,6 +30,10 @@ class AttendanceScreen extends ConsumerStatefulWidget {
   static const checkIn = 'check-in';
   static const checkOut = 'check-out';
 
+  /// Start a site visit — or, with one already open, just show it so the
+  /// person can end it.
+  static const visit = 'visit';
+
   @override
   ConsumerState<AttendanceScreen> createState() => _AttendanceScreenState();
 }
@@ -67,6 +71,12 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
         // present over.
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _checkIn();
+        });
+      case AttendanceScreen.visit
+          when state.openVisit == null && state.selectedSite != null:
+        _autoStarted = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _startVisit();
         });
       case AttendanceScreen.checkOut when today.canCheckOut:
         _autoStarted = true;
@@ -107,11 +117,28 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
   }
 
   Future<void> _checkIn() async {
+    final site = ref.read(attendanceControllerProvider).selectedSite;
+    if (site == null) return;
+
+    // Where and why first, then the photograph: the selfie is the last
+    // step so the moment it captures is the moment of check-in.
+    final purpose = await showDialog<String>(
+      context: context,
+      builder: (context) => _CheckInPurposeDialog(
+        siteName: site.projectName == null
+            ? site.name
+            : '${site.name} · ${site.projectName}',
+      ),
+    );
+    if (purpose == null || !mounted) return;
+
     final bytes = await SelfieCaptureSheet.show(context);
     if (bytes == null || !mounted) return;
 
     await _run(
-      () => ref.read(attendanceControllerProvider.notifier).checkIn(bytes),
+      () => ref
+          .read(attendanceControllerProvider.notifier)
+          .checkIn(bytes, purpose: purpose),
     );
   }
 
@@ -568,6 +595,130 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
         context: context,
         builder: (context) => const _PurposeDialog(),
       );
+}
+
+/// Where you are checking in, and what you are there to do.
+///
+/// The suggestions are only shortcuts into the text box — the employee can
+/// type anything, and the server stores exactly what was sent.
+class _CheckInPurposeDialog extends StatefulWidget {
+  const _CheckInPurposeDialog({required this.siteName});
+
+  final String siteName;
+
+  @override
+  State<_CheckInPurposeDialog> createState() => _CheckInPurposeDialogState();
+}
+
+class _CheckInPurposeDialogState extends State<_CheckInPurposeDialog> {
+  static const _suggestions = <String>[
+    'Regular site work',
+    'Installation',
+    'Inspection',
+    'Maintenance',
+    'Meeting',
+  ];
+
+  final TextEditingController _purpose = TextEditingController();
+
+  @override
+  void dispose() {
+    _purpose.dispose();
+    super.dispose();
+  }
+
+  void _continue() {
+    final text = _purpose.text.trim();
+    if (text.isEmpty) return;
+    Navigator.of(context).pop(text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return AlertDialog(
+      title: const Text('Check in'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              key: const ValueKey('check-in-site'),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primaryContainer,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.location_on,
+                    color: theme.colorScheme.onPrimaryContainer,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      widget.siteName,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: theme.colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              key: const ValueKey('check-in-purpose'),
+              controller: _purpose,
+              autofocus: true,
+              maxLength: 150,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _continue(),
+              decoration: const InputDecoration(
+                labelText: 'Purpose',
+                hintText: 'What will you be doing here today?',
+              ),
+            ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                for (final suggestion in _suggestions)
+                  ActionChip(
+                    label: Text(suggestion),
+                    onPressed: () => setState(() {
+                      _purpose.text = suggestion;
+                      _purpose.selection = TextSelection.collapsed(
+                        offset: suggestion.length,
+                      );
+                    }),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        ListenableBuilder(
+          listenable: _purpose,
+          builder: (context, _) => FilledButton.icon(
+            key: const ValueKey('check-in-continue'),
+            onPressed: _purpose.text.trim().isEmpty ? null : _continue,
+            icon: const Icon(Icons.photo_camera_front),
+            label: const Text('Take selfie'),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 /// Why the visit is happening, asked once.

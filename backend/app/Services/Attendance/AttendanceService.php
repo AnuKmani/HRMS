@@ -157,6 +157,7 @@ final class AttendanceService
                 $attendance->check_in_accuracy = $point['accuracy'];
                 $attendance->check_in_distance = $result->distanceMetresRounded();
                 $attendance->check_in_selfie_path = $selfiePath;
+                $attendance->check_in_purpose = ClientInput::text($data, 'purpose');
                 $attendance->shift_id = $plan->shiftId;
                 $attendance->scheduled_start_at = $plan->scheduledStart;
                 $attendance->scheduled_end_at = $plan->scheduledEnd;

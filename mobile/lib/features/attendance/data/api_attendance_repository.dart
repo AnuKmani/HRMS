@@ -41,6 +41,7 @@ class ApiAttendanceRepository implements AttendanceRepository {
       'client_event_id': submission.clientEventId,
       'device_reference': submission.deviceReference,
       'source': submission.source,
+      if (submission.purpose != null) 'purpose': submission.purpose,
     };
 
     final envelope = await _client.postMultipart(

@@ -34,10 +34,26 @@ void main() {
     await tester.pump();
   }
 
-  /// Opens the sheet, takes the photograph, and accepts it.
-  Future<void> takeSelfie(WidgetTester tester) async {
+  /// Presses CHECK IN and answers the "where and why" dialog, landing on
+  /// the selfie sheet — the step every check-in now starts with.
+  Future<void> startCheckIn(
+    WidgetTester tester, {
+    String purpose = 'Installation',
+  }) async {
     await tap(tester, find.byKey(const ValueKey('attendance-check-in')));
     await tester.pump(const Duration(milliseconds: 300));
+    await tester.enterText(
+      find.byKey(const ValueKey('check-in-purpose')),
+      purpose,
+    );
+    await tester.pump();
+    await tap(tester, find.byKey(const ValueKey('check-in-continue')));
+    await tester.pump(const Duration(milliseconds: 300));
+  }
+
+  /// Opens the sheet, takes the photograph, and accepts it.
+  Future<void> takeSelfie(WidgetTester tester) async {
+    await startCheckIn(tester);
 
     expect(find.text('Check-in photo'), findsOneWidget);
 
@@ -232,8 +248,7 @@ void main() {
     ) async {
       await open(tester);
 
-      await tap(tester, find.byKey(const ValueKey('attendance-check-in')));
-      await tester.pump(const Duration(milliseconds: 300));
+      await startCheckIn(tester);
 
       await tap(tester, find.text('Cancel'));
       await tester.pump(const Duration(milliseconds: 300));
@@ -248,8 +263,7 @@ void main() {
     ) async {
       await open(tester);
 
-      await tap(tester, find.byKey(const ValueKey('attendance-check-in')));
-      await tester.pump(const Duration(milliseconds: 300));
+      await startCheckIn(tester);
 
       await tap(tester, find.byType(FloatingActionButton));
       await tester.pump(const Duration(milliseconds: 100));
@@ -279,8 +293,7 @@ void main() {
 
       harness.repository.hold = Completer<void>();
 
-      await tap(tester, find.byKey(const ValueKey('attendance-check-in')));
-      await tester.pump(const Duration(milliseconds: 300));
+      await startCheckIn(tester);
 
       await tap(tester, find.byType(FloatingActionButton));
       await tester.pump(const Duration(milliseconds: 100));
@@ -314,8 +327,7 @@ void main() {
 
       await open(tester);
 
-      await tap(tester, find.byKey(const ValueKey('attendance-check-in')));
-      await tester.pump(const Duration(milliseconds: 300));
+      await startCheckIn(tester);
 
       expect(find.textContaining('camera is needed'), findsOneWidget);
       expect(find.text('Allow camera'), findsOneWidget);
@@ -335,8 +347,7 @@ void main() {
 
       await open(tester);
 
-      await tap(tester, find.byKey(const ValueKey('attendance-check-in')));
-      await tester.pump(const Duration(milliseconds: 300));
+      await startCheckIn(tester);
 
       expect(find.textContaining('no camera'), findsOneWidget);
       expect(find.byType(FloatingActionButton), findsNothing);

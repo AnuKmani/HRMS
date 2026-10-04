@@ -41,11 +41,44 @@ class FakeRecords implements AttendanceRecordsRepository {
         'check_in_longitude': '55.1400000',
         'check_in_distance': '12.4',
         'has_selfie': true,
+        'check_in_purpose': 'Chiller installation',
         'status': 'present',
       }),
     ];
 
     return PageResult<AttendanceRecord>(
+      items: items,
+      currentPage: 1,
+      lastPage: 1,
+      perPage: 15,
+      total: items.length,
+      hasNext: false,
+    );
+  }
+
+  @override
+  Future<PageResult<SiteVisit>> visits({
+    int page = 1,
+    Map<String, Object?> query = const <String, Object?>{},
+  }) async {
+    final items = [
+      SiteVisit.fromJson({
+        'id': 9,
+        'employee_id': 7,
+        'employee': {'full_name': 'Asha Nair', 'employee_code': 'EMP-007'},
+        'site_id': 4,
+        'site': {'id': 4, 'name': 'Jumeirah Villa'},
+        'started_at': '2026-10-04T10:30:00+00:00',
+        'ended_at': '2026-10-04T12:15:00+00:00',
+        'duration_minutes': 105,
+        'purpose': 'Snag inspection',
+        'start_latitude': '25.1000000',
+        'start_longitude': '55.2000000',
+        'status': 'completed',
+      }),
+    ];
+
+    return PageResult<SiteVisit>(
       items: items,
       currentPage: 1,
       lastPage: 1,
@@ -89,5 +122,32 @@ void main() {
     expect(find.byKey(const ValueKey('attendance-selfie')), findsOneWidget);
     expect(find.text('25.08000, 55.14000'), findsOneWidget);
     expect(find.text('12 m'), findsOneWidget);
+    expect(find.text('Chiller installation'), findsOneWidget);
+  });
+
+  testWidgets('the site visits tab shows who went where, when and why', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          attendanceRecordsRepositoryProvider.overrideWithValue(FakeRecords()),
+        ],
+        child: const MaterialApp(home: AttendanceRecordsScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('tab-site-visits')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Asha Nair (EMP-007)'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('site-visit-9')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Snag inspection'), findsWidgets);
+    expect(find.text('Jumeirah Villa'), findsWidgets);
+    expect(find.text('1h 45m'), findsWidgets);
+    expect(find.text('25.10000, 55.20000'), findsOneWidget);
   });
 }

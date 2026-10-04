@@ -58,6 +58,7 @@ class AttendanceResource extends JsonResource
             'check_in_accuracy' => $resource->check_in_accuracy,
             'check_in_distance' => $resource->check_in_distance,
             'has_selfie' => $resource->hasSelfie(),
+            'check_in_purpose' => $resource->check_in_purpose,
 
             'check_out_latitude' => $resource->check_out_latitude,
             'check_out_longitude' => $resource->check_out_longitude,

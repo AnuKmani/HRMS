@@ -34,6 +34,13 @@ void main() {
       await settle(tester);
       await tester.pump(const Duration(milliseconds: 300));
 
+      // Where and why first — the site is named, the purpose asked.
+      expect(find.byKey(const ValueKey('check-in-site')), findsOneWidget);
+      await tester.tap(find.text('Inspection'));
+      await tester.pump();
+      await tap(tester, find.byKey(const ValueKey('check-in-continue')));
+      await tester.pump(const Duration(milliseconds: 300));
+
       expect(find.text('Check-in photo'), findsOneWidget);
 
       await tap(tester, find.byType(FloatingActionButton));
@@ -44,6 +51,7 @@ void main() {
 
       expect(harness.repository.checkInCalls, 1);
       expect(harness.camera.captures, 1);
+      expect(harness.repository.checkIns.last.purpose, 'Inspection');
     });
 
     testWidgets('check-out submits by itself, once', (tester) async {
@@ -62,6 +70,31 @@ void main() {
       await settle(tester);
 
       expect(harness.repository.checkOutCalls, 1);
+    });
+
+    testWidgets('visit asks why, then starts the visit', (tester) async {
+      harness.repository.todayResult = todayStatus(
+        checkedIn: true,
+        canCheckIn: false,
+        canCheckOut: true,
+      );
+
+      await pumpAttendance(
+        tester,
+        harness,
+        child: const AttendanceScreen(startAction: AttendanceScreen.visit),
+      );
+      await settle(tester);
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('Why are you visiting?'), findsOneWidget);
+      await tester.enterText(find.byType(TextField).first, 'Snag inspection');
+      await tester.pump();
+      await tap(tester, find.text('Start'));
+      await tester.pump(const Duration(milliseconds: 300));
+      await settle(tester);
+
+      expect(harness.repository.startVisitCalls, 1);
     });
 
     testWidgets('nothing starts without a site to check in at', (tester) async {
@@ -119,6 +152,7 @@ void main() {
 
       expect(find.text('You are checked in'), findsOneWidget);
       expect(find.byKey(const ValueKey('quick-check-in')), findsNothing);
+      expect(find.byKey(const ValueKey('quick-site-visit')), findsOneWidget);
       await tap(tester, find.byKey(const ValueKey('quick-check-out')));
 
       expect(opened, ['/attendance?start=check-out']);

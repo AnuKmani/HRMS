@@ -353,8 +353,10 @@ class AttendanceController extends Notifier<AttendanceState> {
   /// rather than in the capture sheet so a *queued* event is stored already
   /// compressed — the bytes that will eventually be uploaded are the bytes
   /// that were saved.
-  Future<void> checkIn(Uint8List rawSelfie) async {
+  Future<void> checkIn(Uint8List rawSelfie, {String? purpose}) async {
     if (!state.canSubmit) return;
+    final trimmed = purpose?.trim();
+    purpose = trimmed == null || trimmed.isEmpty ? null : trimmed;
 
     final site = state.selectedSite;
     if (site == null) {
@@ -389,6 +391,7 @@ class AttendanceController extends Notifier<AttendanceState> {
           clientEventId: clientEventId,
           deviceReference: await _device.label(),
           selfieBytes: bytes,
+          purpose: purpose,
         ),
       );
 
@@ -401,6 +404,7 @@ class AttendanceController extends Notifier<AttendanceState> {
         failure: failure,
         clientEventId: clientEventId,
         selfie: await _safeCompressed(rawSelfie),
+        purpose: purpose,
       );
     } on SelfieRejected catch (failure) {
       state = state.copyWith(submitting: false, submitError: failure.message);
@@ -661,6 +665,7 @@ class AttendanceController extends Notifier<AttendanceState> {
             clientEventId: event.clientEventId,
             deviceReference: event.deviceReference,
             selfieBytes: selfie,
+            purpose: event.purpose,
             source: 'offline',
           ),
         );

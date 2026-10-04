@@ -82,17 +82,23 @@ class AttendanceQuickCard extends ConsumerWidget {
     }
 
     final Widget? button = today.canCheckOut
-        ? FilledButton.icon(
-            key: const ValueKey('quick-check-out'),
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(56),
-              backgroundColor: theme.colorScheme.error,
-              foregroundColor: theme.colorScheme.onError,
-            ),
-            icon: const Icon(Icons.logout),
-            label: const Text('CHECK OUT'),
-            onPressed: () =>
-                onOpen('/attendance?start=${AttendanceScreen.checkOut}'),
+        ? Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  key: const ValueKey('quick-site-visit'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(56),
+                  ),
+                  icon: const Icon(Icons.directions_walk),
+                  label: const Text('SITE VISIT'),
+                  onPressed: () =>
+                      onOpen('/attendance?start=${AttendanceScreen.visit}'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: _checkOutButton(theme)),
+            ],
           )
         : today.canCheckIn && today.sites.isNotEmpty
         ? FilledButton.icon(
@@ -107,6 +113,28 @@ class AttendanceQuickCard extends ConsumerWidget {
           )
         : null;
 
+    return _layout(theme, headline, detail, button, today);
+  }
+
+  Widget _checkOutButton(ThemeData theme) => FilledButton.icon(
+    key: const ValueKey('quick-check-out'),
+    style: FilledButton.styleFrom(
+      minimumSize: const Size.fromHeight(56),
+      backgroundColor: theme.colorScheme.error,
+      foregroundColor: theme.colorScheme.onError,
+    ),
+    icon: const Icon(Icons.logout),
+    label: const Text('CHECK OUT'),
+    onPressed: () => onOpen('/attendance?start=${AttendanceScreen.checkOut}'),
+  );
+
+  Widget _layout(
+    ThemeData theme,
+    String headline,
+    String? detail,
+    Widget? button,
+    TodayStatus today,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -121,7 +149,7 @@ class AttendanceQuickCard extends ConsumerWidget {
           const SizedBox(height: 4),
           Text(
             today.canCheckOut
-                ? 'Your location is recorded when you check out.'
+                ? 'Site visits and check-out record your location.'
                 : 'Your location and a selfie are recorded when you check in.',
             style: theme.textTheme.bodySmall,
             textAlign: TextAlign.center,
