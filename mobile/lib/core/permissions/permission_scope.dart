@@ -84,6 +84,14 @@ class PermissionScope {
   /// everyone else's overtime arrives from their check-out.
   bool get canFileOvertimeByHand => canCreateOvertime && canManageOvertime;
 
+  /* --------------------------------------------------- logins & roles */
+
+  /// Seeing who an employee signs in as.
+  bool get canViewUsers => can('users.view');
+
+  /// Creating a new joiner's login and choosing (or changing) their role.
+  bool get canManageUsers => can('users.manage');
+
   /* ------------------------------------------------------- employees */
 
   bool get canViewEmployees => can('employees.view');

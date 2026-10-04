@@ -74,6 +74,9 @@ class RolePermissionSeeder extends Seeder
             'settings.view', 'settings.manage',
             'roles.view',
             'users.view',
+            // Issuing a new joiner's login and choosing their role is HR's
+            // job. Super Admin stays out of HR's reach (controller rule).
+            'users.manage',
             'audit.view',
         ],
 

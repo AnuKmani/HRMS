@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/router/return_navigation.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/permissions/permission_scope.dart';
+import 'employee_account_card.dart';
 import '../data/api_employees_repository.dart';
 import '../domain/employee.dart';
 
@@ -228,6 +229,12 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
             _row('Date of birth', employee.dateOfBirth),
             _row('Nationality', employee.nationality),
           ]),
+          if (scope.canViewUsers)
+            EmployeeAccountCard(
+              key: ValueKey('account-card-${employee.id}'),
+              employeeId: employee.id,
+              employeeEmail: employee.email,
+            ),
           _section('Emergency contact', [
             _row('Name', employee.emergencyContactName),
             _row('Phone', employee.emergencyContactPhone),

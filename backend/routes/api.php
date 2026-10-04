@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\V1\DepartmentController;
 use App\Http\Controllers\Api\V1\DesignationController;
 use App\Http\Controllers\Api\V1\DeviceTokenController;
 use App\Http\Controllers\Api\V1\DocumentTypeController;
+use App\Http\Controllers\Api\V1\EmployeeAccountController;
 use App\Http\Controllers\Api\V1\EmployeeBankAccountController;
 use App\Http\Controllers\Api\V1\EmployeeController;
 use App\Http\Controllers\Api\V1\EmployeeDocumentController;
@@ -196,6 +197,19 @@ Route::prefix('v1')->group(function () {
             ->middleware('throttle:write');
         Route::delete('employees/{employee}', [EmployeeController::class, 'destroy'])
             ->middleware('permission:employees.delete');
+
+        // An employee's app login and its one role. HR issues it when a
+        // person joins; the role decides everything they can do — a
+        // Project Manager can add sites because the role can. Only a Super
+        // Admin may hand out Super Admin (enforced in the controller).
+        Route::get('employees/{employee}/account', [EmployeeAccountController::class, 'show'])
+            ->middleware('permission:users.view');
+        Route::post('employees/{employee}/account', [EmployeeAccountController::class, 'store'])
+            ->middleware('permission:users.manage')
+            ->middleware('throttle:write');
+        Route::put('employees/{employee}/account', [EmployeeAccountController::class, 'update'])
+            ->middleware('permission:users.manage')
+            ->middleware('throttle:write');
 
         // Projects.
         Route::get('projects', [ProjectController::class, 'index'])
