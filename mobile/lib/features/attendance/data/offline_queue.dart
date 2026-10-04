@@ -29,7 +29,7 @@ class OfflineEvent {
   const OfflineEvent({
     required this.clientEventId,
     required this.action,
-    required this.siteId,
+    this.siteId,
     required this.capturedAt,
     required this.fix,
     required this.deviceReference,
@@ -51,7 +51,8 @@ class OfflineEvent {
 
   final String action;
 
-  final int siteId;
+  /// Null for a check-in / check-out taken away from any listed site.
+  final int? siteId;
 
   /// For `visit_end`, the row to close. The start of a visit carries
   /// `siteId`; the end carries the visit it belongs to, because those are
@@ -121,7 +122,7 @@ class OfflineEvent {
   factory OfflineEvent.fromJson(Map<String, dynamic> json) => OfflineEvent(
     clientEventId: json['client_event_id'] as String? ?? '',
     action: json['action'] as String? ?? '',
-    siteId: (json['site_id'] as num?)?.toInt() ?? 0,
+    siteId: (json['site_id'] as num?)?.toInt(),
     siteVisitId: (json['site_visit_id'] as num?)?.toInt(),
     purpose: json['purpose'] as String?,
     remarks: json['remarks'] as String?,
@@ -291,7 +292,7 @@ class OfflineQueue {
   /// index that exists to stop exactly that would never fire.
   Future<OfflineEvent> enqueue({
     required String action,
-    required int siteId,
+    int? siteId,
     required LocationFix fix,
     required String deviceReference,
     String? clientEventId,

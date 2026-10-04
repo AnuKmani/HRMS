@@ -2,6 +2,7 @@
 
 namespace App\Services\Attendance;
 
+use App\Models\Employee;
 use App\Models\Site;
 use App\Models\SiteVisit;
 use App\Models\User;
@@ -58,10 +59,14 @@ final class SiteVisitService
                 abort(409, 'You already have a site visit in progress. End it before starting another.');
             }
 
-            $access = $this->siteAccess->authorize($employee, $site, now());
+            // A field role may visit any active site on the company list —
+            // no assignment needed. Being there is still checked below.
+            if ($site->status !== Site::STATUS_ACTIVE) {
+                abort(403, 'This site is not active.');
+            }
 
-            if (! $access->allowed) {
-                abort(403, $access->message);
+            if ($employee->employment_status !== Employee::STATUS_ACTIVE) {
+                abort(403, 'Your employment is not active. Contact HR.');
             }
 
             $point = ClientInput::point($data);

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/device_location.dart';
+import '../domain/assigned_site.dart';
 import '../domain/today_status.dart';
 import 'attendance_controller.dart';
 import 'selfie_capture_sheet.dart';
@@ -65,7 +66,8 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
 
     switch (widget.startAction) {
       case AttendanceScreen.checkIn
-          when today.canCheckIn && state.selectedSite != null:
+          when today.canCheckIn &&
+              (!today.requiresSite || state.selectedSite != null):
         _autoStarted = true;
         // After this frame: the selfie sheet needs a settled route to
         // present over.
@@ -73,7 +75,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
           if (mounted) _checkIn();
         });
       case AttendanceScreen.visit
-          when state.openVisit == null && state.selectedSite != null:
+          when state.openVisit == null && today.canStartSiteVisit:
         _autoStarted = true;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _startVisit();
@@ -117,18 +119,30 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
   }
 
   Future<void> _checkIn() async {
-    final site = ref.read(attendanceControllerProvider).selectedSite;
-    if (site == null) return;
+    final before = ref.read(attendanceControllerProvider);
+    final requiresSite = before.today?.requiresSite ?? false;
+    final site = requiresSite ? before.selectedSite : null;
+    if (requiresSite && site == null) return;
+
+    // Attendance is a selfie and the phone's location, wherever the person
+    // is — office, site, anywhere. The dialog shows the GPS reading that
+    // will be recorded (or the site, where a deployment requires one).
+    final fix = before.fix;
+    final where = site != null
+        ? (site.projectName == null
+              ? site.name
+              : '${site.name} · ${site.projectName}')
+        : fix == null
+        ? 'Your current location (GPS)'
+        : 'Your current location\n'
+              '${fix.latitude.toStringAsFixed(5)}, '
+              '${fix.longitude.toStringAsFixed(5)} · ±${fix.accuracy.round()} m';
 
     // Where and why first, then the photograph: the selfie is the last
     // step so the moment it captures is the moment of check-in.
     final purpose = await showDialog<String>(
       context: context,
-      builder: (context) => _CheckInPurposeDialog(
-        siteName: site.projectName == null
-            ? site.name
-            : '${site.name} · ${site.projectName}',
-      ),
+      builder: (context) => _CheckInPurposeDialog(siteName: where),
     );
     if (purpose == null || !mounted) return;
 
@@ -163,9 +177,11 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
         icon: const Icon(Icons.check_circle, color: Colors.green, size: 52),
         title: const Text('You are checked in'),
         content: Text(
-          'Checked in at $time at ${site.name}.\n\n'
-          'Remember to tap CHECK OUT in the evening before you leave. '
-          'If you go to another site during the day, use SITE VISIT.',
+          'Checked in at $time'
+          '${site == null ? '' : ' at ${site.name}'}. '
+          'Your selfie and location are saved.\n\n'
+          'Remember to tap CHECK OUT in the evening before you leave.'
+          '${after.today?.canStartSiteVisit == true ? ' If you go to a site during the day, use SITE VISIT.' : ''}',
           textAlign: TextAlign.center,
         ),
         actions: [
@@ -180,13 +196,26 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
   }
 
   Future<void> _startVisit() async {
-    final purpose = await _askPurpose(context);
-    if (purpose == null || !mounted) return;
+    final state = ref.read(attendanceControllerProvider);
+    final today = state.today;
+    if (today == null) return;
+
+    final sites = today.visitSites.isNotEmpty ? today.visitSites : today.sites;
+    final answer = await showDialog<_VisitAnswer>(
+      context: context,
+      builder: (context) =>
+          _PurposeDialog(sites: sites, initialSiteId: state.selectedSiteId),
+    );
+    if (answer == null || !mounted) return;
 
     await _run(
       () => ref
           .read(attendanceControllerProvider.notifier)
-          .startVisit(purpose: purpose.$1, remarks: purpose.$2),
+          .startVisit(
+            purpose: answer.purpose,
+            remarks: answer.remarks,
+            siteId: answer.siteId,
+          ),
     );
   }
 
@@ -257,8 +286,11 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
           const SizedBox(height: 12),
           _locationCard(state, controller),
           const SizedBox(height: 12),
-          _siteSection(state, controller),
-          const SizedBox(height: 20),
+          if (today.requiresSite) ...[
+            _siteSection(state, controller),
+            const SizedBox(height: 20),
+          ] else
+            const SizedBox(height: 8),
           ..._actions(state, controller),
           if (state.pending.isNotEmpty) ...[
             const SizedBox(height: 20),
@@ -478,35 +510,23 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
     AttendanceController controller,
   ) {
     final today = state.today!;
-    final site = state.selectedSite;
     final canAct = state.canSubmit;
     final hasLocation = state.location.status == LocationStatus.granted;
+    final siteReady = !today.requiresSite || state.selectedSite != null;
 
     final buttons = <Widget>[];
 
+    // Everyone: check in and check out with a selfie and the phone's
+    // location. No site is needed.
     if (today.canCheckIn) {
       buttons.add(
         _bigButton(
           valueKey: const ValueKey('attendance-check-in'),
-          label: 'CHECK IN',
-          icon: Icons.login,
-          enabled: canAct && hasLocation && site != null,
-          loading: state.submitting,
-          onTap: _checkIn,
-        ),
-      );
-    } else if (!today.checkedIn && today.sites.isEmpty) {
-      // Nowhere to check in at. The button is still drawn — greyed out —
-      // so the person can see what the screen is for and that the selfie
-      // step is waiting behind it, rather than a page with no way forward.
-      buttons.add(
-        _bigButton(
-          valueKey: const ValueKey('attendance-check-in-unavailable'),
           label: 'CHECK IN (SELFIE)',
           icon: Icons.photo_camera_front,
-          enabled: false,
-          loading: false,
-          onTap: () {},
+          enabled: canAct && hasLocation && siteReady,
+          loading: state.submitting,
+          onTap: _checkIn,
         ),
       );
     } else if (today.canCheckOut) {
@@ -522,35 +542,45 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
       );
     }
 
-    buttons.add(
-      _bigButton(
-        valueKey: const ValueKey('attendance-site-visit'),
-        label: state.openVisit == null ? 'START SITE VISIT' : 'END SITE VISIT',
-        icon: Icons.explore_outlined,
-        enabled: canAct && hasLocation && site != null,
-        loading: state.submitting,
-        outlined: true,
-        onTap: state.openVisit == null
-            ? _startVisit
-            : () => _run(controller.endVisit),
-      ),
-    );
-
-    if (today.sites.isEmpty) {
+    // Field roles only (Project Manager, Site Engineer, Site Officer, Site
+    // Supervisor, Technician): the server says so with
+    // `can_start_site_visit`. An open visit can always be ended.
+    if (state.openVisit != null || today.canStartSiteVisit) {
+      final noSites =
+          state.openVisit == null &&
+          today.visitSites.isEmpty &&
+          today.sites.isEmpty;
       buttons.add(
-        Text(
-          'You have no work location yet (office or site), so you cannot '
-          'check in. Ask your Project Manager to add you with Quick site '
-          'setup — then the '
-          'CHECK IN '
-          'button (location + selfie) turns on.',
-          style: Theme.of(context).textTheme.bodySmall,
+        _bigButton(
+          valueKey: const ValueKey('attendance-site-visit'),
+          label: state.openVisit == null
+              ? 'START SITE VISIT'
+              : 'END SITE VISIT',
+          icon: Icons.explore_outlined,
+          enabled: canAct && hasLocation && !noSites,
+          loading: state.submitting,
+          outlined: true,
+          onTap: state.openVisit == null
+              ? _startVisit
+              : () => _run(controller.endVisit),
         ),
       );
-    } else if (!hasLocation) {
+      if (noSites) {
+        buttons.add(
+          Text(
+            'No sites on the company list yet. A Project Manager adds '
+            'sites; then you can start a site visit.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        );
+      }
+    }
+
+    if (!hasLocation) {
       buttons.add(
         Text(
-          'Location is needed before any of these can be recorded.',
+          'Turn on location — your GPS position is recorded with every '
+          'check-in and check-out.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
       );
@@ -641,14 +671,6 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
       ),
     );
   }
-
-  /* ------------------------------------------------------------- prompts */
-
-  static Future<(String, String?)?> _askPurpose(BuildContext context) =>
-      showDialog<(String, String?)>(
-        context: context,
-        builder: (context) => const _PurposeDialog(),
-      );
 }
 
 /// Where you are checking in, and what you are there to do.
@@ -666,11 +688,11 @@ class _CheckInPurposeDialog extends StatefulWidget {
 
 class _CheckInPurposeDialogState extends State<_CheckInPurposeDialog> {
   static const _suggestions = <String>[
-    'Regular site work',
-    'Installation',
-    'Inspection',
-    'Maintenance',
+    'Office work',
+    'Site work',
+    'Field work',
     'Meeting',
+    'Training',
   ];
 
   final TextEditingController _purpose = TextEditingController();
@@ -775,17 +797,25 @@ class _CheckInPurposeDialogState extends State<_CheckInPurposeDialog> {
   }
 }
 
-/// Why the visit is happening, asked once.
+class _VisitAnswer {
+  const _VisitAnswer(this.siteId, this.purpose, this.remarks);
+
+  final int siteId;
+  final String purpose;
+  final String? remarks;
+}
+
+/// Which site, and why — asked once when a visit starts.
 ///
-/// The two controllers live here rather than in `_askPurpose` because the
-/// future returned by `showDialog` resolves when the route is *popped*,
-/// which is a moment before the route is gone — the dialog is still on its
-/// way out, its fields still attached. Disposing at that point throws
-/// "TextEditingController was used after being disposed" from the exit
-/// animation. Owned by this State, they are released when the element is,
-/// which is the same moment and not a frame early.
+/// The sites are the company-wide list from the server (`visit_sites`).
+/// The controllers live in this State, not in the caller, because the
+/// future returned by `showDialog` resolves a moment before the route is
+/// gone; disposing them there would throw from the exit animation.
 class _PurposeDialog extends StatefulWidget {
-  const _PurposeDialog();
+  const _PurposeDialog({required this.sites, this.initialSiteId});
+
+  final List<AssignedSite> sites;
+  final int? initialSiteId;
 
   @override
   State<_PurposeDialog> createState() => _PurposeDialogState();
@@ -794,6 +824,16 @@ class _PurposeDialog extends StatefulWidget {
 class _PurposeDialogState extends State<_PurposeDialog> {
   final TextEditingController _purpose = TextEditingController();
   final TextEditingController _remarks = TextEditingController();
+  int? _siteId;
+
+  @override
+  void initState() {
+    super.initState();
+    final wanted = widget.initialSiteId;
+    _siteId = widget.sites.any((s) => s.id == wanted)
+        ? wanted
+        : (widget.sites.length == 1 ? widget.sites.first.id : null);
+  }
 
   @override
   void dispose() {
@@ -804,41 +844,74 @@ class _PurposeDialogState extends State<_PurposeDialog> {
 
   void _start() {
     final text = _purpose.text.trim();
-    if (text.isEmpty) return;
+    final site = _siteId;
+    if (text.isEmpty || site == null) return;
 
     final notes = _remarks.text.trim();
 
-    Navigator.of(context).pop((text, notes.isEmpty ? null : notes));
+    Navigator.of(context)
+        .pop(_VisitAnswer(site, text, notes.isEmpty ? null : notes));
   }
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Why are you visiting?'),
-    content: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        TextField(
-          controller: _purpose,
-          autofocus: true,
-          maxLength: 150,
-          decoration: const InputDecoration(
-            labelText: 'Purpose',
-            hintText: 'Material delivery, inspection, meeting…',
+    title: const Text('Start site visit'),
+    content: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          DropdownButtonFormField<int>(
+            key: const ValueKey('visit-site'),
+            initialValue: _siteId,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Site'),
+            items: [
+              for (final site in widget.sites)
+                DropdownMenuItem(
+                  value: site.id,
+                  child: Text(
+                    site.projectName == null
+                        ? site.name
+                        : '${site.name} · ${site.projectName}',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+            ],
+            onChanged: (id) => setState(() => _siteId = id),
           ),
-        ),
-        TextField(
-          controller: _remarks,
-          maxLength: 500,
-          decoration: const InputDecoration(labelText: 'Notes (optional)'),
-        ),
-      ],
+          const SizedBox(height: 8),
+          TextField(
+            key: const ValueKey('visit-purpose'),
+            controller: _purpose,
+            maxLength: 150,
+            decoration: const InputDecoration(
+              labelText: 'Purpose',
+              hintText: 'Material delivery, inspection, meeting…',
+            ),
+          ),
+          TextField(
+            controller: _remarks,
+            maxLength: 500,
+            decoration: const InputDecoration(labelText: 'Notes (optional)'),
+          ),
+        ],
+      ),
     ),
     actions: [
       TextButton(
         onPressed: () => Navigator.of(context).pop(),
         child: const Text('Cancel'),
       ),
-      FilledButton(onPressed: _start, child: const Text('Start')),
+      ListenableBuilder(
+        listenable: _purpose,
+        builder: (context, _) => FilledButton(
+          key: const ValueKey('visit-start'),
+          onPressed: _purpose.text.trim().isEmpty || _siteId == null
+              ? null
+              : _start,
+          child: const Text('Start'),
+        ),
+      ),
     ],
   );
 }

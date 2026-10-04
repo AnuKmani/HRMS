@@ -112,12 +112,16 @@ void main() {
   });
 
   group('the ready screen', () {
-    testWidgets('names the day, the site and the shift', (tester) async {
+    testWidgets('names the day and the shift, and asks for no site', (
+      tester,
+    ) async {
       await open(tester);
 
       expect(find.byKey(const ValueKey('attendance-today')), findsOneWidget);
       expect(find.text('2026-09-27'), findsOneWidget);
-      expect(find.text('Whitefield Yard · Metro Line 3'), findsOneWidget);
+      // Attendance is a selfie and a location: no site line, no picker.
+      expect(find.text('Work location'), findsNothing);
+      expect(find.byKey(const ValueKey('attendance-site')), findsNothing);
       expect(find.textContaining('09:00–18:00'), findsOneWidget);
       expect(find.textContaining('grace 10 min'), findsOneWidget);
     });
@@ -146,8 +150,14 @@ void main() {
       );
     });
 
-    testWidgets('a second site turns into a picker', (tester) async {
-      harness.repository.todayResult = todayStatus(siteId: 1, siteIds: [1, 2]);
+    testWidgets('where a site is required, a second site is a picker', (
+      tester,
+    ) async {
+      harness.repository.todayResult = todayStatus(
+        siteId: 1,
+        siteIds: [1, 2],
+        requiresSite: true,
+      );
 
       await open(tester);
 
@@ -185,10 +195,7 @@ void main() {
       expect(find.byKey(const ValueKey('attendance-location')), findsOneWidget);
       expect(checkInButton(tester).onPressed, isNull);
       expect(find.text('Allow location'), findsOneWidget);
-      expect(
-        find.textContaining('Location is needed before any of these'),
-        findsOneWidget,
-      );
+      expect(find.textContaining('Turn on location'), findsOneWidget);
     });
 
     testWidgets('a permanently refused permission points at Settings', (
@@ -428,9 +435,13 @@ void main() {
       await tap(tester, find.byKey(const ValueKey('attendance-site-visit')));
       await tester.pump(const Duration(milliseconds: 300));
 
-      expect(find.text('Why are you visiting?'), findsOneWidget);
+      expect(find.text('Start site visit'), findsOneWidget);
 
-      await tester.enterText(find.byType(TextField).first, 'Material delivery');
+      await tester.enterText(
+        find.byKey(const ValueKey('visit-purpose')),
+        'Material delivery',
+      );
+      await tester.pump();
       await tester.tap(find.text('Start'));
       await tester.pump(const Duration(milliseconds: 300));
       await settle(tester);
@@ -449,11 +460,14 @@ void main() {
       await tap(tester, find.byKey(const ValueKey('attendance-site-visit')));
       await tester.pump(const Duration(milliseconds: 300));
 
-      await tester.enterText(find.byType(TextField).first, '   ');
+      await tester.enterText(
+        find.byKey(const ValueKey('visit-purpose')),
+        '   ',
+      );
       await tester.tap(find.text('Start'));
       await tester.pump(const Duration(milliseconds: 300));
 
-      expect(find.text('Why are you visiting?'), findsOneWidget);
+      expect(find.text('Start site visit'), findsOneWidget);
       expect(harness.repository.startVisitCalls, 0);
     });
 
@@ -467,6 +481,31 @@ void main() {
 
       expect(harness.repository.endVisitCalls, 1);
       expect(find.text('Site visit ended.'), findsOneWidget);
+    });
+
+    testWidgets('is not offered to roles without the Site visit option', (
+      tester,
+    ) async {
+      harness.repository.todayResult = todayStatus(canStartSiteVisit: false);
+
+      await open(tester);
+
+      expect(find.byKey(const ValueKey('attendance-site-visit')), findsNothing);
+      expect(find.byKey(const ValueKey('attendance-check-in')), findsOneWidget);
+    });
+
+    testWidgets('a site that is not listed still lets you check in', (
+      tester,
+    ) async {
+      harness.repository.todayResult = todayStatus(
+        siteId: null,
+        siteIds: const [],
+        canStartSiteVisit: false,
+      );
+
+      await open(tester);
+
+      expect(checkInButton(tester).onPressed, isNotNull);
     });
   });
 }

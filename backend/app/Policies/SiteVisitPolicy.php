@@ -28,9 +28,14 @@ class SiteVisitPolicy
         return Visibility::attendanceIsVisible($user, $siteVisit);
     }
 
+    /**
+     * Only the field roles — Project Manager, Site Engineer, Site Officer,
+     * Site Supervisor, Technician — hold `site_visits.create`. Everyone else
+     * records their day with check-in / check-out alone.
+     */
     public function start(User $user): bool
     {
-        return $user->employee !== null;
+        return $user->employee !== null && $user->can('site_visits.create');
     }
 
     /**

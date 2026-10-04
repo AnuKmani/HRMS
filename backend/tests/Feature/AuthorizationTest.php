@@ -82,7 +82,7 @@ class AuthorizationTest extends TestCase
         $response->assertOk()->assertJsonPath('success', true);
 
         $names = collect($response->json('data'))->pluck('name');
-        $this->assertCount(10, $names);
+        $this->assertCount(12, $names);
         $this->assertContains('HR Admin', $names->all());
         $this->assertContains('Super Admin', $names->all());
 

@@ -40,6 +40,11 @@ class AttendanceCheckOutTest extends TestCase
         $this->seed(RolePermissionSeeder::class);
         $this->seed(SettingSeeder::class);
 
+        // These tests pin the site-bound mode (assignment, geofence, same
+        // site at check-out). The default — check in anywhere — is covered
+        // by AttendanceAnywhereTest.
+        config(['hrms.attendance.require_site' => true]);
+
         $this->travelTo(Carbon::parse('2026-09-27 09:00:00'));
     }
 

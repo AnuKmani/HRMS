@@ -358,12 +358,13 @@ class AttendanceController extends Notifier<AttendanceState> {
     final trimmed = purpose?.trim();
     purpose = trimmed == null || trimmed.isEmpty ? null : trimmed;
 
-    final site = state.selectedSite;
-    if (site == null) {
+    // A site is only sent when this deployment ties check-in to sites.
+    // Normally attendance is the selfie and the GPS reading, anywhere.
+    final requiresSite = state.today?.requiresSite ?? false;
+    final site = requiresSite ? state.selectedSite : null;
+    if (requiresSite && site == null) {
       state = state.copyWith(
-        submitError:
-            'You have no site to check in at. Ask HR to post you '
-            'to one.',
+        submitError: 'Choose the site you are checking in at.',
       );
       return;
     }
@@ -386,7 +387,7 @@ class AttendanceController extends Notifier<AttendanceState> {
 
       await _repository.checkIn(
         CheckInSubmission(
-          siteId: site.id,
+          siteId: site?.id,
           fix: fix,
           clientEventId: clientEventId,
           deviceReference: await _device.label(),
@@ -400,7 +401,7 @@ class AttendanceController extends Notifier<AttendanceState> {
     } on ApiException catch (failure) {
       await _failOrQueue(
         action: OfflineAction.checkIn,
-        siteId: site.id,
+        siteId: site?.id,
         failure: failure,
         clientEventId: clientEventId,
         selfie: await _safeCompressed(rawSelfie),
@@ -419,12 +420,10 @@ class AttendanceController extends Notifier<AttendanceState> {
   Future<void> checkOut() async {
     if (!state.canSubmit) return;
 
-    final siteId = state.selectedSite?.id ?? state.today?.attendance?.siteId;
-
-    if (siteId == null) {
-      state = state.copyWith(submitError: 'There is no site to check out of.');
-      return;
-    }
+    // The site the day was checked in at, if it was — never required.
+    final recorded =
+        (state.today?.openAttendance ?? state.today?.attendance)?.siteId;
+    final siteId = recorded == null || recorded == 0 ? null : recorded;
 
     state = state.copyWith(submitting: true, submitError: null, notice: null);
 
@@ -464,7 +463,11 @@ class AttendanceController extends Notifier<AttendanceState> {
     }
   }
 
-  Future<void> startVisit({required String purpose, String? remarks}) async {
+  Future<void> startVisit({
+    required String purpose,
+    String? remarks,
+    int? siteId,
+  }) async {
     if (!state.canSubmit) return;
 
     // Checked here and not only in the dialog: the dialog is a courtesy,
@@ -480,10 +483,14 @@ class AttendanceController extends Notifier<AttendanceState> {
     final notes = remarks?.trim();
     final note = notes == null || notes.isEmpty ? null : notes;
 
-    final site = state.selectedSite;
+    final site = siteId == null
+        ? state.selectedSite
+        : state.today?.siteById(siteId);
     if (site == null) {
       state = state.copyWith(
-        submitError: 'You have no site to visit. Ask HR to post you to one.',
+        submitError:
+            'Choose the site you are visiting. If it is not on the list, '
+            'a Project Manager can add it.',
       );
       return;
     }
@@ -684,7 +691,7 @@ class AttendanceController extends Notifier<AttendanceState> {
       case OfflineAction.visitStart:
         await _repository.startSiteVisit(
           SiteVisitStartSubmission(
-            siteId: event.siteId,
+            siteId: event.siteId ?? 0,
             fix: event.fix,
             purpose: event.purpose ?? 'Site visit',
             remarks: event.remarks,
@@ -720,6 +727,7 @@ class AttendanceController extends Notifier<AttendanceState> {
     if (current != null && today.siteById(current) != null) return current;
 
     if (today.sites.isNotEmpty) return today.sites.first.id;
+    if (today.visitSites.isNotEmpty) return today.visitSites.first.id;
 
     return null;
   }
@@ -768,7 +776,7 @@ class AttendanceController extends Notifier<AttendanceState> {
   /// answer on the third attempt.
   Future<void> _failOrQueue({
     required String action,
-    required int siteId,
+    required int? siteId,
     required String clientEventId,
     required ApiException failure,
     Uint8List? selfie,

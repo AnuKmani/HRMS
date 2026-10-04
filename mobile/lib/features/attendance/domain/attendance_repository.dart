@@ -14,7 +14,7 @@ import 'today_status.dart';
 /// the key that makes a retry safe.
 class CheckInSubmission {
   const CheckInSubmission({
-    required this.siteId,
+    this.siteId,
     required this.fix,
     required this.clientEventId,
     required this.deviceReference,
@@ -23,7 +23,8 @@ class CheckInSubmission {
     this.source = 'online',
   });
 
-  final int siteId;
+  /// Optional: attendance is taken wherever the person is.
+  final int? siteId;
   final LocationFix fix;
   final String clientEventId;
   final String deviceReference;
@@ -40,14 +41,14 @@ class CheckInSubmission {
 
 class CheckOutSubmission {
   const CheckOutSubmission({
-    required this.siteId,
+    this.siteId,
     required this.fix,
     required this.clientEventId,
     required this.deviceReference,
     this.source = 'online',
   });
 
-  final int siteId;
+  final int? siteId;
   final LocationFix fix;
   final String clientEventId;
   final String deviceReference;

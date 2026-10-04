@@ -186,6 +186,7 @@ class RolePermissionSeeder extends Seeder
 
         'Project Manager' => [
             'dashboard.view',
+            'site_visits.create',
             'employees.view',
             'projects.view', 'projects.manage',
             'sites.view', 'sites.manage',
@@ -235,6 +236,7 @@ class RolePermissionSeeder extends Seeder
 
         'Site Engineer' => [
             'dashboard.view',
+            'site_visits.create',
             'projects.view',
             'sites.view',
             'attendance.view',
@@ -261,6 +263,7 @@ class RolePermissionSeeder extends Seeder
 
         'Site Supervisor' => [
             'dashboard.view',
+            'site_visits.create',
             'employees.view',
             'projects.view',
             'sites.view',
@@ -382,6 +385,44 @@ class RolePermissionSeeder extends Seeder
             // narrows even that read to its own rows.
             'expenses.view',
             'audit.view',
+        ],
+
+        // Field roles whose one extra over Employee is the Site visit
+        // option: they go out to sites, and the visit records where and when.
+        'Site Officer' => [
+            'dashboard.view',
+            'site_visits.create',
+            'sites.view',
+            'attendance.view',
+            'leave.view', 'leave.create',
+            'leave.balance.view',
+            'timesheets.view',
+            'overtime.view',
+            'site_activity_reports.view',
+            'site_activity_reports.create',
+            'site_activity_reports.update',
+            'assets.view',
+            'salary_slips.view',
+            'salary_certificates.view',
+            'loans.view', 'loans.create',
+        ],
+
+        'Technician' => [
+            'dashboard.view',
+            'site_visits.create',
+            'sites.view',
+            'attendance.view',
+            'leave.view', 'leave.create',
+            'leave.balance.view',
+            'timesheets.view',
+            'overtime.view',
+            'site_activity_reports.view',
+            'site_activity_reports.create',
+            'site_activity_reports.update',
+            'assets.view',
+            'salary_slips.view',
+            'salary_certificates.view',
+            'loans.view', 'loans.create',
         ],
 
         'Employee' => [

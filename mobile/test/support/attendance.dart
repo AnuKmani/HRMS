@@ -487,6 +487,7 @@ Map<String, dynamic> todayJson({
   bool canCheckIn = true,
   bool canCheckOut = false,
   bool canStartSiteVisit = true,
+  bool requiresSite = false,
   int workingMinutes = 0,
   int lateMinutes = 0,
 }) {
@@ -531,6 +532,7 @@ Map<String, dynamic> todayJson({
     'can_check_in': canCheckIn,
     'can_check_out': canCheckOut,
     'can_start_site_visit': canStartSiteVisit,
+    'requires_site': requiresSite,
     'max_gps_accuracy_metres': 100,
   };
 }
@@ -562,6 +564,8 @@ TodayStatus todayStatus({
   bool canCheckOut = false,
   int? siteId = 1,
   List<int>? siteIds,
+  bool canStartSiteVisit = true,
+  bool requiresSite = false,
   int workingMinutes = 0,
   int lateMinutes = 0,
 }) {
@@ -574,6 +578,8 @@ TodayStatus todayStatus({
       canCheckOut: canCheckOut,
       siteId: siteId,
       sites: [for (final id in ids) siteJson(id: id)],
+      canStartSiteVisit: canStartSiteVisit,
+      requiresSite: requiresSite,
       workingMinutes: workingMinutes,
       lateMinutes: lateMinutes,
     ),

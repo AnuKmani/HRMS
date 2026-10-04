@@ -29,9 +29,9 @@ class RbacTest extends TestCase
 
     /* ------------------------------------------------------------ roles */
 
-    public function test_all_ten_roles_are_created(): void
+    public function test_all_twelve_roles_are_created(): void
     {
-        $this->assertCount(10, Role::all());
+        $this->assertCount(12, Role::all());
 
         foreach (RoleSeeder::ROLES as $role) {
             $this->assertDatabaseHas('roles', ['name' => $role, 'guard_name' => 'web']);
@@ -43,7 +43,7 @@ class RbacTest extends TestCase
         $this->seed(RoleSeeder::class);
         $this->seed(RoleSeeder::class);
 
-        $this->assertCount(10, Role::all());
+        $this->assertCount(12, Role::all());
     }
 
     /* ------------------------------------------------------ permissions */

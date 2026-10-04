@@ -70,12 +70,17 @@ final class AttendanceService
     public function checkIn(User $user, array $data): Attendance
     {
         $employee = ClientInput::employeeFor($user);
-        $site = Site::query()->findOrFail($data['site_id']);
+        $site = ! empty($data['site_id']) ? Site::query()->findOrFail($data['site_id']) : null;
+        $requireSite = $this->requiresSite();
+
+        if ($requireSite && $site === null) {
+            throw ValidationException::withMessages(['site_id' => 'Choose the site you are checking in at.']);
+        }
 
         $selfiePath = null;
 
         try {
-            return DB::transaction(function () use ($employee, $site, $data, &$selfiePath) {
+            return DB::transaction(function () use ($employee, $site, $requireSite, $data, &$selfiePath) {
                 $eventId = ClientInput::eventId($data);
 
                 // 1. Replay, not refuse.
@@ -119,24 +124,32 @@ final class AttendanceService
                     );
                 }
 
-                // 4. Authorised to be here at all?
-                $access = $this->siteAccess->authorize($employee, $site, $now);
-
-                if (! $access->allowed) {
-                    abort(403, $access->message);
-                }
-
-                // 5. Actually here?
                 $point = ClientInput::point($data);
-                $result = $this->geofence->evaluate(
-                    $site,
-                    $point['latitude'],
-                    $point['longitude'],
-                    $point['accuracy'],
-                );
+                $distance = null;
 
-                if (! $result->allowed) {
-                    throw ValidationException::withMessages(['location' => $result->message]);
+                if ($requireSite) {
+                    // 4. Authorised to be here at all?
+                    $access = $this->siteAccess->authorize($employee, $site, $now);
+
+                    if (! $access->allowed) {
+                        abort(403, $access->message);
+                    }
+
+                    // 5. Actually here?
+                    $result = $this->geofence->evaluate(
+                        $site,
+                        $point['latitude'],
+                        $point['longitude'],
+                        $point['accuracy'],
+                    );
+
+                    if (! $result->allowed) {
+                        throw ValidationException::withMessages(['location' => $result->message]);
+                    }
+
+                    $distance = $result->distanceMetresRounded();
+                } elseif ($employee->employment_status !== Employee::STATUS_ACTIVE) {
+                    abort(403, 'Your employment is not active, so you cannot check in. Contact HR.');
                 }
 
                 // 6. What kind of day is this? Decided here, never supplied.
@@ -151,14 +164,14 @@ final class AttendanceService
 
                 $attendance = new Attendance;
                 $attendance->employee_id = $employee->id;
-                $attendance->project_id = $site->project_id;
-                $attendance->site_id = $site->id;
+                $attendance->project_id = $site?->project_id;
+                $attendance->site_id = $site?->id;
                 $attendance->attendance_date = $date;
                 $attendance->check_in_at = $now;
                 $attendance->check_in_latitude = $point['latitude'];
                 $attendance->check_in_longitude = $point['longitude'];
                 $attendance->check_in_accuracy = $point['accuracy'];
-                $attendance->check_in_distance = $result->distanceMetresRounded();
+                $attendance->check_in_distance = $distance;
                 $attendance->check_in_selfie_path = $selfiePath;
                 $attendance->check_in_purpose = ClientInput::text($data, 'purpose');
                 $attendance->shift_id = $plan->shiftId;
@@ -193,7 +206,7 @@ final class AttendanceService
     public function checkOut(User $user, array $data): Attendance
     {
         $employee = ClientInput::employeeFor($user);
-        $site = Site::query()->findOrFail($data['site_id']);
+        $site = ! empty($data['site_id']) ? Site::query()->findOrFail($data['site_id']) : null;
         $eventId = ClientInput::eventId($data);
 
         $selfiePath = null;
@@ -232,7 +245,14 @@ final class AttendanceService
                     ]);
                 }
 
-                if ((int) $open->site_id !== (int) $site->id) {
+                // Same-site and geofence rules only bind a day that was
+                // checked in at a site under the site-required rule. A day
+                // started from the office or anywhere else is closed from
+                // wherever the person is; the GPS is still recorded.
+                $siteBound = $this->requiresSite() && $open->site_id !== null;
+                $site ??= $siteBound ? $open->site : null;
+
+                if ($siteBound && (int) $open->site_id !== (int) $site->id) {
                     throw ValidationException::withMessages([
                         'site_id' => sprintf(
                             'You checked in at %s. Check out from the same site.',
@@ -243,7 +263,7 @@ final class AttendanceService
 
                 $point = ClientInput::point($data);
 
-                if ($this->shouldValidateCheckoutGeofence()) {
+                if ($siteBound && $this->shouldValidateCheckoutGeofence()) {
                     $result = $this->geofence->evaluate(
                         $site,
                         $point['latitude'],
@@ -370,6 +390,7 @@ final class AttendanceService
             : ShiftPlan::none();
 
         $assignments = $this->assignedSites($employee);
+        $canVisit = $user->can('site_visits.create');
 
         $checkedIn = $today?->check_in_at !== null;
         $checkedOut = $today?->check_out_at !== null;
@@ -387,6 +408,13 @@ final class AttendanceService
 
             'site' => $site !== null ? $this->siteSummary($site) : null,
             'sites' => array_map(fn (Site $row) => $this->siteSummary($row), $assignments),
+            // Every active site on the company list — what a field role
+            // picks from when starting a site visit. Empty for everyone else.
+            'visit_sites' => $canVisit
+                ? Site::query()->with('project')->where('status', Site::STATUS_ACTIVE)->orderBy('name')->get()
+                    ->map(fn (Site $row) => $this->siteSummary($row))->values()->all()
+                : [],
+            'requires_site' => $this->requiresSite(),
 
             'shift' => $plan->hasSchedule ? [
                 'shift_id' => $plan->shiftId,
@@ -407,9 +435,11 @@ final class AttendanceService
             // copy of one that would drift the moment this config changed.
             'max_gps_accuracy_metres' => (float) config('hrms.attendance.max_gps_accuracy_metres', 100),
 
-            'can_check_in' => ! $checkedIn && $pending === null && $site !== null,
+            // Never blocked by a missing site unless the deployment asks
+            // for it: attendance is a selfie and a location, anywhere.
+            'can_check_in' => ! $checkedIn && $pending === null && ($site !== null || ! $this->requiresSite()),
             'can_check_out' => $pending !== null,
-            'can_start_site_visit' => $assignments !== [],
+            'can_start_site_visit' => $canVisit,
         ];
     }
 
@@ -475,6 +505,11 @@ final class AttendanceService
             crossesMidnight: $resolved->crossesMidnight,
             hasSchedule: true,
         );
+    }
+
+    private function requiresSite(): bool
+    {
+        return (bool) config('hrms.attendance.require_site', false);
     }
 
     private function shouldValidateCheckoutGeofence(): bool

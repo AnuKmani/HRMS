@@ -294,7 +294,7 @@ Route::prefix('v1')->group(function () {
         Route::get('site-visits', [SiteVisitController::class, 'index'])
             ->middleware('permission:attendance.view');
         Route::post('site-visits/start', [SiteVisitController::class, 'store'])
-            ->middleware('throttle:attendance');
+            ->middleware(['permission:site_visits.create', 'throttle:attendance']);
         Route::post('site-visits/{siteVisit}/end', [SiteVisitController::class, 'end'])
             ->whereNumber('siteVisit')
             ->middleware('throttle:attendance');

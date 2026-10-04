@@ -179,6 +179,11 @@ class PermissionSeeder extends Seeder
             'sites.view',
             'sites.manage',
         ],
+        // The Site visit option. Check-in / check-out is everyone's; going
+        // out to a site and logging it is for the field roles that hold this.
+        'site_visits' => [
+            'site_visits.create',
+        ],
         'shifts' => [
             'shifts.view',
             'shifts.manage',

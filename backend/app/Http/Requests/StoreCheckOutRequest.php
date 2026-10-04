@@ -31,7 +31,7 @@ class StoreCheckOutRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'site_id' => ['required', 'integer', 'exists:sites,id'],
+            'site_id' => ['nullable', 'integer', 'exists:sites,id'],
 
             'latitude' => ['required', 'numeric', 'min:-90', 'max:90'],
             'longitude' => ['required', 'numeric', 'min:-180', 'max:180'],

@@ -66,9 +66,7 @@ class AttendanceQuickCard extends ConsumerWidget {
       detail = 'Since ${_hhmm(attendance?.checkInAt)}';
     } else if (today.canCheckIn) {
       headline = 'You have not checked in today';
-      detail = today.sites.isEmpty
-          ? 'No work location yet — ask your Project Manager to set up your office or site.'
-          : null;
+      detail = 'Tap CHECK IN — a selfie and your location, from anywhere.';
     } else if (today.checkedOut) {
       headline = 'Done for today';
       detail =
@@ -76,12 +74,10 @@ class AttendanceQuickCard extends ConsumerWidget {
           'Out ${_hhmm(attendance?.checkOutAt)}';
     } else {
       headline = 'Attendance';
-      detail = today.sites.isEmpty
-          ? 'No work location yet — ask your Project Manager to set up your office or site.'
-          : null;
+      detail = null;
     }
 
-    final Widget? button = today.canCheckOut
+    final Widget? button = today.canCheckOut && today.canStartSiteVisit
         ? Row(
             children: [
               Expanded(
@@ -100,7 +96,9 @@ class AttendanceQuickCard extends ConsumerWidget {
               Expanded(child: _checkOutButton(theme)),
             ],
           )
-        : today.canCheckIn && today.sites.isNotEmpty
+        : today.canCheckOut
+        ? _checkOutButton(theme)
+        : today.canCheckIn
         ? FilledButton.icon(
             key: const ValueKey('quick-check-in'),
             style: FilledButton.styleFrom(
@@ -149,7 +147,7 @@ class AttendanceQuickCard extends ConsumerWidget {
           const SizedBox(height: 4),
           Text(
             today.canCheckOut
-                ? 'Site visits and check-out record your location.'
+                ? 'Your location is recorded when you check out.'
                 : 'Your location and a selfie are recorded when you check in.',
             style: theme.textTheme.bodySmall,
             textAlign: TextAlign.center,

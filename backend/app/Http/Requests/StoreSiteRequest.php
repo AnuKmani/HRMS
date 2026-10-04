@@ -60,6 +60,68 @@ class StoreSiteRequest extends FormRequest
                     'The supervisor must be a different person from the site manager.',
                 );
             }
+
+            $duplicate = $this->existingDuplicate();
+
+            if ($duplicate !== null) {
+                $validator->errors()->add(
+                    'name',
+                    sprintf('This site is already added: %s (%s).', $duplicate->name, $duplicate->code),
+                );
+            }
         });
+    }
+
+    /**
+     * There is one company-wide site list, shared by every project manager.
+     * A second manager adding the same place gets told it is already there
+     * instead of creating a twin: same name (ignoring case and spacing), or
+     * a pin within `hrms.sites.duplicate_radius_m` of an existing site.
+     */
+    private function existingDuplicate(): ?Site
+    {
+        $name = mb_strtolower(preg_replace('/\s+/', ' ', trim((string) $this->input('name'))));
+
+        if ($name !== '') {
+            $byName = Site::query()
+                ->whereRaw('LOWER(TRIM(name)) = ?', [$name])
+                ->first();
+
+            if ($byName !== null) {
+                return $byName;
+            }
+        }
+
+        $lat = $this->input('latitude');
+        $lng = $this->input('longitude');
+        $radius = (float) config('hrms.sites.duplicate_radius_m', 100);
+
+        if (! is_numeric($lat) || ! is_numeric($lng) || $radius <= 0) {
+            return null;
+        }
+
+        // A cheap bounding box first, then the real distance.
+        $dLat = $radius / 111_320;
+        $dLng = $radius / (111_320 * max(cos(deg2rad((float) $lat)), 0.01));
+
+        return Site::query()
+            ->whereNotNull('latitude')
+            ->whereNotNull('longitude')
+            ->whereBetween('latitude', [(float) $lat - $dLat, (float) $lat + $dLat])
+            ->whereBetween('longitude', [(float) $lng - $dLng, (float) $lng + $dLng])
+            ->get()
+            ->first(fn (Site $site) => self::metresBetween(
+                (float) $lat, (float) $lng, (float) $site->latitude, (float) $site->longitude,
+            ) <= $radius);
+    }
+
+    private static function metresBetween(float $lat1, float $lng1, float $lat2, float $lng2): float
+    {
+        $r = 6_371_000;
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLng = deg2rad($lng2 - $lng1);
+        $a = sin($dLat / 2) ** 2 + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng / 2) ** 2;
+
+        return 2 * $r * asin(min(1.0, sqrt($a)));
     }
 }

@@ -34,9 +34,10 @@ void main() {
       await settle(tester);
       await tester.pump(const Duration(milliseconds: 300));
 
-      // Where and why first — the site is named, the purpose asked.
+      // Where and why first — the GPS location shown, the purpose asked.
       expect(find.byKey(const ValueKey('check-in-site')), findsOneWidget);
-      await tester.tap(find.text('Inspection'));
+      expect(find.textContaining('Your current location'), findsOneWidget);
+      await tester.tap(find.text('Meeting'));
       await tester.pump();
       await tap(tester, find.byKey(const ValueKey('check-in-continue')));
       await tester.pump(const Duration(milliseconds: 300));
@@ -51,7 +52,8 @@ void main() {
 
       expect(harness.repository.checkInCalls, 1);
       expect(harness.camera.captures, 1);
-      expect(harness.repository.checkIns.last.purpose, 'Inspection');
+      expect(harness.repository.checkIns.last.purpose, 'Meeting');
+      expect(harness.repository.checkIns.last.siteId, isNull);
 
       // Then the reminder to check out in the evening.
       expect(find.byKey(const ValueKey('checked-in-dialog')), findsOneWidget);
@@ -94,8 +96,11 @@ void main() {
       await settle(tester);
       await tester.pump(const Duration(milliseconds: 300));
 
-      expect(find.text('Why are you visiting?'), findsOneWidget);
-      await tester.enterText(find.byType(TextField).first, 'Snag inspection');
+      expect(find.text('Start site visit'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('visit-purpose')),
+        'Snag inspection',
+      );
       await tester.pump();
       await tap(tester, find.text('Start'));
       await tester.pump(const Duration(milliseconds: 300));
@@ -104,8 +109,11 @@ void main() {
       expect(harness.repository.startVisitCalls, 1);
     });
 
-    testWidgets('nothing starts without a site to check in at', (tester) async {
-      harness.repository.todayResult = todayStatus(siteId: null);
+    testWidgets('check-in starts even with no site at all', (tester) async {
+      harness.repository.todayResult = todayStatus(
+        siteId: null,
+        canStartSiteVisit: false,
+      );
 
       await pumpAttendance(
         tester,
@@ -115,8 +123,23 @@ void main() {
       await settle(tester);
       await tester.pump(const Duration(milliseconds: 300));
 
-      expect(find.text('Check-in photo'), findsNothing);
-      expect(harness.repository.checkInCalls, 0);
+      expect(find.byKey(const ValueKey('check-in-purpose')), findsOneWidget);
+    });
+
+    testWidgets('a visit never starts for a role without the option', (
+      tester,
+    ) async {
+      harness.repository.todayResult = todayStatus(canStartSiteVisit: false);
+
+      await pumpAttendance(
+        tester,
+        harness,
+        child: const AttendanceScreen(startAction: AttendanceScreen.visit),
+      );
+      await settle(tester);
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('Start site visit'), findsNothing);
     });
 
     testWidgets('a plain visit starts nothing', (tester) async {
@@ -165,12 +188,24 @@ void main() {
       expect(opened, ['/attendance?start=check-out']);
     });
 
-    testWidgets('has no button without a site, and says why', (tester) async {
+    testWidgets('offers CHECK IN with no site at all', (tester) async {
       harness.repository.todayResult = todayStatus(siteId: null);
       await pumpCard(tester);
 
-      expect(find.byKey(const ValueKey('quick-check-in')), findsNothing);
-      expect(find.textContaining('No work location yet'), findsOneWidget);
+      expect(find.byKey(const ValueKey('quick-check-in')), findsOneWidget);
+    });
+
+    testWidgets('no SITE VISIT for a role without the option', (tester) async {
+      harness.repository.todayResult = todayStatus(
+        checkedIn: true,
+        canCheckIn: false,
+        canCheckOut: true,
+        canStartSiteVisit: false,
+      );
+      await pumpCard(tester);
+
+      expect(find.byKey(const ValueKey('quick-site-visit')), findsNothing);
+      expect(find.byKey(const ValueKey('quick-check-out')), findsOneWidget);
     });
   });
 }

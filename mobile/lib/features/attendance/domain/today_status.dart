@@ -19,6 +19,8 @@ class TodayStatus {
     required this.canCheckOut,
     required this.canStartSiteVisit,
     required this.sites,
+    this.visitSites = const <AssignedSite>[],
+    this.requiresSite = false,
     required this.workingMinutes,
     required this.lateMinutes,
     this.attendance,
@@ -44,6 +46,14 @@ class TodayStatus {
   final AssignedSite? site;
   final List<AssignedSite> sites;
 
+  /// The company site list a field role picks from for a site visit.
+  /// Empty for everyone without the Site visit option.
+  final List<AssignedSite> visitSites;
+
+  /// `hrms.attendance.require_site`. Off by default: check-in is a selfie
+  /// and a location, anywhere, and needs no site.
+  final bool requiresSite;
+
   final ShiftSummary? shift;
 
   final int workingMinutes;
@@ -62,6 +72,9 @@ class TodayStatus {
     for (final site in sites) {
       if (site.id == id) return site;
     }
+    for (final site in visitSites) {
+      if (site.id == id) return site;
+    }
     return null;
   }
 
@@ -76,6 +89,8 @@ class TodayStatus {
       checkedOut: json['checked_out'] == true,
       site: _site(json['site']),
       sites: _sites(json['sites']),
+      visitSites: _sites(json['visit_sites']),
+      requiresSite: json['requires_site'] == true,
       shift: json['shift'] is Map
           ? ShiftSummary.fromJson(json['shift']! as Map<String, dynamic>)
           : null,

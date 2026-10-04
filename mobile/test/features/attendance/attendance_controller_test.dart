@@ -293,7 +293,8 @@ void main() {
 
       final sent = harness.repository.checkIns.single;
 
-      expect(sent.siteId, 1);
+      // Attendance is a selfie and a location: no site is sent.
+      expect(sent.siteId, isNull);
       expect(sent.selfieBytes, selfie);
       expect(sent.deviceReference, 'android-testphone');
       expect(sent.source, 'online');
@@ -309,14 +310,14 @@ void main() {
   });
 
   group('checking out', () {
-    test('succeeds with the same site the day started at', () async {
+    test('succeeds without needing a site', () async {
       await ready();
 
       await controller().checkOut();
       await breathe();
 
       expect(harness.repository.checkOutCalls, 1);
-      expect(harness.repository.checkOuts.single.siteId, 1);
+      expect(harness.repository.checkOuts.single.siteId, isNull);
       expect(state().notice, 'Checked out.');
     });
 

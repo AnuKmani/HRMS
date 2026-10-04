@@ -15,6 +15,7 @@ use Database\Seeders\SettingSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
+use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
 /**
@@ -80,7 +81,8 @@ class SiteVisitTest extends TestCase
         ]);
 
         $user = User::factory()->create();
-        $user->assignRole('Employee');
+        // Site visit is a field-role option (`site_visits.create`).
+        $user->assignRole('Site Engineer');
         $employee->update(['user_id' => $user->id]);
 
         return [
@@ -184,7 +186,7 @@ class SiteVisitTest extends TestCase
         $this->assertSame(0, SiteVisit::query()->count());
     }
 
-    public function test_a_visit_to_a_site_one_is_not_assigned_to_is_refused(): void
+    public function test_a_field_role_may_visit_any_active_site_without_an_assignment(): void
     {
         $world = $this->world();
         EmployeeSiteAssignment::query()->update([
@@ -195,7 +197,43 @@ class SiteVisitTest extends TestCase
         Sanctum::actingAs($world['user']);
 
         $this->post('/api/v1/site-visits/start', $this->payload($world['site']))
+            ->assertStatus(201);
+    }
+
+    public function test_an_inactive_site_cannot_be_visited(): void
+    {
+        $world = $this->world();
+        $world['site']->forceFill(['status' => Site::STATUS_INACTIVE])->save();
+
+        Sanctum::actingAs($world['user']);
+
+        $this->post('/api/v1/site-visits/start', $this->payload($world['site']))
             ->assertStatus(403);
+    }
+
+    public function test_only_the_field_roles_have_the_site_visit_option(): void
+    {
+        $world = $this->world();
+        $world['user']->syncRoles(['Employee']);
+
+        Sanctum::actingAs($world['user']);
+
+        $this->post('/api/v1/site-visits/start', $this->payload($world['site']))
+            ->assertStatus(403);
+        $this->getJson('/api/v1/attendance/today')
+            ->assertOk()
+            ->assertJsonPath('data.can_start_site_visit', false)
+            ->assertJsonPath('data.visit_sites', []);
+
+        foreach (['Project Manager', 'Site Engineer', 'Site Officer', 'Site Supervisor', 'Technician'] as $role) {
+            $world['user']->syncRoles([$role]);
+            $world['user']->unsetRelation('roles')->unsetRelation('permissions');
+            app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+            $this->getJson('/api/v1/attendance/today')
+                ->assertOk()
+                ->assertJsonPath('data.can_start_site_visit', true, $role);
+        }
     }
 
     public function test_a_purpose_is_required_because_it_is_the_reason_the_record_exists(): void

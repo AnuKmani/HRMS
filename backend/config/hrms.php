@@ -118,6 +118,30 @@ return [
         | tuning how often anything may happen.
         */
         'validate_checkout_geofence' => (bool) env('ATTENDANCE_VALIDATE_CHECKOUT_GEOFENCE', true),
+
+        /*
+        | Must a check-in name a site the employee is assigned to?
+        |
+        | Off by default: attendance is a selfie and a GPS reading taken
+        | wherever the person is — office staff, a site not yet on the list,
+        | anywhere. Sites, assignments and geofences belong to the Site visit
+        | flow. A deployment that wants check-in tied to assigned sites again
+        | sets ATTENDANCE_REQUIRE_SITE=true.
+        */
+        'require_site' => (bool) env('ATTENDANCE_REQUIRE_SITE', false),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Company site list
+    |--------------------------------------------------------------------------
+    |
+    | A new site whose pin is within this many metres of an existing one is
+    | refused as "already added", as is one with the same name. 0 turns the
+    | distance check off (the name check always applies).
+    */
+    'sites' => [
+        'duplicate_radius_m' => (float) env('SITES_DUPLICATE_RADIUS_M', 100),
     ],
 
     /*

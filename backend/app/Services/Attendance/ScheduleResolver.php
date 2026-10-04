@@ -35,11 +35,13 @@ final class ScheduleResolver
     /**
      * @param  Carbon  $attendanceDate  the day the check-in belongs to
      */
-    public function planFor(Site $site, Carbon $attendanceDate): ShiftPlan
+    public function planFor(?Site $site, Carbon $attendanceDate): ShiftPlan
     {
         // Lazy-loaded: a soft-deleted shift reads as null, which is the same
         // answer as "this site has no shift" and falls through to settings.
-        $shift = $site->shift;
+        // No site at all (a check-in from the office or anywhere else) is
+        // the organisation's default working hours.
+        $shift = $site?->shift;
 
         if ($shift !== null && $shift->status === Shift::STATUS_ACTIVE) {
             return $this->fromShift($shift, $attendanceDate);

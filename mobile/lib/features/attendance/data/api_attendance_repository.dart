@@ -34,7 +34,7 @@ class ApiAttendanceRepository implements AttendanceRepository {
   @override
   Future<AttendanceRecord> checkIn(CheckInSubmission submission) async {
     final fields = <String, Object?>{
-      'site_id': submission.siteId,
+      if (submission.siteId != null) 'site_id': submission.siteId,
       'latitude': submission.fix.latitude,
       'longitude': submission.fix.longitude,
       'accuracy': submission.fix.accuracy,
@@ -64,7 +64,7 @@ class ApiAttendanceRepository implements AttendanceRepository {
     final envelope = await _client.post(
       '$_attendance/check-out',
       body: <String, Object?>{
-        'site_id': submission.siteId,
+        if (submission.siteId != null) 'site_id': submission.siteId,
         'latitude': submission.fix.latitude,
         'longitude': submission.fix.longitude,
         'accuracy': submission.fix.accuracy,

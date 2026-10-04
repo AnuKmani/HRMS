@@ -46,7 +46,9 @@ class StoreCheckInRequest extends FormRequest
         $maxKilobytes = (int) config('hrms.storage.selfie_max_kilobytes', 5120);
 
         return [
-            'site_id' => ['required', 'integer', 'exists:sites,id'],
+            // Optional: attendance is taken wherever the person is. A site is
+            // recorded when they name one.
+            'site_id' => ['nullable', 'integer', 'exists:sites,id'],
 
             // What the employee is on site to do today. Optional so an
             // offline check-in queued by an older build still replays.
