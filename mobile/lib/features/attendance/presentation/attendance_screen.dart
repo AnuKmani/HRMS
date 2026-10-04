@@ -392,7 +392,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Current site',
+            'Work location',
             style: theme.textTheme.labelMedium?.copyWith(
               color: theme.colorScheme.outline,
             ),
@@ -413,7 +413,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
     // row that is not in today's assignment list.
     return DropdownButtonFormField<int>(
       initialValue: state.selectedSiteId,
-      decoration: const InputDecoration(labelText: 'Current site'),
+      decoration: const InputDecoration(labelText: 'Work location'),
       items: [
         for (final site in today.sites)
           DropdownMenuItem(
@@ -502,8 +502,10 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
     if (today.sites.isEmpty) {
       buttons.add(
         Text(
-          'You are not assigned to a site yet, so you cannot check in. '
-          'Ask HR to assign you in Site assignments — then the CHECK IN '
+          'You have no work location yet (office or site), so you cannot '
+          'check in. Ask your Project Manager to add you with Quick site '
+          'setup — then the '
+          'CHECK IN '
           'button (location + selfie) turns on.',
           style: Theme.of(context).textTheme.bodySmall,
         ),

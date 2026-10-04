@@ -163,7 +163,7 @@ void main() {
       await pumpCard(tester);
 
       expect(find.byKey(const ValueKey('quick-check-in')), findsNothing);
-      expect(find.textContaining('No site assigned'), findsOneWidget);
+      expect(find.textContaining('No work location yet'), findsOneWidget);
     });
   });
 }

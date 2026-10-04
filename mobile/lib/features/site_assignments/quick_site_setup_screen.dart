@@ -37,7 +37,9 @@ class _QuickSiteSetupScreenState extends ConsumerState<QuickSiteSetupScreen> {
   final _projectName = TextEditingController(text: 'General');
   final _radius = TextEditingController(text: '200');
 
-  int? _employeeId;
+  /// Everyone being posted here — one person for a construction site, the
+  /// whole office team for a head office. Names are kept for the chips.
+  final Map<int, String> _employees = {};
   int? _projectId;
 
   bool _busy = false;
@@ -60,7 +62,7 @@ class _QuickSiteSetupScreenState extends ConsumerState<QuickSiteSetupScreen> {
   Future<void> _run() async {
     final radius = double.tryParse(_radius.text.trim());
     final errors = <String, String>{
-      if (_employeeId == null) 'employee_id': 'Choose the employee.',
+      if (_employees.isEmpty) 'employee_id': 'Add at least one employee.',
       if (_siteName.text.trim().isEmpty) 'name': 'Give the site a name.',
       if (_projectId == null && _projectName.text.trim().isEmpty)
         'project': 'Choose a project or name a new one.',
@@ -121,17 +123,29 @@ class _QuickSiteSetupScreenState extends ConsumerState<QuickSiteSetupScreen> {
         'status': 'active',
       });
 
-      setState(() => _step = 'Assigning the employee…');
       final now = DateTime.now();
-      await ref.read(siteAssignmentsRepositoryProvider).create({
-        'employee_id': _employeeId,
-        'project_id': projectId,
-        'site_id': site.id,
-        'assignment_type': SiteAssignment.typePrimary,
-        'start_date':
-            '${now.year}-${now.month.toString().padLeft(2, '0')}-'
-            '${now.day.toString().padLeft(2, '0')}',
-      });
+      final today =
+          '${now.year}-${now.month.toString().padLeft(2, '0')}-'
+          '${now.day.toString().padLeft(2, '0')}';
+      var done = 0;
+      final failed = <String>[];
+      for (final entry in _employees.entries) {
+        setState(
+          () => _step = 'Assigning ${done + 1} of ${_employees.length}…',
+        );
+        try {
+          await ref.read(siteAssignmentsRepositoryProvider).create({
+            'employee_id': entry.key,
+            'project_id': projectId,
+            'site_id': site.id,
+            'assignment_type': SiteAssignment.typePrimary,
+            'start_date': today,
+          });
+          done++;
+        } on ApiException catch (failure) {
+          failed.add('${entry.value}: ${failure.message}');
+        }
+      }
 
       ref.read(siteAssignmentsListProvider.notifier).reload();
       if (!mounted) return;
@@ -148,8 +162,10 @@ class _QuickSiteSetupScreenState extends ConsumerState<QuickSiteSetupScreen> {
           content: Text(
             '"${site.name}" was created at your location '
             '(±${fix.accuracy.round()} m) with a ${radius!.round()} m '
-            'check-in area, and the employee is assigned to it.\n\n'
-            'They can now sign in and tap CHECK IN.',
+            'check-in area.\n\n'
+            '$done ${done == 1 ? 'person is' : 'people are'} assigned and '
+            'can now sign in and tap CHECK IN.'
+            '${failed.isEmpty ? '' : '\n\nNot assigned:\n${failed.join('\n')}'}',
           ),
           actions: [
             FilledButton(
@@ -180,6 +196,18 @@ class _QuickSiteSetupScreenState extends ConsumerState<QuickSiteSetupScreen> {
     }
   }
 
+  void _addEmployee(int? id) {
+    if (id == null) return;
+    final match = ref
+        .read(employeesPickerProvider)
+        .items
+        .where((employee) => employee.id == id);
+    setState(() {
+      _employees[id] = match.isEmpty ? 'Employee #$id' : match.first.fullName;
+      _errors = const {};
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final canCreateProjects = ref.watch(
@@ -205,8 +233,10 @@ class _QuickSiteSetupScreenState extends ConsumerState<QuickSiteSetupScreen> {
                 SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Stand at the site. Its location is taken from this '
-                    'phone\'s GPS when you tap Set up.',
+                    'Stand at the site or office. Its location is taken '
+                    'from this phone\'s GPS when you tap Set up. For office '
+                    'staff, name it Head Office and add everyone in the '
+                    'office.',
                   ),
                 ),
               ],
@@ -216,20 +246,39 @@ class _QuickSiteSetupScreenState extends ConsumerState<QuickSiteSetupScreen> {
             FormBanner(message: _banner!, forbidden: _forbidden),
           RemotePickerField<Employee>(
             key: const ValueKey('quick-employee'),
-            label: 'Employee',
+            label: _employees.isEmpty ? 'Employees' : 'Add another employee',
             provider: employeesPickerProvider,
             idOf: (employee) => employee.id,
             labelOf: (employee) => employee.fullName,
-            value: _employeeId,
-            isRequired: true,
-            hint: 'Who will check in here?',
+            value: null,
+            isRequired: _employees.isEmpty,
+            hint: 'Tap to add someone who works here',
             searchHint: 'Search employees',
             errorText: _errors['employee_id'],
-            onChanged: (id) => setState(() => _employeeId = id),
+            onChanged: _addEmployee,
           ),
+          if (_employees.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  for (final entry in _employees.entries)
+                    InputChip(
+                      key: ValueKey('quick-chosen-${entry.key}'),
+                      avatar: const Icon(Icons.person, size: 18),
+                      label: Text(entry.value),
+                      onDeleted: _busy
+                          ? null
+                          : () => setState(() => _employees.remove(entry.key)),
+                    ),
+                ],
+              ),
+            ),
           LabeledTextField(
             key: const ValueKey('quick-site-name'),
-            label: 'Site name',
+            label: 'Site or office name',
             controller: _siteName,
             isRequired: true,
             enabled: !_busy,

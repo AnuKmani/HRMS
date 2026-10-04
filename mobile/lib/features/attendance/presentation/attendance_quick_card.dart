@@ -67,7 +67,7 @@ class AttendanceQuickCard extends ConsumerWidget {
     } else if (today.canCheckIn) {
       headline = 'You have not checked in today';
       detail = today.sites.isEmpty
-          ? 'No site assigned yet — ask HR to assign you to one.'
+          ? 'No work location yet — ask your Project Manager to set up your office or site.'
           : null;
     } else if (today.checkedOut) {
       headline = 'Done for today';
@@ -77,7 +77,7 @@ class AttendanceQuickCard extends ConsumerWidget {
     } else {
       headline = 'Attendance';
       detail = today.sites.isEmpty
-          ? 'No site assigned yet — ask HR to assign you to one.'
+          ? 'No work location yet — ask your Project Manager to set up your office or site.'
           : null;
     }
 

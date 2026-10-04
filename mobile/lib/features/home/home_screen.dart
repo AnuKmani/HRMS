@@ -97,7 +97,7 @@ class HomeScreen extends ConsumerWidget {
           'Quick site setup',
           Icons.bolt,
           '/site-assignments/quick',
-          'Create a site here and assign someone',
+          'Set up an office or site here and assign staff',
         ),
       if (scope.canViewAssignments)
         _Module(

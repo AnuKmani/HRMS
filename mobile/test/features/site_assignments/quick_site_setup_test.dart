@@ -173,7 +173,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('quick-setup-run')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Choose the employee.'), findsOneWidget);
+    expect(find.text('Add at least one employee.'), findsOneWidget);
     expect(sites.createCalls, 0);
   });
 }

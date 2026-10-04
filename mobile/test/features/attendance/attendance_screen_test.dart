@@ -151,7 +151,7 @@ void main() {
 
       await open(tester);
 
-      expect(find.text('Current site'), findsOneWidget);
+      expect(find.text('Work location'), findsOneWidget);
       expect(
         find.textContaining('Whitefield Yard · Metro Line 3'),
         findsOneWidget,
