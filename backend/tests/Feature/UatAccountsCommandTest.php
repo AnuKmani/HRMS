@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Employee;
 use App\Models\User;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RolePermissionSeeder;
@@ -93,5 +94,29 @@ class UatAccountsCommandTest extends TestCase
 
         $this->artisan('hrms:uat-accounts')->assertFailed();
         $this->assertSame(0, User::query()->count());
+    }
+
+    public function test_a_database_seeded_before_new_roles_were_added_does_not_collide(): void
+    {
+        $this->seedRbac();
+
+        // What an earlier run left behind: the old ten-role list numbered
+        // Finance 8, Management 9 and Employee 10, so UAT-010 is taken by an
+        // account that is not the one now tenth in the list.
+        foreach (['UAT-008' => 'finance', 'UAT-009' => 'management', 'UAT-010' => 'employee'] as $code => $slug) {
+            $user = User::factory()->create(['email' => "uat.{$slug}@uat.local"]);
+            Employee::factory()->create(['user_id' => $user->id, 'employee_code' => $code]);
+        }
+        // A soft-deleted row still holds its code in the unique index.
+        Employee::factory()->create(['employee_code' => 'UAT-011'])->delete();
+
+        $this->artisan('hrms:uat-accounts', ['--password' => 'Uat-pass-123', '--reset-passwords' => true])
+            ->assertSuccessful();
+
+        foreach (RoleSeeder::ROLES as $role) {
+            $user = User::query()->whereHas('roles', fn ($q) => $q->where('name', $role))->sole();
+            $this->assertNotNull($user->employee, $role);
+            $this->assertTrue(Hash::check('Uat-pass-123', $user->password), $role);
+        }
     }
 }

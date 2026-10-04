@@ -142,7 +142,7 @@ class CreateUatAccounts extends Command
         if (! $this->option('without-employees') && $user->employee()->doesntExist()) {
             Employee::query()->create([
                 'user_id' => $user->id,
-                'employee_code' => sprintf('UAT-%03d', $ordinal),
+                'employee_code' => $this->freeEmployeeCode($ordinal),
                 'first_name' => 'UAT',
                 'last_name' => $roleName,
                 'email' => $email,
@@ -152,5 +152,24 @@ class CreateUatAccounts extends Command
         }
 
         return [$user->refresh(), $password];
+    }
+
+    /**
+     * `UAT-<ordinal>`, or the next number up when that code is already
+     * taken. Adding a role to RoleSeeder::ROLES shifts every ordinal after
+     * it, so on a database seeded before that change the natural code can
+     * belong to another account; re-running must never collide with it.
+     */
+    private function freeEmployeeCode(int $ordinal): string
+    {
+        // withTrashed: the unique index covers soft-deleted rows too.
+        $taken = Employee::withTrashed()->where('employee_code', 'like', 'UAT-%')->pluck('employee_code')->all();
+
+        for ($n = $ordinal; ; $n++) {
+            $code = sprintf('UAT-%03d', $n);
+            if (! in_array($code, $taken, true)) {
+                return $code;
+            }
+        }
     }
 }
