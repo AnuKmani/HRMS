@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/config/app_config.dart';
 import '../../core/permissions/permission_scope.dart';
 import '../../core/presentation/app_theme.dart';
 import '../auth/auth_controller.dart';
@@ -359,6 +360,17 @@ class HomeScreen extends ConsumerWidget {
                         ),
                       ),
                     ],
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    'HRMS app · build ${AppConfig.build}',
+                    key: const ValueKey('app-build'),
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF94A3B8),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),

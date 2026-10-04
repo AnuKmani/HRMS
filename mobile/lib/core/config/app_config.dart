@@ -17,6 +17,14 @@ class AppConfig {
   /// Not configurable at runtime: the app has exactly one server to talk to,
   /// and a UI that could repoint it would turn a device into a credential
   /// forwarder for whoever can edit that setting.
+  /// Which build this is, shown at the foot of the dashboard so a tester
+  /// can tell at a glance which APK is installed. Set at build time with
+  /// `--dart-define=APP_BUILD=v7`; plain `flutter run` says `dev`.
+  static const String build = String.fromEnvironment(
+    'APP_BUILD',
+    defaultValue: 'dev',
+  );
+
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'http://10.0.2.2:8000/api/v1',
