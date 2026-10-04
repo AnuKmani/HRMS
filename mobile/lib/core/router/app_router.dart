@@ -68,6 +68,7 @@ import '../../features/training/presentation/training_list_screen.dart';
 import '../../features/training/presentation/training_program_form_screen.dart';
 import '../../features/training/presentation/training_programs_screen.dart';
 import '../../features/account/change_password_screen.dart';
+import '../../features/site_assignments/site_assignments_screens.dart';
 import '../../features/attendance/presentation/attendance_records_screen.dart';
 import '../../features/account/forgot_password_screen.dart';
 import '../../features/account/sessions_screen.dart';
@@ -191,6 +192,16 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/attendance',
         builder: (context, state) =>
             AttendanceScreen(startAction: state.uri.queryParameters['start']),
+      ),
+      // Who is posted where. Behind `assignments.view` / `.manage` on the
+      // API; an employee needs an active one to check in at all.
+      GoRoute(
+        path: '/site-assignments',
+        builder: (context, state) => const SiteAssignmentsScreen(),
+      ),
+      GoRoute(
+        path: '/site-assignments/new',
+        builder: (context, state) => const SiteAssignmentFormScreen(),
       ),
       // Reading attendance rather than recording it. Gated on
       // `attendance.view`; whose rows come back is the server's row scope.

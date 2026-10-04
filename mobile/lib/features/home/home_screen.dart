@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/permissions/permission_scope.dart';
+import '../../core/presentation/app_theme.dart';
 import '../auth/auth_controller.dart';
 import '../attendance/presentation/attendance_quick_card.dart';
 import '../auth/auth_models.dart';
@@ -87,6 +88,13 @@ class HomeScreen extends ConsumerWidget {
           Icons.location_on_outlined,
           '/sites',
           'Where the work happens',
+        ),
+      if (scope.canViewAssignments)
+        _Module(
+          'Site assignments',
+          Icons.assignment_ind_outlined,
+          '/site-assignments',
+          'Who works at which site',
         ),
 
       // Phase 6. `Leave` and `Timesheets` are permission-gated like the
@@ -231,105 +239,129 @@ class HomeScreen extends ConsumerWidget {
       ),
     ];
 
+    final sections = <String, List<_Module>>{};
+    for (final module in modules) {
+      sections.putIfAbsent(_sectionOf(module.label), () => []).add(module);
+    }
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('HRMS'),
-        actions: [
-          IconButton(
-            key: const ValueKey('open-notifications'),
-            tooltip: 'Notifications',
-            icon: Badge(
-              isLabelVisible: unread > 0,
-              label: Text(unread > 99 ? '99+' : '$unread'),
-              child: const Icon(Icons.notifications_outlined),
-            ),
-            onPressed: () => _open(context, ref, '/notifications'),
-          ),
-          PopupMenuButton<String>(
-            key: const ValueKey('account-menu'),
-            tooltip: 'Account',
-            icon: const Icon(Icons.account_circle_outlined),
-            onSelected: (path) => _open(context, ref, path),
-            itemBuilder: (context) => const [
-              PopupMenuItem(
-                key: ValueKey('change-password'),
-                value: '/account/password',
-                child: ListTile(
-                  leading: Icon(Icons.password),
-                  title: Text('Change password'),
+      body: ListView(
+        padding: EdgeInsets.zero,
+        children: [
+          _Header(
+            name: user?.name ?? '',
+            subtitle: subtitle,
+            email: user?.email ?? '',
+            roles: user?.roles ?? const [],
+            actions: [
+              IconButton(
+                key: const ValueKey('open-notifications'),
+                tooltip: 'Notifications',
+                color: Colors.white,
+                icon: Badge(
+                  isLabelVisible: unread > 0,
+                  backgroundColor: const Color(0xFFFACC15),
+                  textColor: const Color(0xFF1E1B4B),
+                  label: Text(unread > 99 ? '99+' : '$unread'),
+                  child: const Icon(Icons.notifications_outlined),
                 ),
+                onPressed: () => _open(context, ref, '/notifications'),
               ),
-              PopupMenuItem(
-                key: ValueKey('signed-in-devices'),
-                value: '/account/sessions',
-                child: ListTile(
-                  leading: Icon(Icons.devices_outlined),
-                  title: Text('Signed-in devices'),
-                ),
+              PopupMenuButton<String>(
+                key: const ValueKey('account-menu'),
+                tooltip: 'Account',
+                iconColor: Colors.white,
+                icon: const Icon(Icons.account_circle_outlined),
+                onSelected: (path) => _open(context, ref, path),
+                itemBuilder: (context) => const [
+                  PopupMenuItem(
+                    key: ValueKey('change-password'),
+                    value: '/account/password',
+                    child: ListTile(
+                      leading: Icon(Icons.password),
+                      title: Text('Change password'),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    key: ValueKey('signed-in-devices'),
+                    value: '/account/sessions',
+                    child: ListTile(
+                      leading: Icon(Icons.devices_outlined),
+                      title: Text('Signed-in devices'),
+                    ),
+                  ),
+                ],
+              ),
+              IconButton(
+                tooltip: 'Sign out',
+                color: Colors.white,
+                icon: const Icon(Icons.logout),
+                onPressed: () =>
+                    ref.read(authControllerProvider.notifier).logout(),
               ),
             ],
           ),
-          IconButton(
-            tooltip: 'Sign out',
-            icon: const Icon(Icons.logout),
-            onPressed: () => ref.read(authControllerProvider.notifier).logout(),
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
           Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Text('Welcome back', style: theme.textTheme.titleMedium),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Text(user?.name ?? '', style: theme.textTheme.headlineSmall),
-          ),
-          if (subtitle != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Text(subtitle, style: theme.textTheme.bodyMedium),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // The working day's one button. Not permission-gated, for
+                // the same reason the Attendance tile is not: recording your
+                // own day is not a privilege, and the API enforces the same
+                // rule.
+                if (user?.employee != null)
+                  AttendanceQuickCard(
+                    onOpen: (path) => _open(context, ref, path),
+                  ),
+                if (scope.canViewDashboard)
+                  MySummaryCard(onOpen: (path) => _open(context, ref, path)),
+                if (modules.isEmpty)
+                  Padding(
+                    key: const ValueKey('no-modules'),
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      'This account has no modules available yet. Ask an '
+                      'administrator for a role.',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  )
+                else
+                  for (final section in _sectionOrder)
+                    if (sections[section] case final list?) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
+                        child: Text(
+                          section,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: const Color(0xFF1E1B4B),
+                          ),
+                        ),
+                      ),
+                      LayoutBuilder(
+                        builder: (context, constraints) => GridView.count(
+                          crossAxisCount: constraints.maxWidth >= 600 ? 4 : 2,
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          mainAxisSpacing: 12,
+                          crossAxisSpacing: 12,
+                          childAspectRatio: 1.05,
+                          padding: const EdgeInsets.only(bottom: 12),
+                          children: [
+                            for (final module in list)
+                              _ModuleTile(
+                                module: module,
+                                onTap: () => _open(context, ref, module.path),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+              ],
             ),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 24),
-            child: Text(
-              'Signed in as ${user?.email ?? ''}',
-              style: theme.textTheme.bodySmall,
-            ),
           ),
-          // The working day's one button. Not permission-gated, for the
-          // same reason the Attendance tile is not: recording your own day
-          // is not a privilege, and the API enforces the same rule.
-          if (user?.employee != null)
-            AttendanceQuickCard(onOpen: (path) => _open(context, ref, path)),
-          if (scope.canViewDashboard)
-            MySummaryCard(onOpen: (path) => _open(context, ref, path)),
-          if (modules.isEmpty)
-            Padding(
-              key: const ValueKey('no-modules'),
-              padding: const EdgeInsets.all(24),
-              child: Text(
-                'This account has no modules available yet. Ask an '
-                'administrator for a role.',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodyMedium,
-              ),
-            )
-          else
-            for (final module in modules)
-              Card(
-                margin: const EdgeInsets.only(bottom: 12),
-                child: ListTile(
-                  key: ValueKey('module-${module.label}'),
-                  leading: Icon(module.icon),
-                  title: Text(module.label),
-                  subtitle: Text(module.subtitle),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _open(context, ref, module.path),
-                ),
-              ),
         ],
       ),
     );
@@ -366,4 +398,271 @@ class _Module {
   final IconData icon;
   final String path;
   final String subtitle;
+
+  Color get color => _colorOf(label);
+}
+
+const _sectionOrder = <String>[
+  'My day',
+  'People',
+  'Projects & sites',
+  'Pay & money',
+  'Company',
+];
+
+String _sectionOf(String label) => switch (label) {
+  'Attendance' ||
+  'Attendance records' ||
+  'Leave' ||
+  'Timesheets' ||
+  'Overtime' ||
+  'Holidays' => 'My day',
+  'Employees' ||
+  'Departments' ||
+  'Designations' ||
+  'Onboarding' ||
+  'Documents' ||
+  'Training' => 'People',
+  'Projects' ||
+  'Sites' ||
+  'Site assignments' ||
+  'Site reports' ||
+  'Daily site reports' => 'Projects & sites',
+  'Payroll' ||
+  'Salary slips' ||
+  'Loans' ||
+  'Salary certificates' ||
+  'Expenses' => 'Pay & money',
+  _ => 'Company',
+};
+
+Color _colorOf(String label) => switch (label) {
+  'Attendance' || 'Attendance records' => ModuleColors.attendance,
+  'Leave' => ModuleColors.leave,
+  'Timesheets' || 'Overtime' => ModuleColors.time,
+  'Holidays' => ModuleColors.calendar,
+  'Employees' || 'Onboarding' => ModuleColors.people,
+  'Departments' || 'Designations' => ModuleColors.org,
+  'Documents' => ModuleColors.compliance,
+  'Training' => ModuleColors.learning,
+  'Projects' => ModuleColors.projects,
+  'Sites' || 'Site assignments' => ModuleColors.sites,
+  'Site reports' || 'Daily site reports' => ModuleColors.reports,
+  'Payroll' || 'Salary slips' || 'Salary certificates' => ModuleColors.pay,
+  'Loans' || 'Expenses' => ModuleColors.money,
+  _ => ModuleColors.assets,
+};
+
+class _ModuleTile extends StatelessWidget {
+  const _ModuleTile({required this.module, required this.onTap});
+
+  final _Module module;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = module.color;
+    final theme = Theme.of(context);
+
+    return Material(
+      key: ValueKey('module-${module.label}'),
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(20),
+      elevation: 0,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: color.withValues(alpha: 0.25)),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [color.withValues(alpha: 0.14), Colors.white],
+            ),
+          ),
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: color.withValues(alpha: 0.35),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Icon(module.icon, color: Colors.white, size: 24),
+              ),
+              const Spacer(),
+              Text(
+                module.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: const Color(0xFF1E1B4B),
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                module.subtitle,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFF64748B),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Header extends StatelessWidget {
+  const _Header({
+    required this.name,
+    required this.subtitle,
+    required this.email,
+    required this.roles,
+    required this.actions,
+  });
+
+  final String name;
+  final String? subtitle;
+  final String email;
+  final List<String> roles;
+  final List<Widget> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final initials = name
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .take(2)
+        .map((part) => part[0].toUpperCase())
+        .join();
+
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: AppTheme.headerGradient,
+        borderRadius: BorderRadius.vertical(bottom: Radius.circular(28)),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 8, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    'HRMS',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  const Spacer(),
+                  ...actions,
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 28,
+                    backgroundColor: Colors.white.withValues(alpha: 0.22),
+                    child: Text(
+                      initials.isEmpty ? '?' : initials,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Welcome back',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: Colors.white.withValues(alpha: 0.85),
+                          ),
+                        ),
+                        Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        if (subtitle != null)
+                          Text(
+                            subtitle!,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: Colors.white.withValues(alpha: 0.85),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  for (final role in roles)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        role,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  Text(
+                    'Signed in as $email',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.75),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/presentation/app_theme.dart';
 import 'core/router/app_router.dart';
 
 class HrmsApp extends ConsumerWidget {
@@ -13,12 +14,7 @@ class HrmsApp extends ConsumerWidget {
     return MaterialApp.router(
       title: 'HRMS',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1D4ED8)),
-        inputDecorationTheme: const InputDecorationTheme(
-          border: OutlineInputBorder(),
-        ),
-      ),
+      theme: AppTheme.light(),
       routerConfig: router,
     );
   }
