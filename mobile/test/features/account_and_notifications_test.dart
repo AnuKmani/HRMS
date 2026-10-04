@@ -439,4 +439,26 @@ void main() {
       expect(find.text('Session revoked.'), findsOneWidget);
     });
   });
+
+  testWidgets('a notification arriving while the dashboard is open alerts', (
+    tester,
+  ) async {
+    await pumpApp(tester);
+    expect(find.byKey(const ValueKey('open-notifications')), findsOneWidget);
+
+    // HR approves the leave somewhere else; the next poll sees it.
+    notifications.rows.add(notificationRow(4, route: '/leave/9'));
+    await tester.pump(const Duration(seconds: 31));
+    await advance(tester);
+
+    expect(
+      find.byKey(const ValueKey('new-notification-alert')),
+      findsOneWidget,
+    );
+    expect(find.text('You have a new notification'), findsOneWidget);
+
+    await tester.tap(find.text('VIEW'));
+    await advance(tester);
+    expect(find.text('Notification 4'), findsOneWidget);
+  });
 }

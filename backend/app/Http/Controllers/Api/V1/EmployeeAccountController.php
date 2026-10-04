@@ -58,6 +58,10 @@ class EmployeeAccountController extends Controller
                 'nullable', 'string', 'email:rfc', 'max:190',
                 Rule::unique('users', 'email'),
             ],
+            // HR may choose the first password to hand over (e.g. on paper).
+            // It is temporary either way: the employee must replace it with
+            // their own at first sign-in, so it only has to be typeable.
+            'password' => ['nullable', 'string', 'min:4', 'max:100'],
         ]);
 
         $this->guardSuperAdmin($request, $data['role']);
@@ -67,7 +71,9 @@ class EmployeeAccountController extends Controller
             abort(422, 'That email address is already used by another login.');
         }
 
-        $password = Str::password(12, symbols: false);
+        $password = filled($data['password'] ?? null)
+            ? (string) $data['password']
+            : Str::password(12, symbols: false);
 
         $user = DB::transaction(function () use ($employee, $email, $password, $data) {
             $user = User::query()->create([
@@ -75,6 +81,7 @@ class EmployeeAccountController extends Controller
                 'email' => $email,
                 'password' => Hash::make($password),
                 'status' => User::STATUS_ACTIVE,
+                'must_change_password' => true,
             ]);
             $user->syncRoles([$data['role']]);
 
@@ -121,6 +128,46 @@ class EmployeeAccountController extends Controller
         });
 
         return ApiResponse::success('Role updated.', $this->describe($user->refresh()));
+    }
+
+    /**
+     * POST /employees/{employee}/account/reset-password — HR hands out a new
+     * temporary password (theirs, or a generated one) for a forgotten one.
+     * Every session on the old password ends; the employee must pick their
+     * own again at the next sign-in.
+     */
+    public function resetPassword(Request $request, Employee $employee): JsonResponse
+    {
+        $user = $employee->user;
+
+        if ($user === null) {
+            abort(404, 'This employee has no login yet. Create one first.');
+        }
+
+        if ($user->hasRole(self::SUPER_ADMIN) && ! $request->user()->hasRole(self::SUPER_ADMIN)) {
+            abort(403, 'Only a Super Admin can reset a Super Admin\'s password.');
+        }
+
+        $data = $request->validate([
+            'password' => ['nullable', 'string', 'min:4', 'max:100'],
+        ]);
+
+        $password = filled($data['password'] ?? null)
+            ? (string) $data['password']
+            : Str::password(12, symbols: false);
+
+        DB::transaction(function () use ($user, $password) {
+            $user->forceFill([
+                'password' => Hash::make($password),
+                'must_change_password' => true,
+            ])->save();
+            $user->tokens()->delete();
+            $this->audit($user, 'user.password_reset_by_hr', [], []);
+        });
+
+        return ApiResponse::success('Password reset.', $this->describe($user->refresh()) + [
+            'temporary_password' => $password,
+        ]);
     }
 
     private function guardSuperAdmin(Request $request, string $role): void

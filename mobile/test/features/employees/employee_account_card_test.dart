@@ -10,6 +10,8 @@ class FakeAccounts implements EmployeeAccountRepository {
   EmployeeAccount? account;
   final List<String> created = [];
   final List<String> changed = [];
+  final List<String?> passwords = [];
+  final List<String?> resets = [];
 
   @override
   Future<EmployeeAccount?> find(int employeeId) async => account;
@@ -19,12 +21,31 @@ class FakeAccounts implements EmployeeAccountRepository {
     int employeeId, {
     required String role,
     String? email,
+    String? password,
   }) async {
     created.add(role);
+    passwords.add(password);
     return account = EmployeeAccount(
       email: 'new.joiner@example.com',
       roles: [role],
-      temporaryPassword: 'Tmp9xY2kQ7wP',
+      temporaryPassword: password == null || password.isEmpty
+          ? 'Tmp9xY2kQ7wP'
+          : password,
+    );
+  }
+
+  @override
+  Future<EmployeeAccount> resetPassword(
+    int employeeId, {
+    String? password,
+  }) async {
+    resets.add(password);
+    return EmployeeAccount(
+      email: account!.email,
+      roles: account!.roles,
+      temporaryPassword: password == null || password.isEmpty
+          ? 'Gen3rated99'
+          : password,
     );
   }
 
@@ -91,7 +112,13 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('role-option-Project Manager')));
     await tester.pumpAndSettle();
 
+    // Blank: the server makes one up.
+    expect(find.text('First password'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('account-password-go')));
+    await tester.pumpAndSettle();
+
     expect(fake.created, ['Project Manager']);
+    expect(fake.passwords, ['']);
     expect(find.text('Login created'), findsOneWidget);
     expect(find.text('Tmp9xY2kQ7wP'), findsOneWidget);
 
@@ -126,5 +153,52 @@ void main() {
 
     expect(find.text('No app login yet'), findsOneWidget);
     expect(find.byKey(const ValueKey('account-create')), findsNothing);
+  });
+
+  testWidgets('HR chooses the first password, e.g. 12345', (tester) async {
+    final fake = await pumpCard(
+      tester,
+      permissions: const ['users.view', 'users.manage'],
+    );
+
+    await tester.tap(find.byKey(const ValueKey('account-create')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('role-option-Employee')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('account-password')),
+      '12345',
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('account-password-go')));
+    await tester.pumpAndSettle();
+
+    expect(fake.passwords, ['12345']);
+    expect(find.text('12345'), findsOneWidget);
+  });
+
+  testWidgets('HR resets a forgotten password', (tester) async {
+    final fake = await pumpCard(
+      tester,
+      permissions: const ['users.view', 'users.manage'],
+      existing: const EmployeeAccount(
+        email: 'new.joiner@example.com',
+        roles: ['Employee'],
+      ),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('account-reset-password')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('account-password')),
+      'temp99',
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('account-password-go')));
+    await tester.pumpAndSettle();
+
+    expect(fake.resets, ['temp99']);
+    expect(find.text('Password reset'), findsOneWidget);
+    expect(find.text('temp99'), findsOneWidget);
   });
 }

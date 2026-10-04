@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/data/page_result.dart';
@@ -46,10 +48,34 @@ final unreadNotificationsProvider =
       UnreadNotificationsController.new,
     );
 
+/// How often the bell asks the server for its number while the app is open,
+/// so a leave request (or its answer) shows up without reopening anything.
+/// Null switches polling off.
+final notificationPollIntervalProvider = Provider<Duration?>(
+  (ref) => const Duration(seconds: 30),
+);
+
 class UnreadNotificationsController extends AsyncNotifier<int> {
   @override
-  Future<int> build() =>
-      ref.watch(notificationsRepositoryProvider).unreadCount();
+  Future<int> build() {
+    final every = ref.watch(notificationPollIntervalProvider);
+    if (every != null) {
+      final timer = Timer.periodic(every, (_) => _poll());
+      ref.onDispose(timer.cancel);
+    }
+    return ref.watch(notificationsRepositoryProvider).unreadCount();
+  }
+
+  /// A quiet re-read: a failed poll keeps the last number rather than
+  /// turning the bell into an error.
+  Future<void> _poll() async {
+    try {
+      final unread = await ref
+          .read(notificationsRepositoryProvider)
+          .unreadCount();
+      if (state.value != unread) state = AsyncData(unread);
+    } catch (_) {}
+  }
 
   void set(int unread) => state = AsyncData(unread);
 }

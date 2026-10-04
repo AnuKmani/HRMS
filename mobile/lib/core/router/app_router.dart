@@ -140,6 +140,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       final landing = location == '/' || location == '/login';
 
       if (auth.isAuthenticated) {
+        // A password HR handed out must be replaced before anything else.
+        if (auth.user?.mustChangePassword == true) {
+          return location == '/account/password' ? null : '/account/password';
+        }
+
         // Also covers a deep link back to the landing pages, so a stale
         // notification cannot drop a signed-in user onto the sign-in form.
         return landing ? '/home' : null;

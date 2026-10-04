@@ -62,6 +62,7 @@ class AuthUser {
     required this.roles,
     required this.permissions,
     this.employee,
+    this.mustChangePassword = false,
   });
 
   final int id;
@@ -83,6 +84,20 @@ class AuthUser {
 
   final EmployeeBrief? employee;
 
+  /// HR handed out this password. Until its owner picks their own, the app
+  /// shows only the change-password screen (and the API refuses the rest).
+  final bool mustChangePassword;
+
+  AuthUser withPasswordChanged() => AuthUser(
+    id: id,
+    name: name,
+    email: email,
+    status: status,
+    roles: roles,
+    permissions: permissions,
+    employee: employee,
+  );
+
   bool get isActive => status == 'active';
 
   bool can(String permission) => permissions.contains(permission);
@@ -97,6 +112,7 @@ class AuthUser {
     employee: json['employee'] is Map<String, dynamic>
         ? EmployeeBrief.fromJson(json['employee']! as Map<String, dynamic>)
         : null,
+    mustChangePassword: json['must_change_password'] == true,
   );
 }
 

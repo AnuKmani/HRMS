@@ -4,6 +4,7 @@ namespace App\Services\Leave;
 
 use App\Events\LeaveConvertedToLop;
 use App\Events\LeaveDecided;
+use App\Events\LeaveStepApproved;
 use App\Events\LeaveSubmitted;
 use App\Models\ApprovalRecord;
 use App\Models\Employee;
@@ -201,6 +202,8 @@ final class LeaveRequestService
                 $this->finaliseApproval($leave, $user);
             } else {
                 $leave->save();
+                // Moved on to the next link: tell whoever holds it now.
+                event(new LeaveStepApproved($leave, $user));
             }
 
             return $leave->refresh();

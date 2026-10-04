@@ -64,6 +64,19 @@ class SettingSeeder extends Seeder
             'description' => 'When a check-out earns overtime, create and submit the overtime request for approval automatically.',
         ],
 
+        // --- notifications ----------------------------------------------
+        [
+            // Every in-app alert (leave applied, approved, rejected, ...) is
+            // also emailed to the person when this is on. Delivery needs
+            // MAIL_* in .env and a running `php artisan queue:work`.
+            'key' => 'notifications.email_enabled',
+            'value' => '1',
+            'type' => 'boolean',
+            'group' => 'notifications',
+            'label' => 'Email notifications',
+            'description' => 'Send every app notification by email as well.',
+        ],
+
         // --- leave ------------------------------------------------------
         [
             // 2 days, the default the specification asks for. A leave type

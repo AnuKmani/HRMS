@@ -147,6 +147,17 @@ class AuthController extends Notifier<AuthState> {
   /// Reached from the HTTP layer when any request carrying our token gets a
   /// 401 — the token was revoked from another device, the password changed,
   /// or it aged out.
+  /// The signed-in person has just chosen their own password: the account
+  /// is no longer on the one HR handed out.
+  void passwordChanged() {
+    final user = state.user;
+    if (user == null || !user.mustChangePassword) return;
+    state = AuthState(
+      status: AuthStatus.authenticated,
+      user: user.withPasswordChanged(),
+    );
+  }
+
   void signOutLocally() {
     // A rejected *sign-in attempt* attaches no token, so this only ever fires
     // for a stored session. The guards keep it from clobbering a message the

@@ -91,6 +91,7 @@ final class NotificationCategory
         'attendance.reminder' => self::ATTENDANCE,
 
         'leave.submitted' => self::LEAVE,
+        'leave.progress' => self::LEAVE,
         'leave.approved' => self::LEAVE,
         'leave.rejected' => self::LEAVE,
         'leave.lop_converted' => self::LEAVE,

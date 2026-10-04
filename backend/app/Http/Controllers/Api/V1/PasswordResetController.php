@@ -117,7 +117,10 @@ class PasswordResetController extends Controller
                 // A one-time password, not a copy of the old one: the user
                 // chose this string, and the only thing it must do is stop
                 // being the string that was compromised.
-                $resetUser->forceFill(['password' => Hash::make($password)])->save();
+                $resetUser->forceFill([
+                    'password' => Hash::make($password),
+                    'must_change_password' => false,
+                ])->save();
 
                 // The premise of a reset is that the old password may be
                 // compromised, so every credential issued before it dies

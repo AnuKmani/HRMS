@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../auth/auth_controller.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/presentation/fields.dart';
 import '../../core/presentation/form_controls.dart';
@@ -72,9 +74,16 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
           );
 
       if (!mounted) return;
+      final forced =
+          ref.read(authControllerProvider).user?.mustChangePassword == true;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(message)));
-      context.returnTo('/home');
+      ref.read(authControllerProvider.notifier).passwordChanged();
+      if (forced) {
+        context.go('/home');
+      } else {
+        context.returnTo('/home');
+      }
     } on ApiException catch (failure) {
       if (!mounted) return;
       setState(() {
@@ -87,11 +96,41 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final forced =
+        ref.watch(authControllerProvider).user?.mustChangePassword == true;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Change password')),
+      appBar: AppBar(
+        title: Text(forced ? 'Set your password' : 'Change password'),
+        // A first sign-in has nowhere to go back to until this is done.
+        automaticallyImplyLeading: !forced,
+        actions: [
+          if (forced)
+            TextButton(
+              key: const ValueKey('forced-sign-out'),
+              onPressed: _saving
+                  ? null
+                  : () => ref.read(authControllerProvider.notifier).logout(),
+              child: const Text('Sign out'),
+            ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (forced)
+            Card(
+              key: const ValueKey('first-login-note'),
+              color: Theme.of(context).colorScheme.primaryContainer,
+              child: const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'Welcome! HR gave you a temporary password. Please choose '
+                  'your own password now. Type the password HR gave you as '
+                  'the current password.',
+                ),
+              ),
+            ),
           if (_banner != null) FormBanner(message: _banner!),
           LabeledTextField(
             key: const ValueKey('current-password'),

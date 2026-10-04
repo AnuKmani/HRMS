@@ -34,6 +34,38 @@ class HomeScreen extends ConsumerWidget {
     // goes without a number until the next successful refresh.
     final unread = ref.watch(unreadNotificationsProvider).value ?? 0;
 
+    // Something new arrived while the dashboard is open — a leave request
+    // to approve, or the answer to one. Say so, with a way straight to it.
+    ref.listen<AsyncValue<int>>(unreadNotificationsProvider, (previous, next) {
+      final before = previous?.value;
+      final now = next.value;
+      if (before == null || now == null || now <= before) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            key: const ValueKey('new-notification-alert'),
+            content: Row(
+              children: [
+                const Icon(Icons.notifications_active, color: Colors.amber),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    now - before == 1
+                        ? 'You have a new notification'
+                        : 'You have ${now - before} new notifications',
+                  ),
+                ),
+              ],
+            ),
+            action: SnackBarAction(
+              label: 'VIEW',
+              onPressed: () => _open(context, ref, '/notifications'),
+            ),
+          ),
+        );
+    });
+
     final modules = <_Module>[
       // First, and not gated on a permission: recording your own day is not
       // something a role grants. Every account with an employee record gets
@@ -273,7 +305,11 @@ class HomeScreen extends ConsumerWidget {
                   backgroundColor: const Color(0xFFFACC15),
                   textColor: const Color(0xFF1E1B4B),
                   label: Text(unread > 99 ? '99+' : '$unread'),
-                  child: const Icon(Icons.notifications_outlined),
+                  child: Icon(
+                    unread > 0
+                        ? Icons.notifications_active
+                        : Icons.notifications_outlined,
+                  ),
                 ),
                 onPressed: () => _open(context, ref, '/notifications'),
               ),

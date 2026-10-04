@@ -44,6 +44,8 @@ class UserResource extends JsonResource
             'name' => $this->name,
             'email' => $this->email,
             'status' => $this->status,
+            // HR handed out this password; the app asks for a new one first.
+            'must_change_password' => (bool) $this->must_change_password,
             'roles' => $this->getRoleNames()->sort()->values()->all(),
             'permissions' => $this->getAllPermissions()
                 ->pluck('name')

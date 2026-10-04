@@ -2,10 +2,12 @@
 
 namespace App\Services\Notifications;
 
+use App\Jobs\SendNotificationEmail;
 use App\Jobs\SendPushNotification;
 use App\Models\InAppNotification;
 use App\Models\NotificationPreference;
 use App\Models\User;
+use App\Services\SettingsService;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 
@@ -39,6 +41,8 @@ use Illuminate\Support\Facades\DB;
  */
 class NotificationService
 {
+    public function __construct(private readonly SettingsService $settings) {}
+
     /**
      * Deliver a message to every one of its recipients.
      *
@@ -110,6 +114,10 @@ class NotificationService
             $written[] = $notification;
 
             SendPushNotification::dispatch($notification->id);
+
+            if ($this->settings->bool('notifications.email_enabled', false)) {
+                SendNotificationEmail::dispatch($notification->id);
+            }
         }
 
         return $written;

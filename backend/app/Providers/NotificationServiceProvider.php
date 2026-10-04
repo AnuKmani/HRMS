@@ -11,6 +11,7 @@ use App\Events\EmployeeTrainingExpiring;
 use App\Events\ExpenseDecided;
 use App\Events\LeaveConvertedToLop;
 use App\Events\LeaveDecided;
+use App\Events\LeaveStepApproved;
 use App\Events\LeaveSubmitted;
 use App\Events\OvertimeDecided;
 use App\Events\SalaryCertificateDecided;
@@ -212,7 +213,46 @@ class NotificationServiceProvider extends ServiceProvider
                 title: 'Leave request waiting for you',
                 body: sprintf('%s requested %s.', $leave->employee?->full_name ?? 'An employee', $leave->summary()),
                 recipients: $this->app->make(ApprovalAudience::class)
-                    ->openApprovers('leave_request', (int) $leave->id),
+                    ->currentApprovers('leave_request', (int) $leave->id),
+                data: [
+                    'route' => '/leave/'.$leave->id,
+                    'leave_request_id' => $leave->id,
+                ],
+            );
+        });
+
+        // Manager said yes, the chain moved on: the next approver (e.g. HR)
+        // is alerted now, and the employee hears how far it has got.
+        Event::listen(LeaveStepApproved::class, function (LeaveStepApproved $event) {
+            $leave = $event->leaveRequest;
+            $leave->loadMissing(['employee', 'leaveType']);
+
+            $this->notify(
+                type: 'leave.submitted',
+                title: 'Leave request waiting for you',
+                body: sprintf(
+                    '%s requested %s. Approved by %s; now waiting for you.',
+                    $leave->employee?->full_name ?? 'An employee',
+                    $leave->summary(),
+                    $event->approvedBy->name,
+                ),
+                recipients: $this->app->make(ApprovalAudience::class)
+                    ->currentApprovers('leave_request', (int) $leave->id),
+                data: [
+                    'route' => '/leave/'.$leave->id,
+                    'leave_request_id' => $leave->id,
+                ],
+            );
+
+            $this->notify(
+                type: 'leave.progress',
+                title: 'Leave approved by '.$event->approvedBy->name,
+                body: sprintf(
+                    'Your leave from %s to %s has passed one approval and is now with the next approver.',
+                    $leave->start_date?->format('j M Y') ?? '',
+                    $leave->end_date?->format('j M Y') ?? '',
+                ),
+                recipients: [$this->userFor($leave->employee)],
                 data: [
                     'route' => '/leave/'.$leave->id,
                     'leave_request_id' => $leave->id,

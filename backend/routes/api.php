@@ -93,7 +93,9 @@ Route::prefix('v1')->group(function () {
 
     /* ------------------------------------------- bearer-token only */
 
-    Route::middleware('auth:sanctum')->group(function () {
+    // `password.changed`: a login HR handed out can only change its
+    // password until its owner has picked their own.
+    Route::middleware(['auth:sanctum', 'password.changed'])->group(function () {
 
         // Who am I / sign out / change password.
         Route::get('auth/me', [AuthController::class, 'me']);
@@ -210,6 +212,9 @@ Route::prefix('v1')->group(function () {
             ->middleware('permission:users.manage')
             ->middleware('throttle:write');
         Route::put('employees/{employee}/account', [EmployeeAccountController::class, 'update'])
+            ->middleware('permission:users.manage')
+            ->middleware('throttle:write');
+        Route::post('employees/{employee}/account/reset-password', [EmployeeAccountController::class, 'resetPassword'])
             ->middleware('permission:users.manage')
             ->middleware('throttle:write');
 

@@ -37,8 +37,13 @@ abstract class EmployeeAccountRepository {
     int employeeId, {
     required String role,
     String? email,
+    String? password,
   });
   Future<EmployeeAccount> changeRole(int employeeId, String role);
+
+  /// HR hands out a new temporary password; blank means the server makes
+  /// one up. Either way the employee must choose their own at next sign-in.
+  Future<EmployeeAccount> resetPassword(int employeeId, {String? password});
   Future<List<String>> roles();
 }
 
@@ -58,12 +63,27 @@ class ApiEmployeeAccountRepository implements EmployeeAccountRepository {
     int employeeId, {
     required String role,
     String? email,
+    String? password,
   }) async => _one(
     (await _client.post(
       '/employees/$employeeId/account',
       body: <String, Object?>{
         'role': role,
         if (email != null && email.trim().isNotEmpty) 'email': email.trim(),
+        if (password != null && password.isNotEmpty) 'password': password,
+      },
+    )).data,
+  );
+
+  @override
+  Future<EmployeeAccount> resetPassword(
+    int employeeId, {
+    String? password,
+  }) async => _one(
+    (await _client.post(
+      '/employees/$employeeId/account/reset-password',
+      body: <String, Object?>{
+        if (password != null && password.isNotEmpty) 'password': password,
       },
     )).data,
   );
@@ -193,21 +213,57 @@ class _EmployeeAccountCardState extends ConsumerState<EmployeeAccountCard> {
     );
   }
 
+  /// HR types the first password to hand over, or leaves it blank for one
+  /// the app makes up. Null when cancelled.
+  Future<String?> _askPassword({required String title, required String go}) =>
+      showDialog<String>(
+        context: context,
+        builder: (context) => _PasswordDialog(title: title, go: go),
+      );
+
   Future<void> _create() async {
     final role = await _pickRole();
     if (role == null || !mounted) return;
+    final password = await _askPassword(
+      title: 'First password',
+      go: 'Create login',
+    );
+    if (password == null || !mounted) return;
 
     setState(() => _saving = true);
     try {
       final account = await ref
           .read(employeeAccountRepositoryProvider)
-          .create(widget.employeeId, role: role);
+          .create(widget.employeeId, role: role, password: password);
       if (!mounted) return;
       setState(() {
         _account = account;
         _saving = false;
       });
       await _showPassword(account);
+    } on ApiException catch (failure) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      _snack(
+        failure.errors.values.isNotEmpty
+            ? failure.errors.values.first
+            : failure.message,
+      );
+    }
+  }
+
+  Future<void> _resetPassword() async {
+    final password = await _askPassword(title: 'Reset password', go: 'Reset');
+    if (password == null || !mounted) return;
+
+    setState(() => _saving = true);
+    try {
+      final account = await ref
+          .read(employeeAccountRepositoryProvider)
+          .resetPassword(widget.employeeId, password: password);
+      if (!mounted) return;
+      setState(() => _saving = false);
+      await _showPassword(account, title: 'Password reset');
     } on ApiException catch (failure) {
       if (!mounted) return;
       setState(() => _saving = false);
@@ -247,11 +303,14 @@ class _EmployeeAccountCardState extends ConsumerState<EmployeeAccountCard> {
     }
   }
 
-  Future<void> _showPassword(EmployeeAccount account) => showDialog<void>(
+  Future<void> _showPassword(
+    EmployeeAccount account, {
+    String title = 'Login created',
+  }) => showDialog<void>(
     context: context,
     builder: (context) => AlertDialog(
       icon: const Icon(Icons.key, size: 40),
-      title: const Text('Login created'),
+      title: Text(title),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -278,8 +337,8 @@ class _EmployeeAccountCardState extends ConsumerState<EmployeeAccountCard> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'They should change it after signing in: account icon → '
-            'Change password.',
+            'When they sign in with it, the app asks them to choose their '
+            'own password straight away.',
           ),
         ],
       ),
@@ -316,7 +375,9 @@ class _EmployeeAccountCardState extends ConsumerState<EmployeeAccountCard> {
     'Payroll Admin' => 'Payroll, payslips, loans, certificates',
     'Project Manager' => 'Projects, sites (can add sites), site staff',
     'Site Engineer' => 'Site visits and site reports',
-    'Site Supervisor' => 'Site attendance, daily reports, first approvals',
+    'Site Supervisor' => 'Site visits, site attendance, first approvals',
+    'Site Officer' => 'Own attendance and site visits',
+    'Technician' => 'Own attendance and site visits',
     'Finance' => 'Expenses and money approvals',
     'Management' => 'Summaries and totals',
     'Employee' => 'Own attendance, leave, payslips',
@@ -396,11 +457,28 @@ class _EmployeeAccountCardState extends ConsumerState<EmployeeAccountCard> {
                               icon: const Icon(Icons.person_add),
                               label: const Text('Create login & choose role'),
                             )
-                          : OutlinedButton.icon(
-                              key: const ValueKey('account-change-role'),
-                              onPressed: _saving ? null : _changeRole,
-                              icon: const Icon(Icons.swap_horiz),
-                              label: const Text('Change role'),
+                          : Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    key: const ValueKey('account-change-role'),
+                                    onPressed: _saving ? null : _changeRole,
+                                    icon: const Icon(Icons.swap_horiz),
+                                    label: const Text('Change role'),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    key: const ValueKey(
+                                      'account-reset-password',
+                                    ),
+                                    onPressed: _saving ? null : _resetPassword,
+                                    icon: const Icon(Icons.lock_reset),
+                                    label: const Text('Reset password'),
+                                  ),
+                                ),
+                              ],
                             ),
                     ),
                   ),
@@ -409,6 +487,71 @@ class _EmployeeAccountCardState extends ConsumerState<EmployeeAccountCard> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// The password HR will hand over. Blank is allowed: the server then makes
+/// one up. Returns the text (possibly empty), or null on Cancel.
+class _PasswordDialog extends StatefulWidget {
+  const _PasswordDialog({required this.title, required this.go});
+
+  final String title;
+  final String go;
+
+  @override
+  State<_PasswordDialog> createState() => _PasswordDialogState();
+}
+
+class _PasswordDialogState extends State<_PasswordDialog> {
+  final TextEditingController _password = TextEditingController();
+
+  @override
+  void dispose() {
+    _password.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final text = _password.text.trim();
+    final tooShort = text.isNotEmpty && text.length < 4;
+
+    return AlertDialog(
+      title: Text(widget.title),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            key: const ValueKey('account-password'),
+            controller: _password,
+            autofocus: true,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              labelText: 'Password to give the employee',
+              hintText: 'e.g. 12345',
+              errorText: tooShort ? 'At least 4 characters.' : null,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Leave it blank and the app makes one up. Either way it is '
+            'temporary: the employee chooses their own at first sign-in.',
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: const ValueKey('account-password-go'),
+          onPressed: tooShort ? null : () => Navigator.of(context).pop(text),
+          child: Text(widget.go),
+        ),
+      ],
     );
   }
 }

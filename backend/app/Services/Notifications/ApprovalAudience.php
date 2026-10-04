@@ -48,6 +48,32 @@ class ApprovalAudience
     }
 
     /**
+     * User ids who can act on this subject right now — the pending step
+     * only. Someone further down the chain is told when it reaches them
+     * (LeaveStepApproved), not before: an alert they could not act on
+     * would open a request with no Approve button.
+     *
+     * @return array<int, int>
+     */
+    public function currentApprovers(string $subjectType, int $subjectId): array
+    {
+        $records = ApprovalRecord::query()
+            ->forSubject($subjectType, $subjectId)
+            ->where('status', ApprovalRecord::STATUS_PENDING)
+            ->get();
+
+        $ids = [];
+
+        foreach ($records as $record) {
+            foreach ($this->resolve($record) as $id) {
+                $ids[$id] = $id;
+            }
+        }
+
+        return array_values($ids);
+    }
+
+    /**
      * One open step, expanded to the users it can be answered by.
      *
      * Mirrors `ApprovalWorkflowService::matches()` — that method answers

@@ -134,7 +134,11 @@ class AuthController extends Controller
     public function changePassword(ChangePasswordRequest $request): JsonResponse
     {
         $user = $request->user();
-        $user->update(['password' => $request->validated('password')]);
+        $user->update([
+            'password' => $request->validated('password'),
+            // Their own password now, not the one HR handed out.
+            'must_change_password' => false,
+        ]);
 
         // Only possible when the caller presented a bearer token. If the
         // current token cannot be identified we revoke nothing rather than
