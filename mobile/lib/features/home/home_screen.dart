@@ -232,11 +232,29 @@ class HomeScreen extends ConsumerWidget {
             ),
             onPressed: () => _open(context, ref, '/notifications'),
           ),
-          IconButton(
-            key: const ValueKey('change-password'),
-            tooltip: 'Change password',
-            icon: const Icon(Icons.password),
-            onPressed: () => _open(context, ref, '/account/password'),
+          PopupMenuButton<String>(
+            key: const ValueKey('account-menu'),
+            tooltip: 'Account',
+            icon: const Icon(Icons.account_circle_outlined),
+            onSelected: (path) => _open(context, ref, path),
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                key: ValueKey('change-password'),
+                value: '/account/password',
+                child: ListTile(
+                  leading: Icon(Icons.password),
+                  title: Text('Change password'),
+                ),
+              ),
+              PopupMenuItem(
+                key: ValueKey('signed-in-devices'),
+                value: '/account/sessions',
+                child: ListTile(
+                  leading: Icon(Icons.devices_outlined),
+                  title: Text('Signed-in devices'),
+                ),
+              ),
+            ],
           ),
           IconButton(
             tooltip: 'Sign out',

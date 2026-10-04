@@ -69,6 +69,7 @@ import '../../features/training/presentation/training_program_form_screen.dart';
 import '../../features/training/presentation/training_programs_screen.dart';
 import '../../features/account/change_password_screen.dart';
 import '../../features/account/forgot_password_screen.dart';
+import '../../features/account/sessions_screen.dart';
 import '../../features/notifications/presentation/notifications_screen.dart';
 
 /// The app's routes, one redirect, and a guard driven entirely by auth state.
@@ -168,6 +169,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/account/password',
         builder: (context, state) => const ChangePasswordScreen(),
+      ),
+      GoRoute(
+        path: '/account/sessions',
+        builder: (context, state) => const SessionsScreen(),
       ),
       GoRoute(
         path: '/notifications',

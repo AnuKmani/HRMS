@@ -8,6 +8,7 @@ import 'package:mobile/core/storage/token_store.dart';
 import 'package:mobile/features/account/account_repository.dart';
 import 'package:mobile/features/account/change_password_screen.dart';
 import 'package:mobile/features/account/forgot_password_screen.dart';
+import 'package:mobile/features/account/sessions_screen.dart';
 import 'package:mobile/features/auth/auth_repository.dart';
 import 'package:mobile/core/storage/device_identity.dart';
 import 'package:mobile/features/home/home_screen.dart';
@@ -92,6 +93,27 @@ class FakeAccount implements AccountRepository {
   Future<String> requestPasswordReset(String email) async {
     resets.add(email);
     return 'If that email address is registered, a password reset link has been sent.';
+  }
+
+  final List<DeviceSession> devices = [
+    DeviceSession(
+      id: 1,
+      device: 'Samsung SM-S918B',
+      isCurrent: true,
+      lastUsedAt: DateTime.utc(2026, 10, 4, 8),
+    ),
+    const DeviceSession(id: 2, device: 'Old tablet', isCurrent: false),
+  ];
+  final List<int> revoked = [];
+
+  @override
+  Future<List<DeviceSession>> sessions() async => List.of(devices);
+
+  @override
+  Future<String> revokeSession(int id) async {
+    revoked.add(id);
+    devices.removeWhere((device) => device.id == id);
+    return 'Session revoked.';
   }
 }
 
@@ -250,6 +272,8 @@ void main() {
   group('change password', () {
     Future<void> open(WidgetTester tester) async {
       await pumpApp(tester);
+      await tester.tap(find.byKey(const ValueKey('account-menu')));
+      await advance(tester);
       await tester.tap(find.byKey(const ValueKey('change-password')));
       await advance(tester);
       expect(find.byType(ChangePasswordScreen), findsOneWidget);
@@ -333,6 +357,31 @@ void main() {
       await tester.pageBack();
       await advance(tester);
       expect(find.byKey(const ValueKey('forgot-password')), findsOneWidget);
+    });
+  });
+
+  group('signed-in devices', () {
+    testWidgets('lists devices, and only other devices can be signed out', (
+      tester,
+    ) async {
+      await pumpApp(tester);
+      await tester.tap(find.byKey(const ValueKey('account-menu')));
+      await advance(tester);
+      await tester.tap(find.byKey(const ValueKey('signed-in-devices')));
+      await advance(tester);
+
+      expect(find.byType(SessionsScreen), findsOneWidget);
+      expect(find.text('This device'), findsOneWidget);
+      expect(find.byKey(const ValueKey('revoke-session-1')), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('revoke-session-2')));
+      await advance(tester);
+      await tester.tap(find.byKey(const ValueKey('confirm-revoke')));
+      await advance(tester);
+
+      expect(account.revoked, [2]);
+      expect(find.text('Old tablet'), findsNothing);
+      expect(find.text('Session revoked.'), findsOneWidget);
     });
   });
 }
