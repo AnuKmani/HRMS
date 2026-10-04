@@ -45,6 +45,13 @@ class PermissionScope {
   /// is the server's per-block answer; this only decides whether to ask.
   bool get canViewDashboard => can('dashboard.view');
 
+  /* ------------------------------------------------------ attendance */
+
+  /// Reading attendance records. The seeders give it to every role — an
+  /// employee reads their own history, HR everybody's; the difference is
+  /// `Visibility::attendanceFor`, not this answer.
+  bool get canViewAttendance => can('attendance.view');
+
   /* ------------------------------------------------------- employees */
 
   bool get canViewEmployees => can('employees.view');

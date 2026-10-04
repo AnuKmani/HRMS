@@ -68,6 +68,7 @@ import '../../features/training/presentation/training_list_screen.dart';
 import '../../features/training/presentation/training_program_form_screen.dart';
 import '../../features/training/presentation/training_programs_screen.dart';
 import '../../features/account/change_password_screen.dart';
+import '../../features/attendance/presentation/attendance_records_screen.dart';
 import '../../features/account/forgot_password_screen.dart';
 import '../../features/account/sessions_screen.dart';
 import '../../features/notifications/presentation/notifications_screen.dart';
@@ -188,7 +189,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       // API behind it answers 403 for anyone without one.
       GoRoute(
         path: '/attendance',
-        builder: (context, state) => const AttendanceScreen(),
+        builder: (context, state) =>
+            AttendanceScreen(startAction: state.uri.queryParameters['start']),
+      ),
+      // Reading attendance rather than recording it. Gated on
+      // `attendance.view`; whose rows come back is the server's row scope.
+      GoRoute(
+        path: '/attendance/records',
+        builder: (context, state) => const AttendanceRecordsScreen(),
       ),
 
       /* ------------------------------------------------------ employees */

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/permissions/permission_scope.dart';
 import '../auth/auth_controller.dart';
+import '../attendance/presentation/attendance_quick_card.dart';
 import '../auth/auth_models.dart';
 import '../dashboard/my_summary.dart';
 import '../dashboard/my_summary_card.dart';
@@ -41,6 +42,16 @@ class HomeScreen extends ConsumerWidget {
           Icons.schedule_outlined,
           '/attendance',
           'Check in, visit a site, check out',
+        ),
+      // Who checked in, where and when — with the selfie. HR sees the
+      // workforce; an employee sees their own history. Same door, and the
+      // server decides whose rows are behind it.
+      if (scope.canViewAttendance)
+        _Module(
+          'Attendance records',
+          Icons.fact_check_outlined,
+          '/attendance/records',
+          'Check-ins, check-outs, locations and selfies',
         ),
       if (scope.canViewEmployees)
         _Module(
@@ -288,6 +299,11 @@ class HomeScreen extends ConsumerWidget {
               style: theme.textTheme.bodySmall,
             ),
           ),
+          // The working day's one button. Not permission-gated, for the
+          // same reason the Attendance tile is not: recording your own day
+          // is not a privilege, and the API enforces the same rule.
+          if (user?.employee != null)
+            AttendanceQuickCard(onOpen: (path) => _open(context, ref, path)),
           if (scope.canViewDashboard)
             MySummaryCard(onOpen: (path) => _open(context, ref, path)),
           if (modules.isEmpty)
@@ -327,7 +343,8 @@ class HomeScreen extends ConsumerWidget {
     if (!context.mounted) return;
     ref
       ..invalidate(unreadNotificationsProvider)
-      ..invalidate(mySummaryProvider);
+      ..invalidate(mySummaryProvider)
+      ..invalidate(attendanceTodayProvider);
   }
 
   String? _subtitle(EmployeeBrief? employee) {

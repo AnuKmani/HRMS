@@ -18,6 +18,8 @@ class AttendanceRecord {
     required this.lateMinutes,
     required this.earlyDepartureMinutes,
     this.projectId,
+    this.employeeName,
+    this.employeeCode,
     this.siteName,
     this.projectName,
     this.checkInAt,
@@ -49,6 +51,12 @@ class AttendanceRecord {
   final int earlyDepartureMinutes;
 
   final int? projectId;
+
+  /// Present only on list rows (`GET /attendance` embeds the employee);
+  /// the caller's own day carries no name because it is always theirs.
+  final String? employeeName;
+  final String? employeeCode;
+
   final String? siteName;
   final String? projectName;
 
@@ -90,6 +98,7 @@ class AttendanceRecord {
   factory AttendanceRecord.fromJson(Map<String, dynamic> json) {
     final site = json['site'];
     final project = json['project'];
+    final employee = json['employee'];
 
     return AttendanceRecord(
       id: _int(json['id']) ?? 0,
@@ -103,6 +112,10 @@ class AttendanceRecord {
       lateMinutes: _int(json['late_minutes']) ?? 0,
       earlyDepartureMinutes: _int(json['early_departure_minutes']) ?? 0,
       projectId: _int(json['project_id']),
+      employeeName: employee is Map ? employee['full_name'] as String? : null,
+      employeeCode: employee is Map
+          ? employee['employee_code'] as String?
+          : null,
       siteName: site is Map ? site['name'] as String? : null,
       projectName: project is Map ? project['name'] as String? : null,
       checkInAt: json['check_in_at'] as String?,

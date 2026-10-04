@@ -17,19 +17,65 @@ import 'selfie_capture_sheet.dart';
 /// `GET /attendance/today`, so this screen cannot end up believing
 /// something the API would refuse.
 class AttendanceScreen extends ConsumerStatefulWidget {
-  const AttendanceScreen({super.key});
+  const AttendanceScreen({super.key, this.startAction});
+
+  /// `check-in` or `check-out` when opened from the dashboard's one-tap
+  /// button: the action starts by itself as soon as it is allowed — GPS
+  /// fixed, a site chosen, the server saying today permits it. It goes
+  /// through exactly the same path as pressing the button here, so no
+  /// geofence, selfie or shift rule is skipped; if the moment never comes
+  /// (no site, no GPS) nothing happens and the screen explains why.
+  final String? startAction;
+
+  static const checkIn = 'check-in';
+  static const checkOut = 'check-out';
 
   @override
   ConsumerState<AttendanceScreen> createState() => _AttendanceScreenState();
 }
 
 class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
+  bool _autoStarted = false;
+
   @override
   void initState() {
     super.initState();
     Future.microtask(
       () => ref.read(attendanceControllerProvider.notifier).load(),
     );
+
+    if (widget.startAction != null) {
+      ref.listenManual<AttendanceState>(
+        attendanceControllerProvider,
+        (_, state) => _maybeAutoStart(state),
+      );
+    }
+  }
+
+  void _maybeAutoStart(AttendanceState state) {
+    if (_autoStarted || !mounted || !state.canSubmit) return;
+
+    final today = state.today;
+    final located = state.location.status == LocationStatus.granted;
+    if (today == null || !located) return;
+
+    switch (widget.startAction) {
+      case AttendanceScreen.checkIn
+          when today.canCheckIn && state.selectedSite != null:
+        _autoStarted = true;
+        // After this frame: the selfie sheet needs a settled route to
+        // present over.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _checkIn();
+        });
+      case AttendanceScreen.checkOut when today.canCheckOut:
+        _autoStarted = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _run(ref.read(attendanceControllerProvider.notifier).checkOut);
+          }
+        });
+    }
   }
 
   Future<void> _run(Future<void> Function() action) async {
