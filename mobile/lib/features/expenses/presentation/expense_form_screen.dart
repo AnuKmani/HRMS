@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../../core/router/return_navigation.dart';
 import '../../../core/config/client_settings.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/permissions/permission_scope.dart';
@@ -281,7 +281,7 @@ class _ExpenseFormScreenState extends ConsumerState<ExpenseFormScreen> {
 
       // The draft is a real object with a submit button on it, so the form
       // hands the user straight to the row it just made.
-      context.go('/expenses/${claim.id}');
+      context.returnTo('/expenses/${claim.id}');
     } on ApiException catch (failure) {
       if (!mounted) return;
 

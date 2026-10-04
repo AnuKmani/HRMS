@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../../core/router/return_navigation.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/presentation/fields.dart';
 import '../../../core/presentation/form_controls.dart';
@@ -158,9 +158,9 @@ class _ProjectFormScreenState extends ConsumerState<ProjectFormScreen> {
       if (!mounted) return;
 
       if (_isCreate) {
-        context.go('/projects');
+        context.returnTo('/projects');
       } else {
-        context.go('/projects/${widget.projectId}');
+        context.returnTo('/projects/${widget.projectId}');
       }
     } on ApiException catch (failure) {
       if (!mounted) return;

@@ -3,8 +3,8 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../../core/router/return_navigation.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/permissions/permission_scope.dart';
 import '../../../core/presentation/fields.dart';
@@ -750,7 +750,7 @@ class _DailySiteReportFormScreenState
       const SnackBar(content: Text('Daily report saved as a draft.')),
     );
 
-    context.go('/daily-reports/$id');
+    context.returnTo('/daily-reports/$id');
   }
 
   Future<void> _submit() async {
@@ -796,7 +796,7 @@ class _DailySiteReportFormScreenState
     if (widget.reportId == null) await _forgetDraft();
     if (!mounted) return;
 
-    context.go('/daily-reports/$id');
+    context.returnTo('/daily-reports/$id');
   }
 
   /* ---------------------------------------------------------------- build */

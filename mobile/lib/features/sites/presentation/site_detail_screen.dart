@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/router/return_navigation.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/permissions/permission_scope.dart';
 import '../data/api_sites_repository.dart';
@@ -95,7 +96,7 @@ class _SiteDetailScreenState extends ConsumerState<SiteDetailScreen> {
       await ref.read(sitesRepositoryProvider).remove(site.id);
 
       if (!mounted) return;
-      context.go('/sites');
+      context.returnTo('/sites');
     } on ApiException catch (failure) {
       if (!mounted) return;
 

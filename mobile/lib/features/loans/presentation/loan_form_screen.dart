@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../../core/router/return_navigation.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/permissions/permission_scope.dart';
 import '../../../core/presentation/fields.dart';
@@ -159,7 +159,7 @@ class _LoanFormScreenState extends ConsumerState<LoanFormScreen> {
       // submitting it, editing it or leaving it as a draft — so the form
       // hands the user straight to the row it just made rather than to the
       // list where they would have to find it again.
-      context.go('/loans/${loan.id}');
+      context.returnTo('/loans/${loan.id}');
     } on ApiException catch (failure) {
       if (!mounted) return;
 

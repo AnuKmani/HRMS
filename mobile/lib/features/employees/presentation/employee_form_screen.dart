@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../../core/router/return_navigation.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/permissions/permission_scope.dart';
 import '../../../core/presentation/fields.dart';
@@ -254,9 +254,9 @@ class _EmployeeFormScreenState extends ConsumerState<EmployeeFormScreen> {
       if (!mounted) return;
 
       if (_isCreate) {
-        context.go('/employees');
+        context.returnTo('/employees');
       } else {
-        context.go('/employees/${widget.employeeId}');
+        context.returnTo('/employees/${widget.employeeId}');
       }
     } on ApiException catch (failure) {
       if (!mounted) return;

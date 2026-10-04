@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../../core/router/return_navigation.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/permissions/permission_scope.dart';
 import '../../../core/presentation/fields.dart';
@@ -62,7 +62,7 @@ class _SalaryCertificateFormScreenState
 
       // Straight to the row: the reference number it was just given, and the
       // pending status, are the two things a person asks for next.
-      context.go('/salary-certificates/${request.id}');
+      context.returnTo('/salary-certificates/${request.id}');
     } on ApiException catch (failure) {
       if (!mounted) return;
 

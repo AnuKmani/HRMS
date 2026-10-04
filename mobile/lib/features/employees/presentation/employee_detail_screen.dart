@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/router/return_navigation.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/permissions/permission_scope.dart';
 import '../data/api_employees_repository.dart';
@@ -102,7 +103,7 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
       await ref.read(employeesRepositoryProvider).remove(employee.id);
 
       if (!mounted) return;
-      context.go('/employees');
+      context.returnTo('/employees');
     } on ApiException catch (failure) {
       if (!mounted) return;
 

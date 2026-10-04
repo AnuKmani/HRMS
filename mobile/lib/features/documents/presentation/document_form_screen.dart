@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../../core/router/return_navigation.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/permissions/permission_scope.dart';
 import '../../../core/presentation/fields.dart';
@@ -325,7 +325,7 @@ class _DocumentFormScreenState extends ConsumerState<DocumentFormScreen> {
       ref.read(documentListProvider.notifier).reload();
       ref.read(documentExpiryProvider.notifier).reload();
       if (!mounted) return;
-      context.go('/documents');
+      context.returnTo('/documents');
     } on ApiException catch (failure) {
       if (!mounted) return;
       setState(() {

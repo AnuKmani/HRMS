@@ -3,8 +3,8 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../../core/router/return_navigation.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/permissions/permission_scope.dart';
 import '../../../core/presentation/fields.dart';
@@ -557,7 +557,7 @@ class _SiteActivityFormScreenState
       context,
     ).showSnackBar(const SnackBar(content: Text('Report saved as a draft.')));
 
-    context.go('/site-reports/$id');
+    context.returnTo('/site-reports/$id');
   }
 
   Future<void> _submit() async {
@@ -624,7 +624,7 @@ class _SiteActivityFormScreenState
     if (widget.reportId == null) await _forgetDraft();
     if (!mounted) return;
 
-    context.go('/site-reports/$id');
+    context.returnTo('/site-reports/$id');
   }
 
   /* --------------------------------------------------------------- build */

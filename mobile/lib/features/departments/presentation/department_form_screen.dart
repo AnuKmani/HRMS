@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../../core/router/return_navigation.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/presentation/fields.dart';
 import '../../../core/presentation/form_controls.dart';
@@ -125,7 +125,7 @@ class _DepartmentFormScreenState extends ConsumerState<DepartmentFormScreen> {
       }
 
       if (!mounted) return;
-      context.go('/departments');
+      context.returnTo('/departments');
     } on ApiException catch (failure) {
       if (!mounted) return;
 

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../../core/router/return_navigation.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/presentation/fields.dart';
 import '../../../core/presentation/remote_picker.dart';
@@ -132,14 +132,14 @@ class _LeaveFormScreenState extends ConsumerState<LeaveFormScreen> {
       ref.read(leaveListProvider.notifier).reload();
       if (!mounted) return;
 
-      // `go` rather than `pop`: from the edit route the user wants to be back
+      // `returnTo` rather than `pop`: from the edit route the user wants to be back
       // on the record they just changed, and the detail screen reads it once
       // in `initState` — popping would land them on a screen still showing
       // the draft they just saved away.
       if (_isCreate) {
-        context.go('/leave');
+        context.returnTo('/leave');
       } else {
-        context.go('/leave/${widget.leaveId}');
+        context.returnTo('/leave/${widget.leaveId}');
       }
     } on ApiException catch (failure) {
       if (!mounted) return;

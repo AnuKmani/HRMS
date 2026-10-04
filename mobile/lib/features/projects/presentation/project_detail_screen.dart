@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/router/return_navigation.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/permissions/permission_scope.dart';
 import '../data/api_projects_repository.dart';
@@ -96,7 +97,7 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
       await ref.read(projectsRepositoryProvider).remove(project.id);
 
       if (!mounted) return;
-      context.go('/projects');
+      context.returnTo('/projects');
     } on ApiException catch (failure) {
       if (!mounted) return;
 

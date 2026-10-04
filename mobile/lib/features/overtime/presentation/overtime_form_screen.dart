@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../../core/router/return_navigation.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/presentation/fields.dart';
 import '../../../core/presentation/remote_picker.dart';
@@ -128,9 +128,9 @@ class _OvertimeFormScreenState extends ConsumerState<OvertimeFormScreen> {
       if (!mounted) return;
 
       if (_isCreate) {
-        context.go('/overtime');
+        context.returnTo('/overtime');
       } else {
-        context.go('/overtime/${widget.overtimeId}');
+        context.returnTo('/overtime/${widget.overtimeId}');
       }
     } on ApiException catch (failure) {
       if (!mounted) return;

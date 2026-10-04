@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../../core/router/return_navigation.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/presentation/fields.dart';
 import '../../../core/presentation/form_controls.dart';
@@ -135,7 +135,7 @@ class _HolidayFormScreenState extends ConsumerState<HolidayFormScreen> {
 
       ref.read(holidaysListProvider.notifier).reload();
       if (!mounted) return;
-      context.go('/holidays');
+      context.returnTo('/holidays');
     } on ApiException catch (failure) {
       if (!mounted) return;
       setState(() {
