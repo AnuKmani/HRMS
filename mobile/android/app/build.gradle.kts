@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -55,7 +57,7 @@ android {
             // If key.properties exists, use the release signing config.
             // Otherwise fall back to debug (allows `flutter run --release` without setup).
             signingConfig = signingConfigs.getByName(
-                if (file("key.properties").exists()) "release" else "debug"
+                if (rootProject.file("key.properties").exists()) "release" else "debug"
             )
         }
     }
