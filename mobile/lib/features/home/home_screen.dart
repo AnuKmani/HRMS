@@ -90,6 +90,15 @@ class HomeScreen extends ConsumerWidget {
           '/sites',
           'Where the work happens',
         ),
+      // The one-tap way to make someone able to check in: create the site
+      // where HR is standing and post the employee to it.
+      if (scope.canManageSites && scope.canManageAssignments)
+        _Module(
+          'Quick site setup',
+          Icons.bolt,
+          '/site-assignments/quick',
+          'Create a site here and assign someone',
+        ),
       if (scope.canViewAssignments)
         _Module(
           'Site assignments',
@@ -438,6 +447,7 @@ String _sectionOf(String label) => switch (label) {
   'Projects' ||
   'Sites' ||
   'Site assignments' ||
+  'Quick site setup' ||
   'Site reports' ||
   'Daily site reports' => 'Projects & sites',
   'Payroll' ||
@@ -458,7 +468,7 @@ Color _colorOf(String label) => switch (label) {
   'Documents' => ModuleColors.compliance,
   'Training' => ModuleColors.learning,
   'Projects' => ModuleColors.projects,
-  'Sites' || 'Site assignments' => ModuleColors.sites,
+  'Sites' || 'Site assignments' || 'Quick site setup' => ModuleColors.sites,
   'Site reports' || 'Daily site reports' => ModuleColors.reports,
   'Payroll' || 'Salary slips' || 'Salary certificates' => ModuleColors.pay,
   'Loans' || 'Expenses' => ModuleColors.money,

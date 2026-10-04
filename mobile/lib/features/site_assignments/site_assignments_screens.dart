@@ -32,7 +32,18 @@ class SiteAssignmentsScreen extends ConsumerWidget {
     final status = state.query['status'] as String? ?? '';
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Site assignments')),
+      appBar: AppBar(
+        title: const Text('Site assignments'),
+        actions: [
+          if (canManage)
+            TextButton.icon(
+              key: const ValueKey('open-quick-setup'),
+              onPressed: () => context.push('/site-assignments/quick'),
+              icon: const Icon(Icons.bolt),
+              label: const Text('Quick setup'),
+            ),
+        ],
+      ),
       floatingActionButton: canManage
           ? FloatingActionButton.extended(
               key: const ValueKey('add-assignment'),
