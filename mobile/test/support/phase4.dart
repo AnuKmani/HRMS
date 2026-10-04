@@ -249,6 +249,27 @@ class ScriptedProjects extends Scripted<Project> implements ProjectsRepository {
     required super.idOf,
     super.fallback,
   });
+
+  final List<Map<String, Object?>> addedEvents = [];
+  final List<int> removedEvents = [];
+
+  @override
+  Future<ProjectEvent> addEvent(
+    int projectId,
+    Map<String, Object?> body,
+  ) async {
+    addedEvents.add({'project_id': projectId, ...body});
+    return ProjectEvent(
+      id: 900 + addedEvents.length,
+      type: body['type'] as String? ?? 'other',
+      label: 'Booked',
+      eventDate: body['event_date'] as String? ?? '',
+    );
+  }
+
+  @override
+  Future<void> removeEvent(int projectId, int eventId) async =>
+      removedEvents.add(eventId);
 }
 
 class ScriptedSites extends Scripted<Site> implements SitesRepository {

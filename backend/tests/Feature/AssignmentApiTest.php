@@ -92,9 +92,9 @@ class AssignmentApiTest extends TestCase
         $this->getJson('/api/v1/employee-site-assignments')->assertForbidden();
     }
 
-    public function test_hr_admin_can_create_an_assignment_and_the_row_records_who_made_it(): void
+    public function test_an_admin_can_create_an_assignment_and_the_row_records_who_made_it(): void
     {
-        $user = $this->signInAsRole('HR Admin');
+        $user = $this->signInAsRole('Super Admin');
         ['project' => $project, 'sites' => $sites, 'employee' => $employee] = $this->fixture();
 
         $id = $this->postJson('/api/v1/employee-site-assignments', $this->payload($project, $sites[0], $employee))
@@ -114,7 +114,7 @@ class AssignmentApiTest extends TestCase
 
     public function test_the_site_must_belong_to_the_named_project(): void
     {
-        $this->signInAsRole('HR Admin');
+        $this->signInAsRole('Super Admin');
 
         $first = $this->fixture();
         $second = $this->fixture();
@@ -130,7 +130,7 @@ class AssignmentApiTest extends TestCase
 
     public function test_required_fields_are_validated(): void
     {
-        $this->signInAsRole('HR Admin');
+        $this->signInAsRole('Super Admin');
 
         $this->postJson('/api/v1/employee-site-assignments', [])
             ->assertStatus(422)
@@ -153,7 +153,7 @@ class AssignmentApiTest extends TestCase
 
     public function test_a_new_primary_posting_closes_the_previous_one_without_erasing_it(): void
     {
-        $this->signInAsRole('HR Admin');
+        $this->signInAsRole('Super Admin');
         ['project' => $project, 'sites' => $sites, 'employee' => $employee] = $this->fixture();
 
         $firstId = $this->postJson('/api/v1/employee-site-assignments', $this->payload(
@@ -179,7 +179,7 @@ class AssignmentApiTest extends TestCase
 
     public function test_a_temporary_posting_leaves_the_primary_posting_alone(): void
     {
-        $this->signInAsRole('HR Admin');
+        $this->signInAsRole('Super Admin');
         ['project' => $project, 'sites' => $sites, 'employee' => $employee] = $this->fixture();
 
         $primaryId = $this->postJson('/api/v1/employee-site-assignments', $this->payload(
@@ -199,7 +199,7 @@ class AssignmentApiTest extends TestCase
 
     public function test_a_posting_can_be_closed(): void
     {
-        $this->signInAsRole('HR Admin');
+        $this->signInAsRole('Super Admin');
         ['project' => $project, 'sites' => $sites, 'employee' => $employee] = $this->fixture();
 
         $id = $this->postJson('/api/v1/employee-site-assignments', $this->payload($project, $sites[0], $employee))
@@ -222,7 +222,7 @@ class AssignmentApiTest extends TestCase
 
     public function test_history_cannot_be_rewritten(): void
     {
-        $this->signInAsRole('HR Admin');
+        $this->signInAsRole('Super Admin');
         ['project' => $project, 'sites' => $sites, 'employee' => $employee] = $this->fixture();
 
         $other = Employee::factory()->create();
@@ -256,7 +256,7 @@ class AssignmentApiTest extends TestCase
 
     public function test_an_ended_posting_cannot_be_reopened(): void
     {
-        $this->signInAsRole('HR Admin');
+        $this->signInAsRole('Super Admin');
         ['project' => $project, 'sites' => $sites, 'employee' => $employee] = $this->fixture();
 
         $id = $this->postJson('/api/v1/employee-site-assignments', $this->payload($project, $sites[0], $employee))
@@ -273,7 +273,7 @@ class AssignmentApiTest extends TestCase
 
     public function test_there_is_no_route_that_deletes_posting_history(): void
     {
-        $this->signInAsRole('HR Admin');
+        $this->signInAsRole('Super Admin');
         ['project' => $project, 'sites' => $sites, 'employee' => $employee] = $this->fixture();
 
         $id = $this->postJson('/api/v1/employee-site-assignments', $this->payload($project, $sites[0], $employee))
@@ -355,7 +355,7 @@ class AssignmentApiTest extends TestCase
 
     public function test_the_list_filters_by_employee_project_site_status_and_type(): void
     {
-        $this->signInAsRole('HR Admin');
+        $this->signInAsRole('Super Admin');
         ['project' => $project, 'sites' => $sites, 'employee' => $employee] = $this->fixture();
 
         $target = EmployeeSiteAssignment::factory()->create([

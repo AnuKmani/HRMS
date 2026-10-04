@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\InAppNotification;
 use App\Models\Project;
 use App\Models\Site;
 use App\Models\SiteActivityReport;
@@ -48,7 +49,7 @@ class SiteActivityReportTest extends TestCase
 
     public function test_the_report_belongs_to_the_session_and_ignores_the_ids_the_client_sent(): void
     {
-        $world = $this->world('Employee');
+        $world = $this->world('Site Engineer');
 
         $response = $this->postJson('/api/v1/site-activity-reports', $this->activityPayload($world['site'], [
             // Three columns a client would love to write, none of which are
@@ -69,7 +70,7 @@ class SiteActivityReportTest extends TestCase
 
     public function test_the_site_decides_the_project_and_a_mismatch_is_refused(): void
     {
-        $world = $this->world('Employee');
+        $world = $this->world('Site Engineer');
         $elsewhere = Project::factory()->create();
 
         $this->postJson('/api/v1/site-activity-reports', $this->activityPayload($world['site'], [
@@ -93,7 +94,7 @@ class SiteActivityReportTest extends TestCase
 
     public function test_the_described_work_is_bounded_before_it_is_stored(): void
     {
-        $world = $this->world('Employee');
+        $world = $this->world('Site Engineer');
 
         $this->postJson('/api/v1/site-activity-reports', $this->activityPayload($world['site'], [
             'progress_percentage' => 101,
@@ -114,7 +115,7 @@ class SiteActivityReportTest extends TestCase
 
     public function test_a_draft_may_be_written_with_no_fix_but_a_submission_may_not(): void
     {
-        $world = $this->world('Employee');
+        $world = $this->world('Site Engineer');
 
         $id = $this->postJson('/api/v1/site-activity-reports', $this->activityPayload($world['site'], [
             'latitude' => null,
@@ -133,7 +134,7 @@ class SiteActivityReportTest extends TestCase
 
     public function test_a_submission_carries_the_fix_it_was_made_with_and_freezes_the_report(): void
     {
-        $world = $this->world('Employee');
+        $world = $this->world('Site Engineer');
 
         $id = $this->postJson('/api/v1/site-activity-reports', $this->activityPayload($world['site'], [
             'latitude' => null,
@@ -167,7 +168,7 @@ class SiteActivityReportTest extends TestCase
 
     public function test_half_a_fix_and_an_unbelievable_fix_are_both_refused(): void
     {
-        $world = $this->world('Employee');
+        $world = $this->world('Site Engineer');
 
         // Latitude alone is a line, not a place.
         $this->postJson('/api/v1/site-activity-reports', $this->activityPayload($world['site'], [
@@ -195,7 +196,7 @@ class SiteActivityReportTest extends TestCase
 
     public function test_a_person_may_only_file_where_they_are_placed(): void
     {
-        $world = $this->world('Employee');
+        $world = $this->world('Site Engineer');
         $elsewhere = Site::factory()->create();
 
         $this->postJson('/api/v1/site-activity-reports', $this->activityPayload($elsewhere))
@@ -207,13 +208,13 @@ class SiteActivityReportTest extends TestCase
 
     public function test_an_employee_reads_only_their_own_reports(): void
     {
-        $mine = $this->world('Employee');
+        $mine = $this->world('Site Engineer');
         $mineId = $this->postJson(
             '/api/v1/site-activity-reports',
             $this->activityPayload($mine['site']),
         )->assertCreated()->json('data.id');
 
-        $theirs = $this->world('Employee');
+        $theirs = $this->world('Site Engineer');
         $theirId = $this->postJson(
             '/api/v1/site-activity-reports',
             $this->activityPayload($theirs['site']),
@@ -234,23 +235,63 @@ class SiteActivityReportTest extends TestCase
             ->assertJsonPath('data.items', []);
     }
 
-    public function test_a_supervisor_reads_the_reports_of_the_sites_they_run(): void
+    public function test_only_the_project_manager_reads_and_is_told_about_an_engineers_report(): void
     {
-        $world = $this->world('Site Supervisor');
-        [$reporter, $reporterEmployee] = $this->colleagueOn('Employee', $world['site']);
+        // The Project Manager runs the project; a Site Supervisor and a Site
+        // Engineer work on its site.
+        $world = $this->world('Project Manager');
+        [$supervisor] = $this->colleagueOn('Site Supervisor', $world['site']);
+        [$engineer, $engineerEmployee] = $this->colleagueOn('Site Engineer', $world['site']);
 
-        $this->become($reporter);
+        $this->become($engineer);
         $filed = $this->postJson(
             '/api/v1/site-activity-reports',
             $this->activityPayload($world['site']),
         )->assertCreated()->json('data.id');
+        $this->postJson('/api/v1/site-activity-reports/'.$filed.'/submit', [
+            'latitude' => 12.9716,
+            'longitude' => 77.5946,
+            'gps_accuracy' => 6.5,
+        ])->assertOk();
 
+        // The supervisor on the same site does not read it.
+        $this->become($supervisor);
+        $this->assertSame([], $this->getJson('/api/v1/site-activity-reports')->assertOk()->json('data.items'));
+        $this->getJson('/api/v1/site-activity-reports/'.$filed)->assertForbidden();
+
+        // The project's manager does, and the bell said so.
         $this->become($world['user']);
         $items = $this->getJson('/api/v1/site-activity-reports')->assertOk()->json('data.items');
-
-        $this->assertCount(1, $items, 'The supervisor has filed none, but may read what is filed at their site.');
-        $this->assertSame($reporterEmployee->id, $items[0]['employee_id']);
+        $this->assertCount(1, $items);
+        $this->assertSame($engineerEmployee->id, $items[0]['employee_id']);
         $this->getJson('/api/v1/site-activity-reports/'.$filed)->assertOk();
+        $this->assertTrue(InAppNotification::query()
+            ->where('user_id', $world['user']->id)
+            ->where('type', 'site_report.submitted')
+            ->exists());
+
+        // ...but tracks, not edits.
+        $this->putJson('/api/v1/site-activity-reports/'.$filed, $this->activityPayload($world['site']))
+            ->assertForbidden();
+    }
+
+    public function test_hr_has_no_door_into_site_reports(): void
+    {
+        $this->signInAs('HR Admin');
+
+        $this->getJson('/api/v1/site-activity-reports')->assertForbidden();
+        $this->getJson('/api/v1/daily-site-reports')->assertForbidden();
+        $this->getJson('/api/v1/employee-site-assignments')->assertForbidden();
+    }
+
+    public function test_there_is_no_way_to_delete_a_report(): void
+    {
+        $world = $this->world('Site Engineer');
+        $id = $this->postJson('/api/v1/site-activity-reports', $this->activityPayload($world['site']))
+            ->assertCreated()->json('data.id');
+
+        $this->deleteJson('/api/v1/site-activity-reports/'.$id)->assertStatus(405);
+        $this->assertSame(1, SiteActivityReport::query()->count());
     }
 
     public function test_an_account_without_the_permission_cannot_open_the_module_at_all(): void
@@ -265,12 +306,7 @@ class SiteActivityReportTest extends TestCase
 
     public function test_the_site_picker_answers_which_sites_may_be_reported_about(): void
     {
-        $world = $this->world('Employee');
-
-        // The reason this endpoint exists: a field worker holds no
-        // `sites.view`, so the ordinary directory is closed to exactly the
-        // role the field-reporting form is built for.
-        $this->getJson('/api/v1/sites')->assertStatus(403);
+        $world = $this->world('Site Engineer');
 
         $items = $this->getJson('/api/v1/site-activity-reports/reportable-sites')
             ->assertOk()
@@ -328,7 +364,7 @@ class SiteActivityReportTest extends TestCase
 
     public function test_a_photograph_is_stored_privately_and_nothing_about_its_location_leaves(): void
     {
-        $world = $this->world('Employee');
+        $world = $this->world('Site Engineer');
 
         $id = $this->postJson('/api/v1/site-activity-reports', $this->activityPayload($world['site']))
             ->assertCreated()->json('data.id');
@@ -377,7 +413,7 @@ class SiteActivityReportTest extends TestCase
 
     public function test_a_photograph_is_re_encoded_so_no_camera_or_gps_metadata_survives(): void
     {
-        $world = $this->world('Employee');
+        $world = $this->world('Site Engineer');
         $id = $this->postJson('/api/v1/site-activity-reports', $this->activityPayload($world['site']))
             ->assertCreated()->json('data.id');
 
@@ -401,7 +437,7 @@ class SiteActivityReportTest extends TestCase
 
     public function test_a_file_that_is_not_a_photograph_is_refused_and_nothing_is_written(): void
     {
-        $world = $this->world('Employee');
+        $world = $this->world('Site Engineer');
         $id = $this->postJson('/api/v1/site-activity-reports', $this->activityPayload($world['site']))
             ->assertCreated()->json('data.id');
 
@@ -422,7 +458,7 @@ class SiteActivityReportTest extends TestCase
 
     public function test_photographs_stop_changing_once_the_report_is_submitted(): void
     {
-        $world = $this->world('Employee');
+        $world = $this->world('Site Engineer');
         $id = $this->postJson('/api/v1/site-activity-reports', $this->activityPayload($world['site']))
             ->assertCreated()->json('data.id');
 
@@ -448,7 +484,7 @@ class SiteActivityReportTest extends TestCase
 
     public function test_a_photograph_can_only_be_touched_through_its_own_report(): void
     {
-        $world = $this->world('Employee');
+        $world = $this->world('Site Engineer');
         $first = $this->postJson('/api/v1/site-activity-reports', $this->activityPayload($world['site']))
             ->assertCreated()->json('data.id');
         $second = $this->postJson('/api/v1/site-activity-reports', $this->activityPayload($world['site']))
@@ -472,7 +508,7 @@ class SiteActivityReportTest extends TestCase
 
     public function test_a_report_cannot_hold_more_than_twelve_photographs(): void
     {
-        $world = $this->world('Employee');
+        $world = $this->world('Site Engineer');
         $id = $this->postJson('/api/v1/site-activity-reports', $this->activityPayload($world['site']))
             ->assertCreated()->json('data.id');
 
@@ -497,7 +533,7 @@ class SiteActivityReportTest extends TestCase
 
     public function test_an_empty_photo_batch_is_refused(): void
     {
-        $world = $this->world('Employee');
+        $world = $this->world('Site Engineer');
         $id = $this->postJson('/api/v1/site-activity-reports', $this->activityPayload($world['site']))
             ->assertCreated()->json('data.id');
 

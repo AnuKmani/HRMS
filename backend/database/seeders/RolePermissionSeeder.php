@@ -45,10 +45,7 @@ class RolePermissionSeeder extends Seeder
             'projects.view',
             'sites.view',
             'shifts.view', 'shifts.manage',
-            'assignments.view', 'assignments.manage',
             'reports.view', 'reports.export',
-            'site_activity_reports.view',
-            'daily_site_reports.view', 'daily_site_reports.pdf',
             'documents.view', 'documents.create', 'documents.update',
             'documents.verify', 'documents.delete',
             'documents.expiry.view', 'documents.manage',
@@ -97,10 +94,7 @@ class RolePermissionSeeder extends Seeder
             'projects.view',
             'sites.view',
             'shifts.view',
-            'assignments.view', 'assignments.manage',
             'reports.view',
-            'site_activity_reports.view',
-            'daily_site_reports.view', 'daily_site_reports.pdf',
             'documents.view', 'documents.create', 'documents.update',
             'documents.verify', 'documents.delete',
             'documents.expiry.view', 'documents.manage',
@@ -184,6 +178,9 @@ class RolePermissionSeeder extends Seeder
             'audit.view',
         ],
 
+        // Site reports and daily site reports: written and edited by the
+        // Site Engineer and Site Supervisor, read and tracked by the
+        // Project Manager of that project. Nobody deletes a report.
         'Project Manager' => [
             'dashboard.view',
             'site_visits.create',
@@ -198,8 +195,8 @@ class RolePermissionSeeder extends Seeder
             'overtime.view', 'overtime.create', 'overtime.approve',
             'assignments.view', 'assignments.manage',
             'reports.view',
-            'site_activity_reports.view', 'site_activity_reports.create', 'site_activity_reports.update',
-            'daily_site_reports.view', 'daily_site_reports.create', 'daily_site_reports.update',
+            'site_activity_reports.view',
+            'daily_site_reports.view',
             'daily_site_reports.manage', 'daily_site_reports.pdf',
             // Own file only. `documents.create` is the self-service door —
             // filing your own passport — and `documents.manage` is what
@@ -365,8 +362,6 @@ class RolePermissionSeeder extends Seeder
             'payroll.summary.view',
             'loans.view', 'loans.create',
             'reports.view', 'reports.export',
-            'site_activity_reports.view',
-            'daily_site_reports.view', 'daily_site_reports.pdf',
             'documents.view',
             'onboarding.view',
             // Read-only on training, plus the one extra the brief calls
@@ -398,9 +393,6 @@ class RolePermissionSeeder extends Seeder
             'leave.balance.view',
             'timesheets.view',
             'overtime.view',
-            'site_activity_reports.view',
-            'site_activity_reports.create',
-            'site_activity_reports.update',
             'assets.view',
             'salary_slips.view',
             'salary_certificates.view',
@@ -416,9 +408,6 @@ class RolePermissionSeeder extends Seeder
             'leave.balance.view',
             'timesheets.view',
             'overtime.view',
-            'site_activity_reports.view',
-            'site_activity_reports.create',
-            'site_activity_reports.update',
             'assets.view',
             'salary_slips.view',
             'salary_certificates.view',
@@ -440,9 +429,6 @@ class RolePermissionSeeder extends Seeder
             'leave.balance.view',
             'timesheets.view',
             'overtime.view',
-            'site_activity_reports.view',
-            'site_activity_reports.create',
-            'site_activity_reports.update',
             'assets.view',
             'salary_slips.view',
             'salary_certificates.view',

@@ -212,7 +212,11 @@ class Employee extends Model
 
     public function getFullNameAttribute(): string
     {
-        return trim($this->first_name.' '.$this->middle_name.' '.$this->last_name);
+        // Blank parts skipped, so no middle name never reads "Ravi  Menon".
+        return implode(' ', array_filter(
+            [trim((string) $this->first_name), trim((string) $this->middle_name), trim((string) $this->last_name)],
+            fn (string $part) => $part !== '',
+        ));
     }
 
     public function getInitialsAttribute(): string

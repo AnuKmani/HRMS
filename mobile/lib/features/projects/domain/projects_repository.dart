@@ -18,4 +18,9 @@ abstract class ProjectsRepository {
   /// sites are the history, and a delete that took them with it would be
   /// rewriting it.
   Future<void> remove(int id);
+
+  /// Book a DCD / Civil Defence / handover date on a project.
+  Future<ProjectEvent> addEvent(int projectId, Map<String, Object?> body);
+
+  Future<void> removeEvent(int projectId, int eventId);
 }

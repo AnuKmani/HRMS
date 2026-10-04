@@ -8,14 +8,11 @@ import '../../../core/presentation/form_controls.dart';
 import '../../../core/presentation/remote_picker.dart';
 import '../../employees/presentation/employees_controller.dart';
 import '../data/api_projects_repository.dart';
+import '../domain/project.dart';
 import '../domain/projects_repository.dart';
 
-const _projectStatuses = [
-  StatusOption('planned', 'Planned'),
-  StatusOption('active', 'Active'),
-  StatusOption('on_hold', 'On hold'),
-  StatusOption('completed', 'Completed'),
-  StatusOption('cancelled', 'Cancelled'),
+final _projectStatuses = [
+  for (final (value, label) in projectStatuses) StatusOption(value, label),
 ];
 
 /// Create or edit a project — [projectId] null means create.

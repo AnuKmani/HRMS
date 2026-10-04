@@ -167,7 +167,7 @@ class ProjectSiteRelationshipTest extends TestCase
     public function test_project_status_vocabulary_is_enforced(): void
     {
         $this->assertEqualsCanonicalizing(
-            ['planned', 'active', 'on_hold', 'completed', 'cancelled'],
+            ['planned', 'active', 'handing_over', 'on_hold', 'completed', 'cancelled'],
             Project::STATUSES,
         );
 

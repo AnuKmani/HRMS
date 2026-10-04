@@ -105,6 +105,13 @@ class SiteActivityReportService
 
         $report->save();
 
+        app(ReportSubmittedNotifier::class)->notify(
+            $report,
+            'site report',
+            '/site-reports/'.$report->id,
+            $user->name,
+        );
+
         return $report;
     }
 

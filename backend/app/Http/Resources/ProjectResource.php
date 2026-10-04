@@ -41,6 +41,11 @@ class ProjectResource extends JsonResource
             'end_date' => $resource->end_date?->toDateString(),
             'status' => $resource->status,
 
+            // DCD / Civil Defence / handover dates. `upcoming_events` on the
+            // list (today on), `events` with history on a single project.
+            'upcoming_events' => $this->whenLoaded('upcomingEvents', fn () => ProjectEventResource::collection($resource->upcomingEvents)),
+            'events' => $this->whenLoaded('events', fn () => ProjectEventResource::collection($resource->events)),
+
             'sites_count' => $this->counted('sites_count'),
             'employees_count' => $this->counted('employees_count'),
 

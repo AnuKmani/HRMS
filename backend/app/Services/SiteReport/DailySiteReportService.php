@@ -125,6 +125,13 @@ class DailySiteReportService
         ]);
         $report->save();
 
+        app(ReportSubmittedNotifier::class)->notify(
+            $report,
+            'daily site report',
+            '/daily-reports/'.$report->id,
+            $user->name,
+        );
+
         return $report;
     }
 

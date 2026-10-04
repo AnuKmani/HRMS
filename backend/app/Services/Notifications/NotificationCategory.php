@@ -113,6 +113,7 @@ final class NotificationCategory
         'training.expired' => self::TRAINING_EXPIRY,
 
         'site.assigned' => self::SITE,
+        'site_report.submitted' => self::SITE,
 
         'asset.assigned' => self::ASSET,
         'asset.returned' => self::ASSET,

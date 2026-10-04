@@ -54,6 +54,23 @@ class ApiProjectsRepository implements ProjectsRepository {
   @override
   Future<void> remove(int id) => _client.delete('$_path/$id');
 
+  @override
+  Future<ProjectEvent> addEvent(
+    int projectId,
+    Map<String, Object?> body,
+  ) async {
+    final data = (await _client.post(
+      '$_path/$projectId/events',
+      body: body,
+    )).data;
+    if (data is! Map<String, dynamic>) throw unexpectedShapeException;
+    return ProjectEvent.fromJson(data);
+  }
+
+  @override
+  Future<void> removeEvent(int projectId, int eventId) =>
+      _client.delete('$_path/$projectId/events/$eventId');
+
   Project _one(Object? data) {
     if (data is! Map<String, dynamic>) throw unexpectedShapeException;
 

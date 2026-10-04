@@ -8,12 +8,8 @@ import '../../../core/presentation/paged_list_view.dart';
 import '../domain/project.dart';
 import 'projects_controller.dart';
 
-const _projectStatuses = [
-  StatusOption('planned', 'Planned'),
-  StatusOption('active', 'Active'),
-  StatusOption('on_hold', 'On hold'),
-  StatusOption('completed', 'Completed'),
-  StatusOption('cancelled', 'Cancelled'),
+final _projectStatuses = [
+  for (final (value, label) in projectStatuses) StatusOption(value, label),
 ];
 
 /// Every project the session is allowed to see.
@@ -76,13 +72,43 @@ class _ProjectsList extends ConsumerWidget {
         onChanged: (value) =>
             ref.read(projectsListProvider.notifier).setFilter('status', value),
       ),
-      itemBuilder: (context, project, index) => ListTile(
-        key: ValueKey('project-${project.id}'),
-        title: Text(project.name),
-        subtitle: Text(project.summary),
-        trailing: project.isOngoing ? null : _StatusTag(project.status),
-        onTap: canView ? () => context.push('/projects/${project.id}') : null,
-      ),
+      itemBuilder: (context, project, index) {
+        final next = project.upcomingEvents.isEmpty
+            ? null
+            : project.upcomingEvents.first;
+        return ListTile(
+          key: ValueKey('project-${project.id}'),
+          isThreeLine: next != null,
+          title: Text(project.name),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                project.projectManagerName == null
+                    ? project.code
+                    : '${project.code} · PM: ${project.projectManagerName}',
+              ),
+              if (next != null)
+                Row(
+                  key: ValueKey('project-next-event-${project.id}'),
+                  children: [
+                    const Icon(Icons.event, size: 16, color: Colors.deepOrange),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        '${next.label} · ${next.prettyDate}'
+                        '${project.upcomingEvents.length > 1 ? ' (+${project.upcomingEvents.length - 1} more)' : ''}',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+          trailing: _StatusTag(project.status),
+          onTap: canView ? () => context.push('/projects/${project.id}') : null,
+        );
+      },
     );
   }
 }
@@ -95,11 +121,24 @@ class _StatusTag extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final color = switch (status) {
+      'active' => const Color(0xFF2563EB),
+      'handing_over' => const Color(0xFFF59E0B),
+      'completed' => const Color(0xFF16A34A),
+      _ => scheme.outline,
+    };
 
     return Chip(
-      label: Text(status.replaceAll('_', ' ')),
+      key: ValueKey('project-status-$status'),
+      label: Text(
+        projectStatusLabel(status),
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
       visualDensity: VisualDensity.compact,
-      backgroundColor: scheme.surfaceContainerHighest,
+      backgroundColor: color,
       side: BorderSide.none,
     );
   }

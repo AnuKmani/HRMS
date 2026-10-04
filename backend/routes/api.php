@@ -37,6 +37,7 @@ use App\Http\Controllers\Api\V1\PasswordResetController;
 use App\Http\Controllers\Api\V1\PayrollAdjustmentController;
 use App\Http\Controllers\Api\V1\PayrollController;
 use App\Http\Controllers\Api\V1\ProjectController;
+use App\Http\Controllers\Api\V1\ProjectEventController;
 use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\ReportExportController;
 use App\Http\Controllers\Api\V1\RoleController;
@@ -228,6 +229,17 @@ Route::prefix('v1')->group(function () {
         Route::put('projects/{project}', [ProjectController::class, 'update'])
             ->middleware('permission:projects.manage');
         Route::delete('projects/{project}', [ProjectController::class, 'destroy'])
+            ->middleware('permission:projects.manage');
+
+        // DCD / Civil Defence / handover dates. Read with the project
+        // (projects.view); written by whoever runs the project.
+        Route::post('projects/{project}/events', [ProjectEventController::class, 'store'])
+            ->middleware('permission:projects.manage');
+        Route::put('projects/{project}/events/{projectEvent}', [ProjectEventController::class, 'update'])
+            ->whereNumber('projectEvent')
+            ->middleware('permission:projects.manage');
+        Route::delete('projects/{project}/events/{projectEvent}', [ProjectEventController::class, 'destroy'])
+            ->whereNumber('projectEvent')
             ->middleware('permission:projects.manage');
 
         // Sites.

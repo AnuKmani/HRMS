@@ -32,7 +32,7 @@ class ProjectController extends Controller
         $this->authorize('viewAny', Project::class);
 
         $query = Project::query()
-            ->with('projectManager')
+            ->with(['projectManager', 'upcomingEvents'])
             ->withCount(['sites', 'employees']);
 
         Visibility::projectsAndSitesFor($query, $request->user());
@@ -92,7 +92,7 @@ class ProjectController extends Controller
     {
         $this->authorize('view', $project);
 
-        $project->load('projectManager')->loadCount(['sites', 'employees']);
+        $project->load(['projectManager', 'events', 'upcomingEvents'])->loadCount(['sites', 'employees']);
 
         return ApiResponse::success('Project retrieved.', new ProjectResource($project));
     }

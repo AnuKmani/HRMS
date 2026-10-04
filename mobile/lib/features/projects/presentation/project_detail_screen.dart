@@ -174,7 +174,7 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
               _row('Location', project.location),
               _row(
                 'Status',
-                project.status.replaceAll('_', ' '),
+                project.statusLabel,
                 key: const ValueKey('detail-status'),
               ),
               _row('Start date', project.startDate),
@@ -191,6 +191,7 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
                 key: const ValueKey('detail-employees-count'),
               ),
             ]),
+            _eventsSection(project, canManage: scope.canManageProjects),
             if (project.description != null &&
                 project.description!.trim().isNotEmpty)
               _section('Description', [
@@ -235,6 +236,105 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
     );
   }
 
+  /// DCD / Civil Defence / handover dates. Everyone who may see the
+  /// project reads them; whoever runs it books and cancels them.
+  Widget _eventsSection(Project project, {required bool canManage}) {
+    final today = DateTime.now();
+    final events = project.events.isNotEmpty
+        ? project.events
+        : project.upcomingEvents;
+
+    return _section('Inspections & key dates', [
+      if (events.isEmpty)
+        const Padding(
+          key: ValueKey('events-none'),
+          padding: EdgeInsets.all(12),
+          child: Text('No dates booked yet.'),
+        ),
+      for (final event in events)
+        ListTile(
+          key: ValueKey('event-${event.id}'),
+          leading: Icon(
+            event.isPast(today) ? Icons.event_available : Icons.event,
+            color: event.isPast(today) ? Colors.grey : Colors.deepOrange,
+          ),
+          title: Text(
+            event.label,
+            style: TextStyle(
+              color: event.isPast(today) ? Colors.grey : null,
+              fontWeight: event.isPast(today) ? null : FontWeight.w600,
+            ),
+          ),
+          subtitle: Text(
+            [
+              event.prettyDate,
+              if (event.isPast(today)) 'done',
+              if (event.notes != null && event.notes!.trim().isNotEmpty)
+                event.notes!,
+            ].join(' · '),
+          ),
+          trailing: canManage
+              ? IconButton(
+                  key: ValueKey('event-remove-${event.id}'),
+                  tooltip: 'Remove date',
+                  icon: const Icon(Icons.close),
+                  onPressed: () => _removeEvent(project, event),
+                )
+              : null,
+        ),
+      if (canManage)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+          child: SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              key: const ValueKey('event-add'),
+              icon: const Icon(Icons.add),
+              label: const Text('Add inspection / date'),
+              onPressed: () => _addEvent(project),
+            ),
+          ),
+        ),
+    ]);
+  }
+
+  Future<void> _addEvent(Project project) async {
+    final body = await showDialog<Map<String, Object?>>(
+      context: context,
+      builder: (context) => const _EventDialog(),
+    );
+    if (body == null || !mounted) return;
+
+    try {
+      await ref.read(projectsRepositoryProvider).addEvent(project.id, body);
+      await _load();
+    } on ApiException catch (failure) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            failure.errors.values.isNotEmpty
+                ? failure.errors.values.first
+                : failure.message,
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _removeEvent(Project project, ProjectEvent event) async {
+    try {
+      await ref
+          .read(projectsRepositoryProvider)
+          .removeEvent(project.id, event.id);
+      await _load();
+    } on ApiException catch (failure) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(failure.message)));
+    }
+  }
+
   Widget _section(String title, List<Widget> rows) => Padding(
     padding: const EdgeInsets.only(bottom: 24),
     child: Column(
@@ -268,6 +368,103 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
           Expanded(child: Text(resolved, key: key)),
         ],
       ),
+    );
+  }
+}
+
+/// Which inspection, and when.
+class _EventDialog extends StatefulWidget {
+  const _EventDialog();
+
+  @override
+  State<_EventDialog> createState() => _EventDialogState();
+}
+
+class _EventDialogState extends State<_EventDialog> {
+  String _type = ProjectEvent.types.first.$1;
+  DateTime? _date;
+  final TextEditingController _notes = TextEditingController();
+
+  @override
+  void dispose() {
+    _notes.dispose();
+    super.dispose();
+  }
+
+  String _ymd(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-'
+      '${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _date ?? now,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 5),
+    );
+    if (picked != null) setState(() => _date = picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final date = _date;
+
+    return AlertDialog(
+      title: const Text('Add inspection / date'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DropdownButtonFormField<String>(
+              key: const ValueKey('event-type'),
+              initialValue: _type,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'What'),
+              items: [
+                for (final (value, label) in ProjectEvent.types)
+                  DropdownMenuItem(value: value, child: Text(label)),
+              ],
+              onChanged: (value) {
+                if (value != null) setState(() => _type = value);
+              },
+            ),
+            const SizedBox(height: 8),
+            ListTile(
+              key: const ValueKey('event-date'),
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.calendar_today),
+              title: Text(date == null ? 'Choose the date' : _ymd(date)),
+              onTap: _pickDate,
+            ),
+            TextField(
+              key: const ValueKey('event-notes'),
+              controller: _notes,
+              maxLength: 500,
+              decoration: const InputDecoration(labelText: 'Notes (optional)'),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          key: const ValueKey('event-save'),
+          onPressed: date == null
+              ? null
+              : () => Navigator.of(context).pop(<String, Object?>{
+                  'type': _type,
+                  'event_date': _ymd(date),
+                  if (_notes.text.trim().isNotEmpty)
+                    'notes': _notes.text.trim(),
+                }),
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }

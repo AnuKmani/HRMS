@@ -14,7 +14,10 @@ class Project extends Model
 
     public const STATUS_PLANNED = 'planned';
 
+    /** Shown as "Ongoing". */
     public const STATUS_ACTIVE = 'active';
+
+    public const STATUS_HANDING_OVER = 'handing_over';
 
     public const STATUS_ON_HOLD = 'on_hold';
 
@@ -25,6 +28,7 @@ class Project extends Model
     public const STATUSES = [
         self::STATUS_PLANNED,
         self::STATUS_ACTIVE,
+        self::STATUS_HANDING_OVER,
         self::STATUS_ON_HOLD,
         self::STATUS_COMPLETED,
         self::STATUS_CANCELLED,
@@ -50,6 +54,21 @@ class Project extends Model
     public function projectManager(): BelongsTo
     {
         return $this->belongsTo(Employee::class, 'project_manager_id');
+    }
+
+    /** Every milestone, soonest first. */
+    public function events(): HasMany
+    {
+        return $this->hasMany(ProjectEvent::class)->orderBy('event_date')->orderBy('id');
+    }
+
+    /** Milestones from today on — what the project list shows. */
+    public function upcomingEvents(): HasMany
+    {
+        return $this->hasMany(ProjectEvent::class)
+            ->where('event_date', '>=', now()->toDateString())
+            ->orderBy('event_date')
+            ->orderBy('id');
     }
 
     public function sites(): HasMany

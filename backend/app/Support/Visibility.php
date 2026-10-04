@@ -910,8 +910,9 @@ final class Visibility
     /**
      * May this user read somebody *else's* site activity report?
      *
-     * Three ways in, exactly as attendance — a listed field overseer, an
-     * explicit reporting grant, or `employees.view` — and it fails CLOSED
+     * One way in: `daily_site_reports.manage`, which the Project Manager
+     * holds (the business rule: reports go from the Site Engineer / Site
+     * Supervisor to the project's manager, and nobody else). It fails CLOSED
      * for the reason attendance does: an ordinary employee holds
      * `site_activity_reports.view` for their *own* notes, so the permission
      * cannot also mean "the company's".
@@ -929,11 +930,11 @@ final class Visibility
             return false;
         }
 
-        if (self::attendanceIsScopedFor($user)) {
-            return true;
-        }
-
-        return $user->can('daily_site_reports.manage') || $user->can('employees.view');
+        // Only the Project Manager reads other people's reports — on the
+        // projects they run, narrowed by the query scope below — and Super
+        // Admin through `*`. A Site Engineer or Site Supervisor reads the
+        // reports they wrote; HR and Management do not read them at all.
+        return $user->can('daily_site_reports.manage');
     }
 
     /**
@@ -953,11 +954,11 @@ final class Visibility
             return false;
         }
 
-        if (self::attendanceIsScopedFor($user)) {
-            return true;
-        }
-
-        return $user->can('daily_site_reports.manage') || $user->can('employees.view');
+        // Only the Project Manager reads other people's reports — on the
+        // projects they run, narrowed by the query scope below — and Super
+        // Admin through `*`. A Site Engineer or Site Supervisor reads the
+        // reports they wrote; HR and Management do not read them at all.
+        return $user->can('daily_site_reports.manage');
     }
 
     /**

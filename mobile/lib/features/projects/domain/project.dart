@@ -20,6 +20,8 @@ class Project {
     this.sitesCount,
     this.employeesCount,
     this.createdAt,
+    this.upcomingEvents = const <ProjectEvent>[],
+    this.events = const <ProjectEvent>[],
   });
 
   final int id;
@@ -37,8 +39,17 @@ class Project {
   final String? startDate;
   final String? endDate;
 
-  /// `planned`, `active`, `on_hold`, `completed` or `cancelled`.
+  /// `planned`, `active` (shown as Ongoing), `handing_over`, `on_hold`,
+  /// `completed` or `cancelled`.
   final String status;
+
+  /// DCD / Civil Defence / handover dates from today on, soonest first.
+  final List<ProjectEvent> upcomingEvents;
+
+  /// Every dated event, history included — only on a single project.
+  final List<ProjectEvent> events;
+
+  String get statusLabel => projectStatusLabel(status);
 
   final int? sitesCount;
   final int? employeesCount;
@@ -84,7 +95,95 @@ class Project {
     sitesCount: _int(json['sites_count']),
     employeesCount: _int(json['employees_count']),
     createdAt: json['created_at'] as String?,
+    upcomingEvents: ProjectEvent.listFrom(json['upcoming_events']),
+    events: ProjectEvent.listFrom(json['events']),
   );
+}
+
+/// The statuses HR reads on the project list, in the order a project moves
+/// through them.
+const projectStatuses = <(String, String)>[
+  ('planned', 'Planned'),
+  ('active', 'Ongoing'),
+  ('handing_over', 'Handing over'),
+  ('completed', 'Completed'),
+  ('on_hold', 'On hold'),
+  ('cancelled', 'Cancelled'),
+];
+
+String projectStatusLabel(String status) {
+  for (final (value, label) in projectStatuses) {
+    if (value == status) return label;
+  }
+  return status.replaceAll('_', ' ');
+}
+
+/// A dated milestone on a project: DCD inspection, Civil Defence
+/// inspection, handover…
+class ProjectEvent {
+  const ProjectEvent({
+    required this.id,
+    required this.type,
+    required this.label,
+    required this.eventDate,
+    this.notes,
+  });
+
+  final int id;
+  final String type;
+  final String label;
+
+  /// `YYYY-MM-DD`.
+  final String eventDate;
+  final String? notes;
+
+  static const types = <(String, String)>[
+    ('dcd_inspection', 'DCD inspection'),
+    ('civil_defence', 'Civil Defence inspection'),
+    ('handover', 'Handover'),
+    ('other', 'Other'),
+  ];
+
+  /// `10 Oct 2026`.
+  String get prettyDate {
+    final date = DateTime.tryParse(eventDate);
+    if (date == null) return eventDate;
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${date.day} ${months[date.month - 1]} ${date.year}';
+  }
+
+  bool isPast(DateTime today) {
+    final date = DateTime.tryParse(eventDate);
+    if (date == null) return false;
+    return date.isBefore(DateTime(today.year, today.month, today.day));
+  }
+
+  factory ProjectEvent.fromJson(Map<String, dynamic> json) => ProjectEvent(
+    id: _int(json['id']) ?? 0,
+    type: json['type'] as String? ?? 'other',
+    label: json['label'] as String? ?? '',
+    eventDate: json['event_date'] as String? ?? '',
+    notes: json['notes'] as String?,
+  );
+
+  static List<ProjectEvent> listFrom(Object? value) => [
+    if (value is List)
+      for (final row in value)
+        if (row is Map<String, dynamic>) ProjectEvent.fromJson(row),
+  ];
 }
 
 int? _int(Object? value) {
