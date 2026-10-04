@@ -17,6 +17,7 @@ use App\Support\Money;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Tests\Feature\Concerns\BuildsLeaveStack;
+use Tests\Feature\Concerns\RestoresSelfServiceGrants;
 use Tests\TestCase;
 
 /**
@@ -51,7 +52,7 @@ use Tests\TestCase;
  */
 class PayrollTest extends TestCase
 {
-    use BuildsLeaveStack, RefreshDatabase;
+    use BuildsLeaveStack, RefreshDatabase, RestoresSelfServiceGrants;
 
     private const YEAR = 2026;
 
@@ -62,6 +63,7 @@ class PayrollTest extends TestCase
         parent::setUp();
 
         $this->seedLeaveStack();
+        $this->restoreSelfServiceGrants();
     }
 
     /* ------------------------------------------------------------ the run */

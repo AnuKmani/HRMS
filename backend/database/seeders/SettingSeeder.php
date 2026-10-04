@@ -52,6 +52,18 @@ class SettingSeeder extends Seeder
             'description' => 'Consecutive late check-ins that trigger an HR notification.',
         ],
 
+        [
+            // On by default: a late check-out should not depend on the
+            // employee remembering to file a claim. The claim still needs
+            // approval before payroll reads it.
+            'key' => 'overtime.auto_request_from_attendance',
+            'value' => '1',
+            'type' => 'boolean',
+            'group' => 'attendance',
+            'label' => 'Raise overtime automatically at check-out',
+            'description' => 'When a check-out earns overtime, create and submit the overtime request for approval automatically.',
+        ],
+
         // --- leave ------------------------------------------------------
         [
             // 2 days, the default the specification asks for. A leave type

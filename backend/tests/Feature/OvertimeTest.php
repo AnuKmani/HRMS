@@ -9,6 +9,7 @@ use App\Models\Project;
 use App\Models\Site;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Feature\Concerns\BuildsLeaveStack;
+use Tests\Feature\Concerns\RestoresSelfServiceGrants;
 use Tests\TestCase;
 
 /**
@@ -34,7 +35,7 @@ use Tests\TestCase;
  */
 class OvertimeTest extends TestCase
 {
-    use BuildsLeaveStack, RefreshDatabase;
+    use BuildsLeaveStack, RefreshDatabase, RestoresSelfServiceGrants;
 
     private Project $project;
 
@@ -45,6 +46,7 @@ class OvertimeTest extends TestCase
         parent::setUp();
 
         $this->seedLeaveStack();
+        $this->restoreSelfServiceGrants();
 
         $this->project = Project::factory()->create();
         $this->site = Site::factory()->create(['project_id' => $this->project->id]);

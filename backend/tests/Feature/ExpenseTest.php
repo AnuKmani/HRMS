@@ -11,6 +11,7 @@ use App\Models\Setting;
 use App\Models\Site;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Feature\Concerns\BuildsExpenses;
+use Tests\Feature\Concerns\RestoresSelfServiceGrants;
 use Tests\TestCase;
 
 /**
@@ -43,7 +44,7 @@ use Tests\TestCase;
  */
 class ExpenseTest extends TestCase
 {
-    use BuildsExpenses, RefreshDatabase;
+    use BuildsExpenses, RefreshDatabase, RestoresSelfServiceGrants;
 
     private Project $project;
 
@@ -54,6 +55,7 @@ class ExpenseTest extends TestCase
         parent::setUp();
 
         $this->seedExpenseStack();
+        $this->restoreSelfServiceGrants();
 
         $this->project = Project::factory()->create();
         $this->site = Site::factory()->create(['project_id' => $this->project->id]);

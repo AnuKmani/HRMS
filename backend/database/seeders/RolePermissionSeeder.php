@@ -382,71 +382,24 @@ class RolePermissionSeeder extends Seeder
         ],
 
         'Employee' => [
+            // Self-service only, as the business set it for local UAT:
+            //  - Overtime is read-only here. A late check-out raises the
+            //    claim itself (AttendanceService::raiseOvertimeFor), so the
+            //    employee has nothing to file — only something to follow.
+            //  - No People section: documents, onboarding and training are
+            //    managed by HR on the employee's behalf.
+            //  - Pay & money is salary slips, certificates and loans; the
+            //    payroll ledger and expense claims are not employee doors.
             'dashboard.view',
-            // Their own attendance, and nothing else: `attendance.view` is
-            // the coarse gate that lets GET /attendance through, and
-            // Visibility::attendanceIsVisible() then narrows the rows to
-            // their own because this role is not listed as an overseer and
-            // holds neither employees.view nor attendance.manage. Without
-            // this grant an employee could not read back the day they
-            // themselves recorded.
             'attendance.view',
-            // The same shape for leave, timesheets and overtime: enough to
-            // ask, read your own and see your own pot — never `leave.approve`,
-            // because nobody signs off on their own absence.
             'leave.view', 'leave.create',
             'leave.balance.view',
             'timesheets.view',
-            'overtime.view', 'overtime.create',
-            // The field worker's own reporting door. Creating a *site
-            // activity report is writing your own note about your own site,
-            // so the coarse gate goes to every account expected to stand on
-            // one; Visibility::attachedSiteIds() then narrows "which site?"
-            // to the ones this person is actually assigned to, which is why
-            // an Employee with no assignment is refused rather than offered
-            // a picker of every site in the company. Deliberately NOT
-            // `daily_site_reports.*` — the official site-day record is a
-            // supervisor's artefact, and two official reports for one
-            // site-date is a contradiction.
+            'overtime.view',
             'site_activity_reports.view',
             'site_activity_reports.create',
             'site_activity_reports.update',
-            // Their own file, and the door to add to it. `documents.create`
-            // and `.update` are filing and correcting *their own* documents;
-            // `documents.manage` is absent, which is what keeps this role
-            // reading its own passport and nobody else's.
-            'documents.view', 'documents.create', 'documents.update',
-            // Their own onboarding checklist, and nothing else: the list
-            // and the detail both narrow to the caller's own employee row
-            // unless `onboarding.manage` is held.
-            'onboarding.view',
-            // Their own course history and their own kit, and nothing
-            // else. Both doors are coarse gates that Visibility then
-            // narrows to this person's own rows: `training.manage` and
-            // `assets.manage` are absent, which is what stops an employee
-            // reading a colleague's certificate or browsing the pool —
-            // and `training.assign`, `training.complete` and
-            // `assets.assign` are absent again, because HR puts people on
-            // courses and hands out the tools, not the other way round.
-            'training.view',
             'assets.view',
-            // Their own claims, and nothing else. `expenses.view` is the
-            // coarse gate that lets GET /expenses through at all —
-            // Visibility then narrows every row to their own, because this
-            // role holds neither `expenses.manage` nor `expenses.approve`.
-            // `.create` / `.update` are filing and correcting a draft of
-            // their own; `.approve` is deliberately absent, because nobody
-            // signs off on their own spend. Their own receipts read back
-            // through ownership, so `expenses.receipts.view` is not needed.
-            'expenses.view', 'expenses.create', 'expenses.update',
-            // Their own pay, their own loans, their own certificates - the
-            // three doors an employee needs to answer "what am I paid?" for
-            // themselves. `payroll.view` is granted for exactly the same
-            // reason `leave.view` is: without the coarse gate the endpoint
-            // is a 403 before any row-level rule can run, and Visibility
-            // then narrows it to their own rows because this role holds
-            // neither `payroll.manage` nor `employees.salary.view`.
-            'payroll.view',
             'salary_slips.view',
             'salary_certificates.view',
             'loans.view', 'loans.create',

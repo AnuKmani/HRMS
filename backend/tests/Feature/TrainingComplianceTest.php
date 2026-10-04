@@ -6,6 +6,7 @@ use App\Models\EmployeeTraining;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Tests\Feature\Concerns\BuildsTrainingAssets;
+use Tests\Feature\Concerns\RestoresSelfServiceGrants;
 use Tests\TestCase;
 
 /**
@@ -32,13 +33,14 @@ use Tests\TestCase;
  */
 class TrainingComplianceTest extends TestCase
 {
-    use BuildsTrainingAssets, RefreshDatabase;
+    use BuildsTrainingAssets, RefreshDatabase, RestoresSelfServiceGrants;
 
     protected function setUp(): void
     {
         parent::setUp();
 
         $this->seedTrainingAssetStack();
+        $this->restoreSelfServiceGrants();
 
         Storage::fake('local');
         $this->withHeaders(['Accept' => 'application/json']);

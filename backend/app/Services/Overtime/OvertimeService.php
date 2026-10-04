@@ -111,21 +111,73 @@ final class OvertimeService
             ]);
         }
 
-        return DB::transaction(function () use ($overtime) {
-            $overtime->submitted_at = now();
-            $overtime->status = OvertimeRequest::STATUS_PENDING;
-            $overtime->save();
+        return DB::transaction(fn () => $this->startApproval($overtime));
+    }
 
-            $outcome = $this->approvals->start($overtime);
+    /**
+     * Raise — and submit — the overtime claim a check-out earned.
+     *
+     * The minutes are the attendance row's own `overtime_minutes`, which the
+     * check-out derived from the shift's configurable threshold; nobody types
+     * them. The claim still goes through the configured approval workflow,
+     * and only an approved one reaches payroll, exactly as a hand-filed claim
+     * would. Returns the existing claim if this day already has one, so a
+     * replayed check-out never raises two.
+     */
+    public function recordFromAttendance(Attendance $attendance): ?OvertimeRequest
+    {
+        $minutes = (int) $attendance->overtime_minutes;
 
-            if ($outcome === ApprovalWorkflowService::COMPLETED) {
-                $this->finalise($overtime, null);
-            } else {
-                $overtime->save();
+        if ($minutes <= 0) {
+            return null;
+        }
+
+        return DB::transaction(function () use ($attendance, $minutes) {
+            $existing = OvertimeRequest::query()
+                ->where('attendance_id', $attendance->id)
+                ->where('status', '!=', OvertimeRequest::STATUS_CANCELLED)
+                ->lockForUpdate()
+                ->first();
+
+            if ($existing !== null) {
+                return $existing;
             }
 
-            return $overtime->refresh();
+            $overtime = new OvertimeRequest([
+                'employee_id' => $attendance->employee_id,
+                'overtime_date' => $attendance->attendance_date,
+                'project_id' => $attendance->project_id,
+                'site_id' => $attendance->site_id,
+                'requested_minutes' => $minutes,
+                'reason' => sprintf(
+                    'Recorded automatically at check-out: %dh %02dm beyond the shift.',
+                    intdiv($minutes, 60),
+                    $minutes % 60,
+                ),
+                'status' => OvertimeRequest::STATUS_DRAFT,
+            ]);
+            $overtime->attendance_id = $attendance->id;
+            $overtime->save();
+
+            return $this->startApproval($overtime);
         });
+    }
+
+    private function startApproval(OvertimeRequest $overtime): OvertimeRequest
+    {
+        $overtime->submitted_at = now();
+        $overtime->status = OvertimeRequest::STATUS_PENDING;
+        $overtime->save();
+
+        $outcome = $this->approvals->start($overtime);
+
+        if ($outcome === ApprovalWorkflowService::COMPLETED) {
+            $this->finalise($overtime, null);
+        } else {
+            $overtime->save();
+        }
+
+        return $overtime->refresh();
     }
 
     /**

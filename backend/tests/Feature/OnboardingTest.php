@@ -7,6 +7,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Tests\Feature\Concerns\BuildsDocuments;
+use Tests\Feature\Concerns\RestoresSelfServiceGrants;
 use Tests\TestCase;
 
 /**
@@ -33,13 +34,14 @@ use Tests\TestCase;
  */
 class OnboardingTest extends TestCase
 {
-    use BuildsDocuments, RefreshDatabase;
+    use BuildsDocuments, RefreshDatabase, RestoresSelfServiceGrants;
 
     protected function setUp(): void
     {
         parent::setUp();
 
         $this->seedDocumentStack();
+        $this->restoreSelfServiceGrants();
 
         Storage::fake('local');
         $this->withHeaders(['Accept' => 'application/json']);

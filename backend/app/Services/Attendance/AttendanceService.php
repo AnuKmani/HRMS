@@ -8,8 +8,10 @@ use App\Models\Employee;
 use App\Models\EmployeeSiteAssignment;
 use App\Models\Site;
 use App\Models\User;
+use App\Services\Overtime\OvertimeService;
 use App\Services\SettingsService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
@@ -57,6 +59,7 @@ final class AttendanceService
         private readonly SiteAccessValidator $siteAccess,
         private readonly SelfieStore $selfies,
         private readonly SettingsService $settings,
+        private readonly OvertimeService $overtime,
     ) {}
 
     /* ------------------------------------------------------------- check-in */
@@ -196,7 +199,7 @@ final class AttendanceService
         $selfiePath = null;
 
         try {
-            return DB::transaction(function () use ($employee, $site, $data, $eventId, &$selfiePath) {
+            $attendance = DB::transaction(function () use ($employee, $site, $data, $eventId, &$selfiePath) {
                 if ($eventId !== null) {
                     $replay = Attendance::query()
                         ->where('check_out_client_event_id', $eventId)
@@ -292,12 +295,38 @@ final class AttendanceService
 
                 return $open;
             });
+
+            // After the commit, never inside it: the check-out is the
+            // employee's record of their day and must stand even if the
+            // overtime claim cannot be raised (no workflow configured, a
+            // notification failing). Idempotent, so an offline replay of the
+            // same check-out does not raise a second claim.
+            $this->raiseOvertimeFor($attendance);
+
+            return $attendance;
         } catch (Throwable $exception) {
             if ($selfiePath !== null) {
                 $this->selfies->delete($selfiePath);
             }
 
             throw $exception;
+        }
+    }
+
+    private function raiseOvertimeFor(Attendance $attendance): void
+    {
+        if ((int) $attendance->overtime_minutes <= 0
+            || ! $this->settings->bool('overtime.auto_request_from_attendance', true)) {
+            return;
+        }
+
+        try {
+            $this->overtime->recordFromAttendance($attendance);
+        } catch (Throwable $exception) {
+            Log::warning('overtime.auto_request_failed', [
+                'attendance_id' => $attendance->id,
+                'error' => $exception->getMessage(),
+            ]);
         }
     }
 

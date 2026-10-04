@@ -9,6 +9,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Tests\Feature\Concerns\BuildsDocuments;
+use Tests\Feature\Concerns\RestoresSelfServiceGrants;
 use Tests\TestCase;
 
 /**
@@ -38,13 +39,14 @@ use Tests\TestCase;
  */
 class EmployeeDocumentTest extends TestCase
 {
-    use BuildsDocuments, RefreshDatabase;
+    use BuildsDocuments, RefreshDatabase, RestoresSelfServiceGrants;
 
     protected function setUp(): void
     {
         parent::setUp();
 
         $this->seedDocumentStack();
+        $this->restoreSelfServiceGrants();
 
         Storage::fake('local');
         Storage::fake('public');

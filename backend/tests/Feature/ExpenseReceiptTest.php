@@ -10,6 +10,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Tests\Feature\Concerns\BuildsExpenses;
+use Tests\Feature\Concerns\RestoresSelfServiceGrants;
 use Tests\TestCase;
 
 /**
@@ -38,7 +39,7 @@ use Tests\TestCase;
  */
 class ExpenseReceiptTest extends TestCase
 {
-    use BuildsExpenses, RefreshDatabase;
+    use BuildsExpenses, RefreshDatabase, RestoresSelfServiceGrants;
 
     /** Enough of a PDF to carry the signature CertificateContent looks for. */
     private const PDF = "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\nstartxref\n%%EOF\n";
@@ -52,6 +53,7 @@ class ExpenseReceiptTest extends TestCase
         parent::setUp();
 
         $this->seedExpenseStack();
+        $this->restoreSelfServiceGrants();
 
         Storage::fake('local');
         Storage::fake('public');
