@@ -270,6 +270,22 @@ php artisan serve          # http://127.0.0.1:8000
 > credentials. Business rules such as the 2-day certificate deadline are
 > database settings, not environment variables.
 
+> **UAT accounts — one sign-in per role.** The seeders create roles and
+> permissions but no users. For local real-device UAT:
+>
+> ```bash
+> php artisan hrms:uat-accounts                       # uat.<role>@uat.local, random passwords
+> php artisan hrms:uat-accounts --password='Uat-pass-123'   # one shared password
+> php artisan hrms:uat-accounts --reset-passwords     # re-issue passwords on re-run
+> ```
+>
+> Each account holds exactly one seeded role and has an employee record (so
+> Attendance appears); the passwords are printed once. The command refuses to
+> run when `APP_ENV=production`, and fails — listing the roles — if any role
+> holds no permissions, which is the cause of a dashboard that shows only
+> Holidays. It never deletes or rewrites existing data beyond the UAT
+> accounts themselves.
+
 ```bash
 php artisan test                  # 553 tests, 3674 assertions
 ./vendor/bin/pint                 # code style
