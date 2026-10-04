@@ -6,6 +6,7 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/presentation/fields.dart';
 import '../../../core/presentation/form_controls.dart';
 import '../../../core/presentation/remote_picker.dart';
+import '../../attendance/data/device_location.dart';
 import '../../employees/presentation/employees_controller.dart';
 import '../../projects/presentation/projects_controller.dart';
 import '../data/api_sites_repository.dart';
@@ -201,6 +202,70 @@ class _SiteFormScreenState extends ConsumerState<SiteFormScreen> {
     }
   }
 
+  bool _locating = false;
+
+  /// Fills latitude and longitude from where the phone is standing — the
+  /// way HR sets a site up while actually on it. The radius stays HR's
+  /// decision: it is a rule about the site, not a fact the GPS knows.
+  Future<void> _useCurrentLocation() async {
+    final gateway = ref.read(locationGatewayProvider);
+    final messenger = ScaffoldMessenger.of(context);
+
+    setState(() => _locating = true);
+    try {
+      if (!await gateway.isServiceEnabled()) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: const Text('Turn on location (GPS) on this phone first.'),
+            action: SnackBarAction(
+              label: 'Settings',
+              onPressed: gateway.openLocationSettings,
+            ),
+          ),
+        );
+        return;
+      }
+
+      var status = await gateway.checkPermission();
+      if (status != LocationStatus.granted) {
+        status = await gateway.requestPermission();
+      }
+      if (status != LocationStatus.granted) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Location permission is needed to read this position.',
+            ),
+            action: SnackBarAction(
+              label: 'Settings',
+              onPressed: gateway.openAppSettings,
+            ),
+          ),
+        );
+        return;
+      }
+
+      final fix = await gateway.currentFix();
+      if (!mounted) return;
+      setState(() {
+        _latitude.text = fix.latitude.toStringAsFixed(7);
+        _longitude.text = fix.longitude.toStringAsFixed(7);
+      });
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Location set (accuracy ±${fix.accuracy.round()} m). '
+            'Now set the geofence radius.',
+          ),
+        ),
+      );
+    } on LocationAcquisitionFailed catch (failure) {
+      messenger.showSnackBar(SnackBar(content: Text(failure.message)));
+    } finally {
+      if (mounted) setState(() => _locating = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -256,6 +321,32 @@ class _SiteFormScreenState extends ConsumerState<SiteFormScreen> {
                       enabled: !_saving,
                       maxLines: 3,
                       errorText: _errors['address'],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: FilledButton.tonalIcon(
+                        key: const ValueKey('site-use-my-location'),
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(52),
+                        ),
+                        onPressed: _saving || _locating
+                            ? null
+                            : _useCurrentLocation,
+                        icon: _locating
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.my_location),
+                        label: Text(
+                          _locating
+                              ? 'Getting your location…'
+                              : 'Use my current location',
+                        ),
+                      ),
                     ),
                     LabeledTextField(
                       label: 'Latitude',

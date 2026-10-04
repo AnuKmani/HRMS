@@ -458,6 +458,20 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
           onTap: _checkIn,
         ),
       );
+    } else if (!today.checkedIn && today.sites.isEmpty) {
+      // Nowhere to check in at. The button is still drawn — greyed out —
+      // so the person can see what the screen is for and that the selfie
+      // step is waiting behind it, rather than a page with no way forward.
+      buttons.add(
+        _bigButton(
+          valueKey: const ValueKey('attendance-check-in-unavailable'),
+          label: 'CHECK IN (SELFIE)',
+          icon: Icons.photo_camera_front,
+          enabled: false,
+          loading: false,
+          onTap: () {},
+        ),
+      );
     } else if (today.canCheckOut) {
       buttons.add(
         _bigButton(
@@ -488,8 +502,9 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
     if (today.sites.isEmpty) {
       buttons.add(
         Text(
-          'You have no active site assignment, so there is nothing to check '
-          'in at. Ask HR to post you to one.',
+          'You are not assigned to a site yet, so you cannot check in. '
+          'Ask HR to assign you in Site assignments — then the CHECK IN '
+          'button (location + selfie) turns on.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
       );
