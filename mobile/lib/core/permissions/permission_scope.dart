@@ -52,6 +52,38 @@ class PermissionScope {
   /// `Visibility::attendanceFor`, not this answer.
   bool get canViewAttendance => can('attendance.view');
 
+  /* --------------------------------------------- back-office doors */
+
+  // The business keeps these modules off a self-service dashboard: a
+  // person who can only ever see *their own* documents, training, payroll
+  // row or expense claims is not offered the tile, and overtime is raised
+  // by check-out rather than filed by hand. Each door opens for whoever
+  // works the module for other people — decided from grants, never from a
+  // role name. The server's own seeders say the same for the Employee
+  // role; this keeps the app right against a server that has not been
+  // re-seeded yet.
+
+  bool get showsDocumentsModule =>
+      canViewDocuments && (canManageDocuments || canViewDocumentExpiry);
+
+  bool get showsOnboardingModule => canViewOnboarding && canManageOnboarding;
+
+  bool get showsTrainingModule =>
+      canViewTraining && (canManageTraining || canViewTrainingExpiry);
+
+  bool get showsPayrollModule =>
+      canViewPayrollSummary ||
+      (canViewPayroll &&
+          (canManagePayroll || canProcessPayroll || canViewSalary));
+
+  bool get showsExpensesModule =>
+      canViewExpenses &&
+      (canApproveExpenses || canManageExpenses || canViewExpenseReceipts);
+
+  /// Filing overtime by hand is for the back office correcting a day;
+  /// everyone else's overtime arrives from their check-out.
+  bool get canFileOvertimeByHand => canCreateOvertime && canManageOvertime;
+
   /* ------------------------------------------------------- employees */
 
   bool get canViewEmployees => can('employees.view');

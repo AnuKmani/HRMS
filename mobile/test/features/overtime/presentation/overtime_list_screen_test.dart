@@ -96,16 +96,28 @@ void main() {
     expect(find.text('Payroll'), findsOneWidget);
   });
 
-  testWidgets('the claim door appears only for overtime.create', (
+  testWidgets('the claim door is the back office\'s, not self-service', (
     tester,
   ) async {
     await pumpList(tester, permissions: const ['overtime.view']);
 
     expect(find.byKey(const ValueKey('claim-overtime')), findsNothing);
 
+    // Self-service overtime arrives from check-out; there is nothing to file.
     await pumpList(
       tester,
       permissions: const ['overtime.view', 'overtime.create'],
+    );
+
+    expect(find.byKey(const ValueKey('claim-overtime')), findsNothing);
+
+    await pumpList(
+      tester,
+      permissions: const [
+        'overtime.view',
+        'overtime.create',
+        'overtime.manage',
+      ],
     );
 
     expect(find.byKey(const ValueKey('claim-overtime')), findsOneWidget);

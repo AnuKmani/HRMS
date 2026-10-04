@@ -60,11 +60,22 @@ void main() {
       'other time-off work', (tester) async {
     await pumpHome(
       tester,
-      permissions: const ['expenses.view', 'overtime.view'],
+      permissions: const ['expenses.view', 'expenses.approve', 'overtime.view'],
     );
 
     expect(find.byKey(const ValueKey('module-Expenses')), findsOneWidget);
     expect(find.text('Claims, receipts and approvals'), findsOneWidget);
+  });
+
+  testWidgets('reading only your own claims is not a dashboard door', (
+    tester,
+  ) async {
+    await pumpHome(
+      tester,
+      permissions: const ['expenses.view', 'expenses.create'],
+    );
+
+    expect(find.byKey(const ValueKey('module-Expenses')), findsNothing);
   });
 
   testWidgets('the door is withheld when the grant is a different one', (

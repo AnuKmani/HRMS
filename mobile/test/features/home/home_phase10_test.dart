@@ -61,10 +61,19 @@ void main() {
     expect(find.text('Where new joiners stand'), findsNothing);
   });
 
-  testWidgets('the documents door belongs to documents.view on its own', (
+  testWidgets('documents.view alone — your own file — opens no door', (
     tester,
   ) async {
     await pumpHome(tester, permissions: const ['documents.view']);
+
+    expect(find.byKey(const ValueKey('module-Documents')), findsNothing);
+  });
+
+  testWidgets('the documents door belongs to the back office', (tester) async {
+    await pumpHome(
+      tester,
+      permissions: const ['documents.view', 'documents.manage'],
+    );
 
     expect(find.byKey(const ValueKey('module-Documents')), findsOneWidget);
     expect(find.text('Passports, IDs, visas and contracts'), findsOneWidget);
@@ -79,7 +88,10 @@ void main() {
     // joiners, and the reverse: Finance may watch a directory and may not
     // open a passport. One tile behind the other would say something untrue
     // about which question the reader was asking.
-    await pumpHome(tester, permissions: const ['onboarding.view']);
+    await pumpHome(
+      tester,
+      permissions: const ['onboarding.view', 'onboarding.manage'],
+    );
 
     expect(find.byKey(const ValueKey('module-Onboarding')), findsOneWidget);
     expect(find.text('Where new joiners stand'), findsOneWidget);
@@ -89,7 +101,12 @@ void main() {
   testWidgets('both grants offer both doors, side by side', (tester) async {
     await pumpHome(
       tester,
-      permissions: const <String>['documents.view', 'onboarding.view'],
+      permissions: const <String>[
+        'documents.view',
+        'documents.manage',
+        'onboarding.view',
+        'onboarding.manage',
+      ],
     );
 
     expect(find.byKey(const ValueKey('module-Documents')), findsOneWidget);

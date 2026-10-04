@@ -61,10 +61,19 @@ void main() {
     expect(find.text('Company kit and who is holding it'), findsNothing);
   });
 
-  testWidgets('the training door belongs to training.view on its own', (
+  testWidgets('training.view alone — your own courses — opens no door', (
     tester,
   ) async {
     await pumpHome(tester, permissions: const ['training.view']);
+
+    expect(find.byKey(const ValueKey('module-Training')), findsNothing);
+  });
+
+  testWidgets('the training door belongs to the back office', (tester) async {
+    await pumpHome(
+      tester,
+      permissions: const ['training.view', 'training.manage'],
+    );
 
     expect(find.byKey(const ValueKey('module-Training')), findsOneWidget);
     expect(find.text('Courses, certificates and expiry'), findsOneWidget);
@@ -89,7 +98,11 @@ void main() {
   testWidgets('both grants offer both doors, side by side', (tester) async {
     await pumpHome(
       tester,
-      permissions: const <String>['training.view', 'assets.view'],
+      permissions: const <String>[
+        'training.view',
+        'training.manage',
+        'assets.view',
+      ],
     );
 
     expect(find.byKey(const ValueKey('module-Training')), findsOneWidget);

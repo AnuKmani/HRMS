@@ -33,7 +33,7 @@ class OvertimeListScreen extends ConsumerWidget {
     }
 
     final canCreate = ref.watch(
-      permissionScopeProvider.select((scope) => scope.canCreateOvertime),
+      permissionScopeProvider.select((scope) => scope.canFileOvertimeByHand),
     );
 
     return Scaffold(

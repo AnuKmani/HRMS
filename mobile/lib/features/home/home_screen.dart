@@ -125,7 +125,7 @@ class HomeScreen extends ConsumerWidget {
       // with the receipts that prove it — a different door from overtime's
       // because it is a different question: not "how long did you work?"
       // but "what did you spend, and who signed it off?".
-      if (scope.canViewExpenses)
+      if (scope.showsExpensesModule)
         _Module(
           'Expenses',
           Icons.receipt_long_outlined,
@@ -159,7 +159,7 @@ class HomeScreen extends ConsumerWidget {
       // door is a different question from the ledger: "what is my pay" and
       // "give me the document" are asked by different people for different
       // reasons, and a role may hold one without the other.
-      if (scope.canViewPayroll || scope.canViewPayrollSummary)
+      if (scope.showsPayrollModule)
         _Module(
           'Payroll',
           Icons.account_balance_outlined,
@@ -194,14 +194,14 @@ class HomeScreen extends ConsumerWidget {
       // `onboarding.view` is a directory of who is joining. A person can
       // hold either, both, or neither, and hiding one behind the other
       // would say something untrue about which question they were asking.
-      if (scope.canViewDocuments)
+      if (scope.showsDocumentsModule)
         _Module(
           'Documents',
           Icons.folder_outlined,
           '/documents',
           'Passports, IDs, visas and contracts',
         ),
-      if (scope.canViewOnboarding)
+      if (scope.showsOnboardingModule)
         _Module(
           'Onboarding',
           Icons.person_add_alt_outlined,
@@ -216,7 +216,7 @@ class HomeScreen extends ConsumerWidget {
       // to you without `assets.manage`). A Site Engineer holding the first
       // and HR holding the second are two people reading two different
       // pages — so they are two tiles, not one behind the other.
-      if (scope.canViewTraining)
+      if (scope.showsTrainingModule)
         _Module(
           'Training',
           Icons.school_outlined,

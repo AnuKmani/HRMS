@@ -68,6 +68,7 @@ void main() {
       tester,
       permissions: const [
         'payroll.view',
+        'payroll.manage',
         'salary_slips.view',
         'loans.view',
         'salary_certificates.view',
@@ -81,6 +82,17 @@ void main() {
       find.byKey(const ValueKey('module-Salary certificates')),
       findsOneWidget,
     );
+  });
+
+  testWidgets('a self-service reader of their own payroll row gets the '
+      'slips, not the ledger', (tester) async {
+    await pumpHome(
+      tester,
+      permissions: const ['payroll.view', 'salary_slips.view'],
+    );
+
+    expect(find.byKey(const ValueKey('module-Payroll')), findsNothing);
+    expect(find.byKey(const ValueKey('module-Salary slips')), findsOneWidget);
   });
 
   testWidgets('a total-only reader is offered the summary door, not the '
