@@ -5,9 +5,9 @@
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
 
-    <!-- Debug builds only: local UAT talks to `php artisan serve` over plain
+    <!-- Debug and profile (UAT) builds only: local UAT talks to `php artisan serve` over plain
          http on the LAN (http://<pc-ip>:8000), which Android 9+ refuses by
-         default. Merged into the main manifest for debug; release builds
+         default. Merged into the main manifest for debug and profile; release builds
          never see it and stay HTTPS-only. -->
     <application android:usesCleartextTraffic="true"/>
 </manifest>
