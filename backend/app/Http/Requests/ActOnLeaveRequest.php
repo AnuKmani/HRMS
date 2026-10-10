@@ -35,6 +35,8 @@ class ActOnLeaveRequest extends FormRequest
     {
         return [
             'remarks' => ['nullable', 'string', 'max:500'],
+            // Days beyond the balance, decided at the final approval.
+            'excess' => ['nullable', 'in:grant,lop'],
         ];
     }
 }

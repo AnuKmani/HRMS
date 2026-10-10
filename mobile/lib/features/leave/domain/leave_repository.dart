@@ -35,7 +35,9 @@ abstract class LeaveRepository {
 
   Future<LeaveRequest> submit(int id, {String remarks = ''});
 
-  Future<LeaveRequest> approve(int id, {String remarks = ''});
+  /// [excess] — at the last step of a request beyond the balance: `grant`
+  /// gives the extra days, `lop` makes them loss of pay.
+  Future<LeaveRequest> approve(int id, {String remarks = '', String? excess});
 
   Future<LeaveRequest> reject(int id, {String remarks = ''});
 

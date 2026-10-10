@@ -274,7 +274,11 @@ class NotificationServiceProvider extends ServiceProvider
                     $leave->start_date?->format('j M Y') ?? '',
                     $leave->end_date?->format('j M Y') ?? '',
                     $event->decision,
-                ),
+                ).($approved && (float) $leave->over_balance_days > 0
+                    ? ($leave->excess_decision === 'grant'
+                        ? sprintf(' HR gave you %s extra day(s).', rtrim(rtrim(number_format((float) $leave->over_balance_days, 2), '0'), '.'))
+                        : sprintf(' %s day(s) beyond your balance are loss of pay.', rtrim(rtrim(number_format((float) $leave->over_balance_days, 2), '0'), '.')))
+                    : ''),
                 recipients: [$this->userFor($leave->employee)],
                 data: [
                     'route' => '/leave/'.$leave->id,

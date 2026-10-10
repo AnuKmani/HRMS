@@ -90,14 +90,45 @@ final class LeaveBalanceService
     }
 
     /**
+     * What is left right now, or null for a type with no limit.
+     */
+    public function available(Employee $employee, LeaveType $type, int $year): ?float
+    {
+        if ((bool) $type->is_unlimited || ! (bool) $type->is_paid || (bool) $type->allow_negative_balance) {
+            return null;
+        }
+
+        return $this->find($employee, $type, $year)->loadMissing('leaveType')->remaining();
+    }
+
+    /**
+     * Give one employee extra days of a type (HR granting days asked beyond
+     * the balance).
+     */
+    public function grantExtra(Employee $employee, LeaveType $type, int $year, float $days): LeaveBalance
+    {
+        return $this->move($employee, $type, $year, function (LeaveBalance $balance) use ($days) {
+            $balance->adjustment = (int) $balance->adjustment + (int) ceil($days);
+        });
+    }
+
+    /**
      * Hold days for a request that is going to an approver.
      *
      * @throws ValidationException when the pot would go negative
      */
-    public function reserve(Employee $employee, LeaveType $type, int $year, float $days): LeaveBalance
+    public function reserve(Employee $employee, LeaveType $type, int $year, float $days, bool $allowOver = false): LeaveBalance
     {
-        return $this->move($employee, $type, $year, function (LeaveBalance $balance) use ($type, $days) {
+        return $this->move($employee, $type, $year, function (LeaveBalance $balance) use ($type, $days, $allowOver) {
             if ($days <= 0) {
+                return;
+            }
+
+            // A request may ask for more than is left; HR decides on
+            // approval whether the extra is given or becomes loss of pay.
+            if ($allowOver && (bool) $type->is_paid) {
+                $balance->pending = round((float) $balance->pending + $days, 2);
+
                 return;
             }
 

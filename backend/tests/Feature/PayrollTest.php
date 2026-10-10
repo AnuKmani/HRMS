@@ -566,6 +566,33 @@ class PayrollTest extends TestCase
             ->json('data');
     }
 
+    public function test_days_hr_made_loss_of_pay_on_an_approved_leave_are_cut_from_salary(): void
+    {
+        [, $employee] = $this->makeSeat('Employee', ['salary' => 30000]);
+        $this->become($this->makeSeat('Payroll Admin', ['salary' => 50000])[0]);
+
+        // Six days of paid sick leave, approved with the two beyond the
+        // balance as loss of pay.
+        LeaveRequest::create([
+            'employee_id' => $employee->id,
+            'leave_type_id' => LeaveType::query()->where('code', 'SL')->value('id'),
+            'start_date' => '2026-09-07',
+            'end_date' => '2026-09-12',
+            'requested_days' => 6,
+            'over_balance_days' => 2,
+            'excess_decision' => LeaveRequest::EXCESS_LOP,
+            'status' => LeaveRequest::STATUS_APPROVED,
+            'lop_days' => 2,
+            'approved_at' => now(),
+        ]);
+
+        $this->process();
+        $row = $this->row($employee->id);
+
+        $this->assertSame(2.0, (float) $row['lop_days']);
+        $this->assertSame(2000.0, (float) $row['lop_amount']);
+    }
+
     /**
      * The row as the API renders it, so assertions are on what a screen
      * would actually be handed.

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../leave/presentation/my_leave_card.dart';
+
 import 'package:go_router/go_router.dart';
 
 import '../../core/config/app_config.dart';
@@ -407,6 +410,12 @@ class HomeScreen extends ConsumerWidget {
                 // rule.
                 if (user?.employee != null)
                   AttendanceQuickCard(
+                    onOpen: (path) => _open(context, ref, path),
+                  ),
+                // What leave is left this year, for anyone who has leave.
+                if (user?.employee != null && scope.canViewLeaveBalances)
+                  MyLeaveCard(
+                    employeeId: user!.employee!.id,
                     onOpen: (path) => _open(context, ref, path),
                   ),
                 // Visits a Project Manager planned for this engineer.

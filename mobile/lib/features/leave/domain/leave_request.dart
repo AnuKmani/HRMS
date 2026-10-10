@@ -43,6 +43,9 @@ class LeaveRequest {
     required this.certificate,
     this.lop,
     this.approvalChain,
+    this.overBalanceDays = 0,
+    this.availableAtSubmit,
+    this.excessDecision,
   });
 
   static const statusDraft = 'draft';
@@ -86,6 +89,23 @@ class LeaveRequest {
   /// each pulling six approval records is the textbook N+1, and a list has
   /// nowhere to put them anyway. The detail screen asks for it.
   final List<ApprovalStep>? approvalChain;
+
+  /// Days asked beyond what was left at submit; HR decides on approval.
+  final double overBalanceDays;
+  final double? availableAtSubmit;
+
+  /// `grant` (HR gave the extra days) or `lop` (they became loss of pay).
+  final String? excessDecision;
+
+  /// Is the step waiting now the last one — the one that decides the extra?
+  bool get isAtLastStep {
+    final chain = approvalChain;
+    if (chain == null || chain.isEmpty) return true;
+    final pending = chain.where((s) => s.isPending);
+    if (pending.isEmpty) return false;
+    final last = chain.map((s) => s.sequence).reduce((a, b) => a > b ? a : b);
+    return pending.first.sequence == last;
+  }
 
   bool get isDraft => status == statusDraft;
 
@@ -185,6 +205,9 @@ class LeaveRequest {
               .map(ApprovalStep.fromJson)
               .toList()
         : null,
+    overBalanceDays: (json['over_balance_days'] as num?)?.toDouble() ?? 0,
+    availableAtSubmit: (json['available_days_at_submit'] as num?)?.toDouble(),
+    excessDecision: json['excess_decision'] as String?,
   );
 }
 

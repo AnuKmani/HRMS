@@ -67,8 +67,19 @@ class ApiLeaveRepository implements LeaveRepository {
       _transition(id, 'submit', remarks);
 
   @override
-  Future<LeaveRequest> approve(int id, {String remarks = ''}) async =>
-      _transition(id, 'approve', remarks);
+  Future<LeaveRequest> approve(
+    int id, {
+    String remarks = '',
+    String? excess,
+  }) async => _one(
+    (await _client.post(
+      '$_path/$id/approve',
+      body: <String, Object?>{
+        if (remarks.isNotEmpty) 'remarks': remarks,
+        'excess': ?excess,
+      },
+    )).data,
+  );
 
   @override
   Future<LeaveRequest> reject(int id, {String remarks = ''}) async =>

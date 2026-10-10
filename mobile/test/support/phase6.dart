@@ -92,7 +92,7 @@ class ScriptedLeave extends Scripted<LeaveRequest> implements LeaveRepository {
       _transition('submit', id, remarks);
 
   @override
-  Future<LeaveRequest> approve(int id, {String remarks = ''}) =>
+  Future<LeaveRequest> approve(int id, {String remarks = '', String? excess}) =>
       _transition('approve', id, remarks);
 
   @override

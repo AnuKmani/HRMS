@@ -158,11 +158,24 @@ final class LeaveRequestService
             // Reserve BEFORE the chain is materialised: if there is not
             // enough balance, nobody should have been asked to approve
             // anything.
+            $available = $this->balances->available(
+                $leave->employee,
+                $leave->leaveType,
+                (int) $leave->start_date->year,
+            );
+            $leave->available_days_at_submit = $available;
+            $leave->over_balance_days = $available === null
+                ? 0
+                : max(0, round((float) $leave->requested_days - $available, 2));
+
+            // Asking for more than is left is allowed; the approvers see by
+            // how much and HR decides on the extra days.
             $this->balances->reserve(
                 $leave->employee,
                 $leave->leaveType,
                 (int) $leave->start_date->year,
                 (float) $leave->requested_days,
+                allowOver: true,
             );
 
             $outcome = $this->approvals->start(
@@ -171,7 +184,8 @@ final class LeaveRequestService
             );
 
             if ($outcome === ApprovalWorkflowService::COMPLETED) {
-                $this->finaliseApproval($leave, null);
+                // Nobody to ask: extra days cannot be given by nobody.
+                $this->finaliseApproval($leave, null, LeaveRequest::EXCESS_LOP);
             } else {
                 $leave->save();
             }
@@ -189,17 +203,27 @@ final class LeaveRequestService
     /**
      * The current approver signs the current step off.
      */
-    public function approve(User $user, LeaveRequest $leave, string $remarks = ''): LeaveRequest
+    public function approve(User $user, LeaveRequest $leave, string $remarks = '', ?string $excess = null): LeaveRequest
     {
         if ($leave->status !== LeaveRequest::STATUS_PENDING) {
             abort(409, 'This request is not waiting for approval.');
         }
 
-        return DB::transaction(function () use ($user, $leave, $remarks) {
+        return DB::transaction(function () use ($user, $leave, $remarks, $excess) {
             $outcome = $this->approvals->approve($leave, $user, $remarks);
 
             if ($outcome === ApprovalWorkflowService::COMPLETED) {
-                $this->finaliseApproval($leave, $user);
+                // The final say on days beyond the balance is HR's, here.
+                if ((float) $leave->over_balance_days > 0 && $excess === null) {
+                    throw ValidationException::withMessages([
+                        'excess' => sprintf(
+                            'This request is %s day(s) more than the balance. Choose: give the extra days, or make them loss of pay.',
+                            rtrim(rtrim(number_format((float) $leave->over_balance_days, 2), '0'), '.'),
+                        ),
+                    ]);
+                }
+
+                $this->finaliseApproval($leave, $user, $excess);
             } else {
                 $leave->save();
                 // Moved on to the next link: tell whoever holds it now.
@@ -349,6 +373,12 @@ final class LeaveRequestService
 
             $leave->loadMissing(['leaveType', 'employee']);
 
+            // Days an approval already made loss of pay never reached the
+            // balance, so only the rest goes back.
+            $giveBack = $wasApproved
+                ? round((float) $leave->requested_days - (float) $leave->lop_days, 2)
+                : (float) $leave->requested_days;
+
             $leave->status = LeaveRequest::STATUS_LOP;
             $leave->lop_days = $leave->requested_days;
             $leave->lop_reason = $reason;
@@ -368,7 +398,7 @@ final class LeaveRequestService
                 $leave->employee,
                 $leave->leaveType,
                 (int) $leave->start_date->year,
-                (float) $leave->requested_days,
+                $giveBack,
                 $wasApproved,
             );
 
@@ -385,23 +415,43 @@ final class LeaveRequestService
      *
      * @param  User|null  $approver  null when nobody had to be asked
      */
-    private function finaliseApproval(LeaveRequest $leave, ?User $approver): void
+    private function finaliseApproval(LeaveRequest $leave, ?User $approver, ?string $excess = null): void
     {
         $leave->status = LeaveRequest::STATUS_APPROVED;
         $leave->approved_at = now();
         $leave->approved_by = $approver?->id;
         $leave->current_approval_step = null;
-        $leave->save();
 
         $leave->loadMissing(['leaveType', 'employee']);
+        $year = (int) $leave->start_date->year;
+        $over = (float) $leave->over_balance_days;
+        $paidDays = (float) $leave->requested_days;
+
+        if ($over > 0) {
+            $leave->excess_decision = $excess ?? LeaveRequest::EXCESS_LOP;
+
+            if ($leave->excess_decision === LeaveRequest::EXCESS_GRANT) {
+                // HR gives this one employee the extra days.
+                $this->balances->grantExtra($leave->employee, $leave->leaveType, $year, $over);
+            } else {
+                // The extra days are unpaid: off the salary, not off the pot.
+                $paidDays = round($paidDays - $over, 2);
+                $this->balances->release($leave->employee, $leave->leaveType, $year, $over);
+                $leave->lop_days = $over;
+                $leave->lop_reason = 'Days beyond the leave balance';
+                $leave->lop_applied_at = now();
+            }
+        }
+
+        $leave->save();
 
         // Pending becomes used in one movement. `release()` is not involved:
         // the days were always going somewhere, they were only waiting.
         $this->balances->commit(
             $leave->employee,
             $leave->leaveType,
-            (int) $leave->start_date->year,
-            (float) $leave->requested_days,
+            $year,
+            $paidDays,
         );
 
         // Raised here rather than in approve(): this method is the one place

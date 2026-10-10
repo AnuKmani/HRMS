@@ -56,6 +56,9 @@ class LeaveRequestResource extends JsonResource
             'end_date' => $resource->end_date?->toDateString(),
             'summary' => $resource->summary(),
             'requested_days' => (float) $resource->requested_days,
+            'over_balance_days' => (float) $resource->over_balance_days,
+            'available_days_at_submit' => $resource->available_days_at_submit !== null ? (float) $resource->available_days_at_submit : null,
+            'excess_decision' => $resource->excess_decision,
             'reason' => $resource->reason,
 
             'status' => $resource->status,

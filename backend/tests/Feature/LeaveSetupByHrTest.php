@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\Employee;
 use App\Models\LeaveBalance;
 use App\Models\LeaveType;
+use App\Models\User;
 use App\Services\Leave\LeaveBalanceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Feature\Concerns\BuildsLeaveStack;
@@ -80,5 +82,71 @@ class LeaveSetupByHrTest extends TestCase
         // HR gives this one person extra days.
         $this->putJson("/api/v1/leave-balances/{$annual['id']}", ['adjustment' => 5])->assertOk();
         $this->assertEquals($annual['remaining'] + 5, LeaveBalance::query()->find($annual['id'])->remaining());
+    }
+
+    /**
+     * Sick leave set to 4 days; Arunlal asks for 6. He can submit; HR
+     * decides the extra 2 on the final approval.
+     *
+     * @return array{0: User, 1: Employee, 2: int}
+     */
+    private function overBalanceRequest(): array
+    {
+        LeaveType::query()->where('code', 'SL')->update(['entitlement_days' => 4, 'requires_document' => false, 'maximum_days_per_request' => 0]);
+        [$hr] = $this->makeSeat('HR Admin');
+        [, $employee] = $this->signInAs('Employee');
+
+        // Mon 2026-10-12 .. Mon 2026-10-19: six working days.
+        $draft = $this->draftLeave($this->leaveTypeId('SL'), '2026-10-12', '2026-10-19');
+        $leave = $this->postJson("/api/v1/leave/{$draft['id']}/submit")->assertOk()->json('data');
+
+        $this->assertEquals(4, $leave['available_days_at_submit']);
+        $this->assertEquals($leave['requested_days'] - 4, $leave['over_balance_days']);
+
+        return [$hr, $employee, $draft['id']];
+    }
+
+    private function sickBalance(int $employeeId): LeaveBalance
+    {
+        return LeaveBalance::query()->with('leaveType')
+            ->where('employee_id', $employeeId)
+            ->where('leave_type_id', $this->leaveTypeId('SL'))
+            ->firstOrFail();
+    }
+
+    public function test_more_than_the_balance_can_be_submitted_and_hr_gives_the_extra_days(): void
+    {
+        [$hr, $employee, $id] = $this->overBalanceRequest();
+
+        $this->become($hr);
+        // HR must choose.
+        $this->postJson("/api/v1/leave/{$id}/approve")->assertUnprocessable()->assertJsonValidationErrors('excess');
+
+        $data = $this->postJson("/api/v1/leave/{$id}/approve", ['excess' => 'grant'])->assertOk()->json('data');
+        $this->assertSame('approved', $data['status']);
+        $this->assertSame('grant', $data['excess_decision']);
+        $this->assertNull($data['lop']);
+
+        $balance = $this->sickBalance($employee->id);
+        $this->assertEquals((float) $data['requested_days'], (float) $balance->used);
+        $this->assertEquals(0.0, $balance->remaining());
+        $this->assertEquals($data['over_balance_days'], (float) $balance->adjustment);
+    }
+
+    public function test_hr_makes_the_extra_days_loss_of_pay(): void
+    {
+        [$hr, $employee, $id] = $this->overBalanceRequest();
+
+        $this->become($hr);
+        $data = $this->postJson("/api/v1/leave/{$id}/approve", ['excess' => 'lop'])->assertOk()->json('data');
+
+        $this->assertSame('approved', $data['status']);
+        $this->assertSame('lop', $data['excess_decision']);
+        $this->assertEquals($data['over_balance_days'], $data['lop']['days']);
+
+        $balance = $this->sickBalance($employee->id);
+        $this->assertEquals(4.0, (float) $balance->used);
+        $this->assertEquals(0.0, (float) $balance->pending);
+        $this->assertEquals(0, (int) $balance->adjustment);
     }
 }

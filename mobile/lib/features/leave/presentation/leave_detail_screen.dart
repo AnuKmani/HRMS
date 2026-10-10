@@ -322,6 +322,10 @@ class _LeaveDetailScreenState extends ConsumerState<LeaveDetailScreen> {
             ),
           _header(request),
           const SizedBox(height: 16),
+          if (request.overBalanceDays > 0) ...[
+            _overBalance(request),
+            const SizedBox(height: 16),
+          ],
           _certificate(request),
           const SizedBox(height: 16),
           if (request.lop != null) ...[
@@ -587,6 +591,41 @@ class _LeaveDetailScreenState extends ConsumerState<LeaveDetailScreen> {
     return StatusTone.neutral;
   }
 
+  static String _n(double v) =>
+      v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+
+  /// Asked for more days than were left.
+  Widget _overBalance(LeaveRequest request) {
+    final decided = switch (request.excessDecision) {
+      'grant' => 'HR gave the extra ${_n(request.overBalanceDays)} day(s).',
+      'lop' =>
+        '${_n(request.overBalanceDays)} day(s) are loss of pay (salary cut).',
+      _ => 'HR decides on approval: give the extra days, or loss of pay.',
+    };
+    return Card(
+      key: const ValueKey('over-balance'),
+      margin: EdgeInsets.zero,
+      color: Colors.orange.shade50,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange.shade800),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                '${_n(request.requestedDays)} day(s) asked · '
+                '${_n(request.availableAtSubmit ?? 0)} available · '
+                '${_n(request.overBalanceDays)} over the balance.\n$decided',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _actions(LeaveRequest request, PermissionScope scope) {
     final canApprove =
         scope.canApproveLeave && request.isAwaitingDecision && !_working;
@@ -621,7 +660,52 @@ class _LeaveDetailScreenState extends ConsumerState<LeaveDetailScreen> {
             label: const Text('Edit'),
           ),
         ],
-        if (canApprove) ...[
+        if (canApprove &&
+            request.overBalanceDays > 0 &&
+            request.isAtLastStep) ...[
+          FilledButton.icon(
+            key: const ValueKey('approve-grant'),
+            onPressed: () => _act(
+              (repository, remarks) => repository.approve(
+                request.id,
+                remarks: remarks,
+                excess: 'grant',
+              ),
+              title:
+                  'Approve and give ${_n(request.overBalanceDays)} extra day(s)?',
+              message:
+                  'All days are paid. The extra days are added to this '
+                  "employee's balance only.",
+              confirmLabel: 'Approve',
+            ),
+            icon: const Icon(Icons.card_giftcard_outlined),
+            label: Text(
+              'Approve · give ${_n(request.overBalanceDays)} extra day(s)',
+            ),
+          ),
+          const SizedBox(height: 8),
+          FilledButton.tonalIcon(
+            key: const ValueKey('approve-lop'),
+            onPressed: () => _act(
+              (repository, remarks) => repository.approve(
+                request.id,
+                remarks: remarks,
+                excess: 'lop',
+              ),
+              title:
+                  'Approve with ${_n(request.overBalanceDays)} day(s) loss of pay?',
+              message:
+                  'The days within the balance are paid. The extra days '
+                  'are cut from salary.',
+              confirmLabel: 'Approve',
+            ),
+            icon: const Icon(Icons.money_off_outlined),
+            label: Text(
+              'Approve · ${_n(request.overBalanceDays)} day(s) loss of pay',
+            ),
+          ),
+          const SizedBox(height: 8),
+        ] else if (canApprove) ...[
           FilledButton.icon(
             key: const ValueKey('approve-leave'),
             onPressed: () => _act(

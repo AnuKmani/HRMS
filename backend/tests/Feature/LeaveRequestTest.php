@@ -170,27 +170,20 @@ class LeaveRequestTest extends TestCase
         $this->assertSame(12.0, $balance->remaining());
     }
 
-    public function test_a_request_beyond_the_entitlement_is_refused_on_submit(): void
+    public function test_a_request_beyond_the_entitlement_is_submitted_and_flagged(): void
     {
-        $supervisor = $this->makeSeat('Site Supervisor');
-        [, $employee] = $this->signInAs('Employee', ['reporting_manager_id' => $supervisor[1]->id]);
+        $this->signInAs('Employee');
 
         // 13 working days against Annual Leave's 12 — inside the type's
-        // 15-day per-request cap, so the cap is not what refuses it.
+        // 15-day per-request cap. It goes through, marked one day over, for
+        // HR to decide on approval.
         $draft = $this->draftLeave($this->leaveTypeId('AL'), '2026-09-28', '2026-10-14');
         $this->assertRequestedDays($draft, 13.0);
 
         $this->postJson("/api/v1/leave/{$draft['id']}/submit")
-            ->assertUnprocessable()
-            ->assertJsonValidationErrors('leave_type_id');
-
-        // The transaction rolled back: still a draft, no balance row, no
-        // half-open approval chain.
-        $leave = LeaveRequest::query()->findOrFail($draft['id']);
-        $this->assertSame('draft', $leave->status);
-        $this->assertNull($leave->submitted_at);
-        $this->assertFalse(LeaveBalance::query()->where('employee_id', $employee->id)->exists());
-        $this->assertSame(0, ApprovalRecord::query()->where('subject_id', $leave->id)->count());
+            ->assertOk()
+            ->assertJsonPath('data.status', 'pending')
+            ->assertJsonPath('data.over_balance_days', 1);
     }
 
     public function test_unpaid_leave_is_never_refused_for_balance_reasons(): void

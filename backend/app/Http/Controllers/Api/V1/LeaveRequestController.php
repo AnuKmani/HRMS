@@ -166,6 +166,7 @@ class LeaveRequestController extends Controller
             $request->user(),
             $leaveRequest,
             (string) $request->input('remarks', ''),
+            $request->input('excess'),
         );
 
         return ApiResponse::success('Leave request approved.', new LeaveRequestResource($leave));

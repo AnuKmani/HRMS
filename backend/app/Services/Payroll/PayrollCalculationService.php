@@ -569,9 +569,14 @@ final class PayrollCalculationService
             ->where('end_date', '>=', $periodStart)
             ->with('leaveType');
 
+        // Whole requests turned into loss of pay, and approved paid ones
+        // whose days beyond the balance HR made loss of pay.
         $lopRows = (clone $base)
-            ->where('status', LeaveRequest::STATUS_LOP)
-            ->get();
+            ->where(fn ($q) => $q->where('status', LeaveRequest::STATUS_LOP)
+                ->orWhere(fn ($w) => $w->where('status', LeaveRequest::STATUS_APPROVED)->where('lop_days', '>', 0)))
+            ->get()
+            ->filter(fn (LeaveRequest $leave) => $leave->status === LeaveRequest::STATUS_LOP || $leave->isPaid())
+            ->values();
 
         $unpaidRows = (clone $base)
             ->where('status', LeaveRequest::STATUS_APPROVED)

@@ -20,6 +20,11 @@ class LeaveRequest extends Model
 {
     use HasFactory;
 
+    /** HR's answer for days asked beyond the balance. */
+    public const EXCESS_GRANT = 'grant';
+
+    public const EXCESS_LOP = 'lop';
+
     public const STATUS_DRAFT = 'draft';
 
     public const STATUS_PENDING = 'pending';
@@ -82,6 +87,9 @@ class LeaveRequest extends Model
         'certificate_due_at',
         'certificate_checked_at',
         'lop_days',
+        'over_balance_days',
+        'available_days_at_submit',
+        'excess_decision',
         'lop_reason',
         'lop_applied_at',
     ];
@@ -100,6 +108,8 @@ class LeaveRequest extends Model
         'certificate_checked_at' => 'datetime',
         'certificate_size' => 'integer',
         'lop_days' => 'decimal:2',
+        'over_balance_days' => 'decimal:2',
+        'available_days_at_submit' => 'decimal:2',
         'lop_applied_at' => 'datetime',
     ];
 
