@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Release builds are HTTPS-only unless built for a LAN test server with
+         HRMS_LAN_HTTP=true in the environment (plain http to
+         `php artisan serve` on the office Wi-Fi). A production build never
+         sets it. See the `lanHttp` placeholder in app/build.gradle.kts. -->
+    <application android:usesCleartextTraffic="${lanHttp}"/>
+</manifest>

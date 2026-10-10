@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/data/page_result.dart';
@@ -56,12 +57,37 @@ final notificationPollIntervalProvider = Provider<Duration?>(
 );
 
 class UnreadNotificationsController extends AsyncNotifier<int> {
+  Timer? _timer;
+
   @override
   Future<int> build() {
     final every = ref.watch(notificationPollIntervalProvider);
     if (every != null) {
-      final timer = Timer.periodic(every, (_) => _poll());
-      ref.onDispose(timer.cancel);
+      void start() {
+        _timer?.cancel();
+        _timer = Timer.periodic(every, (_) => _poll());
+      }
+
+      void stop() {
+        _timer?.cancel();
+        _timer = null;
+      }
+
+      start();
+      // Only while the app is on screen: in the background the phone is
+      // left alone (no network, no battery), and coming back checks once
+      // straight away so the bell is current.
+      final lifecycle = AppLifecycleListener(
+        onResume: () {
+          _poll();
+          start();
+        },
+        onHide: stop,
+      );
+      ref.onDispose(() {
+        stop();
+        lifecycle.dispose();
+      });
     }
     return ref.watch(notificationsRepositoryProvider).unreadCount();
   }

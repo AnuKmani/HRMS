@@ -461,4 +461,27 @@ void main() {
     await advance(tester);
     expect(find.text('Notification 4'), findsOneWidget);
   });
+
+  testWidgets('the bell rests while the app is in the background', (
+    tester,
+  ) async {
+    await pumpApp(tester);
+
+    // The app goes to the background; a notification arrives meanwhile.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    notifications.rows.add(notificationRow(5));
+    await tester.pump(const Duration(seconds: 65));
+    await advance(tester);
+    expect(find.byKey(const ValueKey('new-notification-alert')), findsNothing);
+
+    // Back on screen: one check straight away.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await advance(tester);
+    expect(
+      find.byKey(const ValueKey('new-notification-alert')),
+      findsOneWidget,
+    );
+  });
 }

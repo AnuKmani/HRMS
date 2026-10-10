@@ -54,6 +54,9 @@ android {
 
     buildTypes {
         release {
+            // Plain http to a LAN test server only when explicitly asked for
+            // (HRMS_LAN_HTTP=true); otherwise release stays HTTPS-only.
+            manifestPlaceholders["lanHttp"] = (System.getenv("HRMS_LAN_HTTP") == "true").toString()
             // If key.properties exists, use the release signing config.
             // Otherwise fall back to debug (allows `flutter run --release` without setup).
             signingConfig = signingConfigs.getByName(
