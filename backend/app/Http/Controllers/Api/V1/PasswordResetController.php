@@ -120,6 +120,7 @@ class PasswordResetController extends Controller
                 $resetUser->forceFill([
                     'password' => Hash::make($password),
                     'must_change_password' => false,
+                    'temporary_password' => null,
                 ])->save();
 
                 // The premise of a reset is that the old password may be

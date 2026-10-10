@@ -45,6 +45,7 @@ class User extends Authenticatable
         'password',
         'status',
         'must_change_password',
+        'temporary_password',
     ];
 
     /**
@@ -55,6 +56,7 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'temporary_password',
     ];
 
     /**
@@ -68,6 +70,8 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'must_change_password' => 'boolean',
+            // The HR-issued password, readable by HR until replaced.
+            'temporary_password' => 'encrypted',
         ];
     }
 

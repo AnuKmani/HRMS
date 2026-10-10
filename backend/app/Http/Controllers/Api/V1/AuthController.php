@@ -138,6 +138,7 @@ class AuthController extends Controller
             'password' => $request->validated('password'),
             // Their own password now, not the one HR handed out.
             'must_change_password' => false,
+            'temporary_password' => null,
         ]);
 
         // Only possible when the caller presented a bearer token. If the

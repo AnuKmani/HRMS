@@ -201,4 +201,44 @@ void main() {
     expect(find.text('Password reset'), findsOneWidget);
     expect(find.text('temp99'), findsOneWidget);
   });
+
+  testWidgets('HR sees the username and the temporary password, hidden '
+      'until asked', (tester) async {
+    await pumpCard(
+      tester,
+      permissions: const ['users.view', 'users.manage'],
+      existing: const EmployeeAccount(
+        email: 'new.joiner@example.com',
+        roles: ['Employee'],
+        temporaryPassword: '12345',
+        mustChangePassword: true,
+      ),
+    );
+
+    expect(find.text('new.joiner@example.com'), findsOneWidget);
+    expect(find.text('12345'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('account-password-toggle')));
+    await tester.pump();
+    expect(find.text('12345'), findsOneWidget);
+  });
+
+  testWidgets('once the employee changed it, nobody can read it', (
+    tester,
+  ) async {
+    await pumpCard(
+      tester,
+      permissions: const ['users.view', 'users.manage'],
+      existing: const EmployeeAccount(
+        email: 'new.joiner@example.com',
+        roles: ['Employee'],
+      ),
+    );
+
+    expect(find.byKey(const ValueKey('account-password-own')), findsOneWidget);
+    expect(find.byKey(const ValueKey('account-password-toggle')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('account-reset-password')),
+      findsOneWidget,
+    );
+  });
 }

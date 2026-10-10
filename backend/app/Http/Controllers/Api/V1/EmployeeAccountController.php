@@ -39,11 +39,25 @@ class EmployeeAccountController extends Controller
 {
     private const SUPER_ADMIN = 'Super Admin';
 
-    public function show(Employee $employee): JsonResponse
+    public function show(Request $request, Employee $employee): JsonResponse
     {
         $user = $employee->user;
 
-        return ApiResponse::success('Employee account.', $user === null ? null : $this->describe($user));
+        if ($user === null) {
+            return ApiResponse::success('Employee account.', null);
+        }
+
+        $body = $this->describe($user);
+
+        // The password HR handed out, while it is still the one in use —
+        // only to someone who may manage logins, and every reading is
+        // recorded. Once the employee chooses their own it is gone.
+        if ($request->user()->can('users.manage') && $user->must_change_password && $user->temporary_password !== null) {
+            $body['temporary_password'] = $user->temporary_password;
+            $this->audit($user, 'user.temporary_password_viewed', [], []);
+        }
+
+        return ApiResponse::success('Employee account.', $body);
     }
 
     public function store(Request $request, Employee $employee): JsonResponse
@@ -82,6 +96,7 @@ class EmployeeAccountController extends Controller
                 'password' => Hash::make($password),
                 'status' => User::STATUS_ACTIVE,
                 'must_change_password' => true,
+                'temporary_password' => $this->readable($password),
             ]);
             $user->syncRoles([$data['role']]);
 
@@ -160,6 +175,7 @@ class EmployeeAccountController extends Controller
             $user->forceFill([
                 'password' => Hash::make($password),
                 'must_change_password' => true,
+                'temporary_password' => $this->readable($password),
             ])->save();
             $user->tokens()->delete();
             $this->audit($user, 'user.password_reset_by_hr', [], []);
@@ -168,6 +184,16 @@ class EmployeeAccountController extends Controller
         return ApiResponse::success('Password reset.', $this->describe($user->refresh()) + [
             'temporary_password' => $password,
         ]);
+    }
+
+    /**
+     * The handed-out password to keep for HR to read back, or null on a
+     * server with no APP_KEY (nothing can be encrypted there, so nothing is
+     * kept — the login itself still works, and Reset password still does).
+     */
+    private function readable(string $password): ?string
+    {
+        return filled(config('app.key')) ? $password : null;
     }
 
     private function guardSuperAdmin(Request $request, string $role): void
@@ -187,6 +213,8 @@ class EmployeeAccountController extends Controller
             'email' => $user->email,
             'status' => $user->status,
             'roles' => $user->getRoleNames()->sort()->values()->all(),
+            // true while the HR-issued password is still the one in use.
+            'must_change_password' => (bool) $user->must_change_password,
         ];
     }
 

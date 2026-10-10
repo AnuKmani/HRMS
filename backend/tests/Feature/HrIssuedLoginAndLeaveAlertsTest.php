@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\SettingsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
 use Tests\Feature\Concerns\BuildsLeaveStack;
@@ -201,5 +202,70 @@ class HrIssuedLoginAndLeaveAlertsTest extends TestCase
         $this->postJson("/api/v1/leave/{$leave['id']}/submit")->assertOk();
 
         Queue::assertNotPushed(SendNotificationEmail::class);
+    }
+
+    public function test_hr_reads_the_temporary_password_until_the_employee_replaces_it(): void
+    {
+        [$hr, $employee] = $this->hrCreatesLogin('12345');
+
+        // On the employee's profile: username and the password HR gave out.
+        $this->become($hr);
+        $this->getJson("/api/v1/employees/{$employee->id}/account")
+            ->assertOk()
+            ->assertJsonPath('data.email', 'meera@example.test')
+            ->assertJsonPath('data.must_change_password', true)
+            ->assertJsonPath('data.temporary_password', '12345');
+
+        // Kept encrypted, never as plain text in the database.
+        $raw = DB::table('users')->where('id', $employee->user_id)->value('temporary_password');
+        $this->assertNotNull($raw);
+        $this->assertStringNotContainsString('12345', $raw);
+
+        // The employee chooses their own password: HR can no longer read it.
+        $token = $this->signIn('meera@example.test', '12345');
+        $this->withToken($token)->postJson('/api/v1/auth/change-password', [
+            'current_password' => '12345',
+            'password' => 'MyOwnPass9',
+            'password_confirmation' => 'MyOwnPass9',
+        ])->assertOk();
+
+        Auth::forgetGuards();
+        $this->app['auth']->forgetGuards();
+        $this->withoutToken();
+        $this->become($hr);
+        $body = $this->getJson("/api/v1/employees/{$employee->id}/account")->assertOk()->json('data');
+        $this->assertFalse($body['must_change_password']);
+        $this->assertArrayNotHasKey('temporary_password', $body);
+        $this->assertNull(DB::table('users')->where('id', $employee->user_id)->value('temporary_password'));
+
+        // A reset hands out a new readable one again.
+        $this->postJson("/api/v1/employees/{$employee->id}/account/reset-password", ['password' => 'temp77'])->assertOk();
+        $this->getJson("/api/v1/employees/{$employee->id}/account")
+            ->assertJsonPath('data.temporary_password', 'temp77');
+    }
+
+    public function test_the_temporary_password_never_reaches_the_employees_own_profile_payload(): void
+    {
+        [, $employee] = $this->hrCreatesLogin('12345');
+
+        $token = $this->signIn('meera@example.test', '12345');
+        $me = $this->withToken($token)->getJson('/api/v1/auth/me')->assertOk()->json('data');
+
+        $this->assertArrayNotHasKey('temporary_password', $me);
+        $this->assertStringNotContainsString('12345', json_encode($me));
+    }
+
+    public function test_a_server_without_an_app_key_still_creates_the_login(): void
+    {
+        config(['app.key' => '']);
+
+        $this->signInAs('HR Admin');
+        $employee = Employee::factory()->create(['email' => 'nokey@example.test']);
+
+        $this->postJson("/api/v1/employees/{$employee->id}/account", ['role' => 'Employee', 'password' => '12345'])
+            ->assertCreated()
+            ->assertJsonPath('data.temporary_password', '12345');
+
+        $this->assertNull(DB::table('users')->where('email', 'nokey@example.test')->value('temporary_password'));
     }
 }

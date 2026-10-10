@@ -12,13 +12,19 @@ class EmployeeAccount {
     required this.email,
     required this.roles,
     this.temporaryPassword,
+    this.mustChangePassword = false,
   });
 
+  /// The username the employee signs in with.
   final String email;
   final List<String> roles;
 
-  /// Present only in the response that created the login — shown once.
+  /// The password HR handed out, readable by HR only while the employee
+  /// has not yet replaced it with their own.
   final String? temporaryPassword;
+
+  /// True until the employee chooses their own password.
+  final bool mustChangePassword;
 
   factory EmployeeAccount.fromJson(Map<String, dynamic> json) =>
       EmployeeAccount(
@@ -28,6 +34,7 @@ class EmployeeAccount {
             if (role is String) role,
         ],
         temporaryPassword: json['temporary_password'] as String?,
+        mustChangePassword: json['must_change_password'] == true,
       );
 }
 
@@ -264,6 +271,7 @@ class _EmployeeAccountCardState extends ConsumerState<EmployeeAccountCard> {
       if (!mounted) return;
       setState(() => _saving = false);
       await _showPassword(account, title: 'Password reset');
+      await _load();
     } on ApiException catch (failure) {
       if (!mounted) return;
       setState(() => _saving = false);
@@ -362,6 +370,11 @@ class _EmployeeAccountCardState extends ConsumerState<EmployeeAccountCard> {
     ),
   );
 
+  void _copy(String text, String done) {
+    Clipboard.setData(ClipboardData(text: text));
+    _snack(done);
+  }
+
   void _snack(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -416,17 +429,36 @@ class _EmployeeAccountCardState extends ConsumerState<EmployeeAccountCard> {
         ),
       );
     } else {
-      body = ListTile(
-        key: const ValueKey('account-existing'),
-        leading: const Icon(Icons.verified_user_outlined),
-        title: Text(account.email),
-        subtitle: Wrap(
-          spacing: 6,
-          children: [
-            for (final role in account.roles)
-              Chip(label: Text(role), visualDensity: VisualDensity.compact),
-          ],
-        ),
+      body = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ListTile(
+            key: const ValueKey('account-existing'),
+            leading: const Icon(Icons.verified_user_outlined),
+            title: const Text('Username'),
+            subtitle: SelectableText(
+              account.email,
+              key: const ValueKey('account-username'),
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            trailing: IconButton(
+              tooltip: 'Copy username',
+              icon: const Icon(Icons.copy, size: 20),
+              onPressed: () => _copy(account.email, 'Username copied.'),
+            ),
+          ),
+          _PasswordRow(account: account, onCopy: _copy),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Wrap(
+              spacing: 6,
+              children: [
+                for (final role in account.roles)
+                  Chip(label: Text(role), visualDensity: VisualDensity.compact),
+              ],
+            ),
+          ),
+        ],
       );
     }
 
@@ -552,6 +584,84 @@ class _PasswordDialogState extends State<_PasswordDialog> {
           child: Text(widget.go),
         ),
       ],
+    );
+  }
+}
+
+/// "Password: 12345 (temporary)" while HR's password is still in use;
+/// "Changed by the employee" once it is not — nobody can read that one.
+class _PasswordRow extends StatefulWidget {
+  const _PasswordRow({required this.account, required this.onCopy});
+
+  final EmployeeAccount account;
+  final void Function(String text, String done) onCopy;
+
+  @override
+  State<_PasswordRow> createState() => _PasswordRowState();
+}
+
+class _PasswordRowState extends State<_PasswordRow> {
+  bool _shown = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final password = widget.account.temporaryPassword;
+
+    if (!widget.account.mustChangePassword) {
+      return const ListTile(
+        key: ValueKey('account-password-own'),
+        leading: Icon(Icons.lock_outline),
+        title: Text('Password'),
+        subtitle: Text(
+          'Changed by the employee — only they know it. If they forget '
+          'it, use Reset password.',
+        ),
+      );
+    }
+
+    if (password == null) {
+      return const ListTile(
+        key: ValueKey('account-password-unknown'),
+        leading: Icon(Icons.lock_clock_outlined),
+        title: Text('Password'),
+        subtitle: Text(
+          'Temporary password not changed yet. Use Reset password to '
+          'issue a new one.',
+        ),
+      );
+    }
+
+    return ListTile(
+      key: const ValueKey('account-password-temporary'),
+      leading: const Icon(Icons.key),
+      title: const Text('Password (temporary)'),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _shown ? password : '••••••',
+            key: const ValueKey('account-password-value'),
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+          ),
+          const Text('Not changed by the employee yet.'),
+        ],
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            key: const ValueKey('account-password-toggle'),
+            tooltip: _shown ? 'Hide password' : 'Show password',
+            icon: Icon(_shown ? Icons.visibility_off : Icons.visibility),
+            onPressed: () => setState(() => _shown = !_shown),
+          ),
+          IconButton(
+            tooltip: 'Copy password',
+            icon: const Icon(Icons.copy, size: 20),
+            onPressed: () => widget.onCopy(password, 'Password copied.'),
+          ),
+        ],
+      ),
     );
   }
 }
