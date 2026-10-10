@@ -20,6 +20,9 @@ import '../notifications/presentation/notifications_controller.dart';
 /// `permission:departments.view` whether or not the tile was drawn, so
 /// arriving at the URL by hand gets the API's 403 and an honest message
 /// rather than data.
+/// The account menu's Sign out entry — not a route.
+const _signOut = 'sign-out';
+
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
@@ -318,7 +321,9 @@ class HomeScreen extends ConsumerWidget {
                 tooltip: 'Account',
                 iconColor: Colors.white,
                 icon: const Icon(Icons.account_circle_outlined),
-                onSelected: (path) => _open(context, ref, path),
+                onSelected: (path) => path == _signOut
+                    ? ref.read(authControllerProvider.notifier).logout()
+                    : _open(context, ref, path),
                 itemBuilder: (context) => const [
                   PopupMenuItem(
                     key: ValueKey('change-password'),
@@ -334,6 +339,15 @@ class HomeScreen extends ConsumerWidget {
                     child: ListTile(
                       leading: Icon(Icons.devices_outlined),
                       title: Text('Signed-in devices'),
+                    ),
+                  ),
+                  PopupMenuDivider(),
+                  PopupMenuItem(
+                    key: ValueKey('menu-sign-out'),
+                    value: _signOut,
+                    child: ListTile(
+                      leading: Icon(Icons.logout, color: Colors.red),
+                      title: Text('Sign out'),
                     ),
                   ),
                 ],
@@ -405,6 +419,22 @@ class HomeScreen extends ConsumerWidget {
                         ),
                       ),
                     ],
+                // Plainly labelled, at the end of the page, for whoever did
+                // not spot the icon in the header.
+                Padding(
+                  padding: const EdgeInsets.only(top: 16),
+                  child: OutlinedButton.icon(
+                    key: const ValueKey('dashboard-sign-out'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red.shade700,
+                      minimumSize: const Size.fromHeight(48),
+                    ),
+                    icon: const Icon(Icons.logout),
+                    label: const Text('Sign out'),
+                    onPressed: () =>
+                        ref.read(authControllerProvider.notifier).logout(),
+                  ),
+                ),
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(

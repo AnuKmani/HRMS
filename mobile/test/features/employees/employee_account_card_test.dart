@@ -215,7 +215,11 @@ void main() {
       ),
     );
 
-    expect(find.text('new.joiner@example.com'), findsOneWidget);
+    // The username is plain, visible text — not an empty selectable field.
+    final username = tester.widget<Text>(
+      find.byKey(const ValueKey('account-username')),
+    );
+    expect(username.data, 'new.joiner@example.com');
     expect(find.text('12345'), findsNothing);
     await tester.tap(find.byKey(const ValueKey('account-password-toggle')));
     await tester.pump();

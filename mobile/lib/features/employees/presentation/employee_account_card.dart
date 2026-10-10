@@ -324,17 +324,19 @@ class _EmployeeAccountCardState extends ConsumerState<EmployeeAccountCard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Give these to the employee. The password is shown only now.',
+            'Give these to the employee. You can also see the password on '
+            'this profile until they change it.',
           ),
           const SizedBox(height: 12),
-          const Text('Email'),
-          SelectableText(
+          const Text('Username (email)'),
+          Text(
             account.email,
-            style: const TextStyle(fontWeight: FontWeight.w700),
+            key: const ValueKey('created-username'),
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
           ),
           const SizedBox(height: 8),
           const Text('Temporary password'),
-          SelectableText(
+          Text(
             account.temporaryPassword ?? '',
             key: const ValueKey('temporary-password'),
             style: const TextStyle(
@@ -436,10 +438,14 @@ class _EmployeeAccountCardState extends ConsumerState<EmployeeAccountCard> {
             key: const ValueKey('account-existing'),
             leading: const Icon(Icons.verified_user_outlined),
             title: const Text('Username'),
-            subtitle: SelectableText(
-              account.email,
+            subtitle: Text(
+              account.email.isEmpty ? '—' : account.email,
               key: const ValueKey('account-username'),
-              style: const TextStyle(fontWeight: FontWeight.w700),
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 16,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
             ),
             trailing: IconButton(
               tooltip: 'Copy username',

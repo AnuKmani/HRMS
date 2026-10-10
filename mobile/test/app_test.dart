@@ -178,6 +178,38 @@ void main() {
       expect(repository.logoutCalls, 1);
     });
 
+    testWidgets('Sign out is also in the account menu, labelled', (
+      tester,
+    ) async {
+      tokenStore.value = 'stored-token';
+      await pumpApp(tester);
+
+      await tester.tap(find.byKey(const ValueKey('account-menu')));
+      await advance(tester);
+      await tester.tap(find.byKey(const ValueKey('menu-sign-out')));
+      await advance(tester);
+
+      expect(find.byType(LoginScreen), findsOneWidget);
+      expect(repository.logoutCalls, 1);
+    });
+
+    testWidgets('and as a button at the end of the dashboard', (tester) async {
+      tester.view.physicalSize = const Size(1080, 4000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      tokenStore.value = 'stored-token';
+      await pumpApp(tester);
+
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('dashboard-sign-out')),
+      );
+      await tester.tap(find.byKey(const ValueKey('dashboard-sign-out')));
+      await advance(tester);
+
+      expect(find.byType(LoginScreen), findsOneWidget);
+      expect(repository.logoutCalls, 1);
+    });
+
     testWidgets('a token revoked elsewhere returns the user to the form', (
       tester,
     ) async {
