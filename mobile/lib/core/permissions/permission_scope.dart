@@ -127,6 +127,12 @@ class PermissionScope {
 
   bool get canManageProjects => can('projects.manage');
 
+  /// Progress only — the Sales view (also held by the site roles).
+  bool get canViewProjectProgress => can('projects.progress.view');
+
+  /// Marks payment milestones requested / paid.
+  bool get canManageBilling => can('projects.billing.manage');
+
   /* ---------------------------------------------------------- sites */
 
   bool get canViewSites => can('sites.view');

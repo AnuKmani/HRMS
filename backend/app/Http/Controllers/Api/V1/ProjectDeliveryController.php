@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ProjectMilestoneResource;
 use App\Http\Responses\ApiResponse;
+use App\Models\Employee;
 use App\Models\Project;
 use App\Models\ProjectDocument;
 use App\Models\ProjectMember;
@@ -157,6 +158,27 @@ class ProjectDeliveryController extends Controller
         $this->projects->replaceTeam($project, $data['site_engineer_ids'], $data['site_supervisor_ids']);
 
         return ApiResponse::success('Team updated.', $this->team($project));
+    }
+
+    /** Who can be put on a project team: everyone who writes daily reports. */
+    public function teamCandidates(): JsonResponse
+    {
+        $userIds = User::permission('daily_site_reports.create')->where('status', User::STATUS_ACTIVE)->pluck('id');
+
+        $items = Employee::query()
+            ->whereIn('user_id', $userIds)
+            ->where('employment_status', Employee::STATUS_ACTIVE)
+            ->with('user.roles')
+            ->get()
+            ->sortBy(fn (Employee $e) => $e->full_name)
+            ->values()
+            ->map(fn (Employee $e) => [
+                'id' => $e->id,
+                'name' => $e->full_name,
+                'role' => $e->user?->roles->pluck('name')->first(),
+            ]);
+
+        return ApiResponse::success('People who can join a project team.', ['items' => $items]);
     }
 
     // ---- Stages and progress -------------------------------------------

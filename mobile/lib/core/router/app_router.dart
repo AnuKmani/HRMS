@@ -45,6 +45,7 @@ import '../../features/payroll/presentation/payroll_list_screen.dart';
 import '../../features/payroll/presentation/salary_slips_screen.dart';
 import '../../features/projects/presentation/project_detail_screen.dart';
 import '../../features/projects/presentation/project_form_screen.dart';
+import '../../features/projects/presentation/project_progress_screens.dart';
 import '../../features/projects/presentation/projects_list_screen.dart';
 import '../../features/salary_certificates/presentation/salary_certificate_detail_screen.dart';
 import '../../features/salary_certificates/presentation/salary_certificate_form_screen.dart';
@@ -292,6 +293,15 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/projects/:id/edit',
         builder: (context, state) => ProjectFormScreen(projectId: idOf(state)),
+      ),
+      GoRoute(
+        path: '/project-progress',
+        builder: (context, state) => const ProjectProgressListScreen(),
+      ),
+      GoRoute(
+        path: '/project-progress/:id',
+        builder: (context, state) =>
+            ProjectProgressDetailScreen(projectId: idOf(state)),
       ),
 
       /* ---------------------------------------------------------- sites */

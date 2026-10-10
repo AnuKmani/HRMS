@@ -6,6 +6,8 @@ import '../../../core/permissions/permission_scope.dart';
 import '../../../core/presentation/form_controls.dart';
 import '../../../core/presentation/paged_list_view.dart';
 import '../domain/project.dart';
+import '../domain/project_delivery.dart';
+import 'project_delivery_sections.dart';
 import 'projects_controller.dart';
 
 final _projectStatuses = [
@@ -78,7 +80,7 @@ class _ProjectsList extends ConsumerWidget {
             : project.upcomingEvents.first;
         return ListTile(
           key: ValueKey('project-${project.id}'),
-          isThreeLine: next != null,
+          isThreeLine: true,
           title: Text(project.name),
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -87,6 +89,26 @@ class _ProjectsList extends ConsumerWidget {
                 project.projectManagerName == null
                     ? project.code
                     : '${project.code} · PM: ${project.projectManagerName}',
+              ),
+              Padding(
+                key: ValueKey('project-progress-${project.id}'),
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: LinearProgressIndicator(
+                        value: (project.progressPercent / 100).clamp(0, 1),
+                        minHeight: 6,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(pct(project.progressPercent)),
+                    if (project.behindSchedule) ...[
+                      const SizedBox(width: 6),
+                      const BehindChip(),
+                    ],
+                  ],
+                ),
               ),
               if (next != null)
                 Row(

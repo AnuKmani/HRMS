@@ -4,6 +4,9 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../projects/data/project_delivery_api.dart';
+import '../../projects/domain/project_delivery.dart';
+
 import '../../../core/router/return_navigation.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/permissions/permission_scope.dart';
@@ -67,6 +70,40 @@ class _DailySiteReportFormScreenState
   int? _siteId;
   String? _siteName;
   int? _projectId;
+
+  /// The project's stages and how far this report says each has got.
+  List<ProjectStage> _stages = const [];
+  final Map<int, TextEditingController> _stagePercent = {};
+  int? _stagesFor;
+
+  Future<void> _loadStages(int? projectId, [Map<int, double>? reported]) async {
+    if (projectId == null || projectId == _stagesFor) return;
+    _stagesFor = projectId;
+    try {
+      final stages = await ref
+          .read(projectDeliveryApiProvider)
+          .stages(projectId);
+      if (!mounted || _stagesFor != projectId) return;
+      for (final c in _stagePercent.values) {
+        c.dispose();
+      }
+      _stagePercent.clear();
+      setState(() {
+        _stages = stages;
+        for (final stage in stages) {
+          final value = reported?[stage.id] ?? stage.percentComplete;
+          _stagePercent[stage.id] = TextEditingController(
+            text: value == value.roundToDouble()
+                ? value.toStringAsFixed(0)
+                : '$value',
+          );
+        }
+      });
+    } catch (_) {
+      // No stages to show — the report still works without them.
+      if (mounted) setState(() => _stages = const []);
+    }
+  }
 
   /// One row is `columns.length` controllers, in column order. Owned here
   /// — and disposed here — because only this screen knows when the whole
@@ -184,6 +221,9 @@ class _DailySiteReportFormScreenState
 
   @override
   void dispose() {
+    for (final c in _stagePercent.values) {
+      c.dispose();
+    }
     _draftTimer?.cancel();
     _date.dispose();
     _workPlanned.dispose();
@@ -251,6 +291,9 @@ class _DailySiteReportFormScreenState
       _disposeRows(_manpower);
       _disposeRows(_materials);
       _disposeRows(_equipment);
+
+      _stagesFor = null;
+      _loadStages(report.projectId, report.stageProgress);
 
       setState(() {
         _alreadySubmitted = report.isSubmitted;
@@ -347,6 +390,7 @@ class _DailySiteReportFormScreenState
       _projectId = draft['project_id'] is int
           ? draft['project_id'] as int
           : null;
+      _loadStages(_projectId);
       _date.text = draft['report_date'] as String? ?? '';
       _workPlanned.text = draft['work_planned'] as String? ?? '';
       _workCompleted.text = draft['work_completed'] as String? ?? '';
@@ -686,6 +730,16 @@ class _DailySiteReportFormScreenState
     'delays': _delays.text.trim(),
     'issues': _issues.text.trim(),
     'remarks': _remarks.text.trim(),
+    if (_stages.isNotEmpty)
+      'stage_progress': [
+        for (final stage in _stages)
+          if (double.tryParse(_stagePercent[stage.id]?.text.trim() ?? '')
+              case final value?)
+            <String, Object?>{
+              'stage_id': stage.id,
+              'percent': value.clamp(0, 100),
+            },
+      ],
   };
 
   Future<int?> _persist() async {
@@ -874,6 +928,7 @@ class _DailySiteReportFormScreenState
                             _siteName = name;
                             _projectId = project;
                           });
+                          _loadStages(project);
                           _scheduleDraftSave();
                         },
                       ),
@@ -1059,6 +1114,58 @@ class _DailySiteReportFormScreenState
                       ),
                     ],
                   ),
+                  if (_stages.isNotEmpty)
+                    _section(
+                      title: 'Progress by stage',
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.only(bottom: 8),
+                          child: Text(
+                            'How far each stage has got, in % (0–100). '
+                            'When you submit, the project progress updates.',
+                          ),
+                        ),
+                        for (final stage in _stages)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Row(
+                              children: [
+                                Expanded(child: Text(stage.name)),
+                                SizedBox(
+                                  width: 90,
+                                  child: TextField(
+                                    key: ValueKey('stage-percent-${stage.id}'),
+                                    controller: _stagePercent[stage.id],
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                          decimal: true,
+                                        ),
+                                    textAlign: TextAlign.end,
+                                    decoration: const InputDecoration(
+                                      suffixText: '%',
+                                      isDense: true,
+                                    ),
+                                    onChanged: (_) => _scheduleDraftSave(),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        if (_errors.keys.any(
+                          (k) => k.startsWith('stage_progress'),
+                        ))
+                          Text(
+                            _errors.entries
+                                .firstWhere(
+                                  (e) => e.key.startsWith('stage_progress'),
+                                )
+                                .value,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                          ),
+                      ],
+                    ),
                   _section(
                     title: 'Evidence',
                     children: [

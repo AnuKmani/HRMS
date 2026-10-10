@@ -120,6 +120,14 @@ class HomeScreen extends ConsumerWidget {
           '/projects',
           'Work in flight',
         ),
+      // Sales: progress and payment milestones, nothing else of projects.
+      if (scope.canViewProjectProgress && !scope.canViewProjects)
+        _Module(
+          'Project progress',
+          Icons.insights_outlined,
+          '/project-progress',
+          'Progress and payments due',
+        ),
       if (scope.canViewSites)
         _Module(
           'Sites',

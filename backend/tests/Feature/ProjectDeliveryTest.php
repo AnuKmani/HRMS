@@ -54,6 +54,10 @@ class ProjectDeliveryTest extends TestCase
         [, $engineer] = $this->makeSeat('Site Engineer');
         [, $supervisor] = $this->makeSeat('Site Supervisor');
 
+        $candidates = array_column($this->getJson('/api/v1/project-team-candidates')->assertOk()->json('data.items'), 'id');
+        $this->assertContains($engineer->id, $candidates);
+        $this->assertContains($supervisor->id, $candidates);
+
         $data = $this->postJson('/api/v1/projects', $this->payload([
             'site_engineer_ids' => [$engineer->id],
             'site_supervisor_ids' => [$supervisor->id],

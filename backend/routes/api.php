@@ -260,6 +260,7 @@ Route::prefix('v1')->group(function () {
                 Route::post('projects/{project}/subcontractors/{subcontractor}/document', 'uploadSubcontractorDocument')->whereNumber('subcontractor');
                 Route::get('projects/{project}/subcontractors/{subcontractor}/document', 'downloadSubcontractorDocument')->whereNumber('subcontractor');
                 Route::put('projects/{project}/team', 'updateTeam');
+                Route::get('project-team-candidates', 'teamCandidates');
                 Route::put('projects/{project}/stages', 'replaceStages');
                 Route::post('projects/{project}/stages/{stage}/correct', 'correctStage')->whereNumber('stage');
                 Route::post('projects/{project}/milestones', 'storeMilestone');

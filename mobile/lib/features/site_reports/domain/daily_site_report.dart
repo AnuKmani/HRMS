@@ -46,6 +46,7 @@ class DailySiteReport {
     this.materials = const <MaterialRow>[],
     this.equipment = const <EquipmentRow>[],
     this.photos = const <SiteReportPhoto>[],
+    this.stageProgress = const <int, double>{},
   });
 
   static const statusDraft = 'draft';
@@ -96,6 +97,9 @@ class DailySiteReport {
   final List<MaterialRow> materials;
   final List<EquipmentRow> equipment;
   final List<SiteReportPhoto> photos;
+
+  /// Stage id → % complete as this report states it.
+  final Map<int, double> stageProgress;
 
   bool get isSubmitted => status == statusSubmitted;
 
@@ -154,6 +158,13 @@ class DailySiteReport {
         materials: _rows(json['materials'], MaterialRow.fromJson),
         equipment: _rows(json['equipment'], EquipmentRow.fromJson),
         photos: photosFrom(json['photos']),
+        stageProgress: <int, double>{
+          if (json['stage_progress'] is List)
+            for (final row in json['stage_progress'] as List)
+              if (row is Map && row['stage_id'] is num && row['percent'] is num)
+                (row['stage_id'] as num).toInt(): (row['percent'] as num)
+                    .toDouble(),
+        },
       );
 }
 

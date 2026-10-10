@@ -1,3 +1,5 @@
+import 'project_delivery.dart';
+
 /// A project.
 ///
 /// Matches `ProjectResource`. The two `*_count` values are only in the
@@ -22,7 +24,37 @@ class Project {
     this.createdAt,
     this.upcomingEvents = const <ProjectEvent>[],
     this.events = const <ProjectEvent>[],
+    this.mainContractor,
+    this.progressPercent = 0,
+    this.expectedPercent,
+    this.behindSchedule = false,
+    this.createdByName,
+    this.canEdit,
+    this.stages = const <ProjectStage>[],
+    this.subcontractors = const <Subcontractor>[],
+    this.team = const <TeamMember>[],
+    this.milestones = const <PaymentMilestone>[],
+    this.documents = const <ProjectDocumentFile>[],
   });
+
+  final String? mainContractor;
+  final double progressPercent;
+
+  /// Where progress should be by today from the dates; null without dates.
+  final double? expectedPercent;
+  final bool behindSchedule;
+
+  /// The Project Manager who added it — the only one who edits it.
+  final String? createdByName;
+
+  /// From the server; null when an older server did not say.
+  final bool? canEdit;
+
+  final List<ProjectStage> stages;
+  final List<Subcontractor> subcontractors;
+  final List<TeamMember> team;
+  final List<PaymentMilestone> milestones;
+  final List<ProjectDocumentFile> documents;
 
   final int id;
   final String name;
@@ -97,6 +129,17 @@ class Project {
     createdAt: json['created_at'] as String?,
     upcomingEvents: ProjectEvent.listFrom(json['upcoming_events']),
     events: ProjectEvent.listFrom(json['events']),
+    mainContractor: json['main_contractor'] as String?,
+    progressPercent: (json['progress_percent'] as num?)?.toDouble() ?? 0,
+    expectedPercent: (json['expected_percent'] as num?)?.toDouble(),
+    behindSchedule: json['behind_schedule'] == true,
+    createdByName: json['created_by_name'] as String?,
+    canEdit: json['can_edit'] is bool ? json['can_edit'] as bool : null,
+    stages: listOf(json['stages'], ProjectStage.fromJson),
+    subcontractors: listOf(json['subcontractors'], Subcontractor.fromJson),
+    team: listOf(json['team'], TeamMember.fromJson),
+    milestones: listOf(json['payment_milestones'], PaymentMilestone.fromJson),
+    documents: listOf(json['documents'], ProjectDocumentFile.fromJson),
   );
 }
 

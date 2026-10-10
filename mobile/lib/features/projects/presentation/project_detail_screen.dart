@@ -7,6 +7,7 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/permissions/permission_scope.dart';
 import '../data/api_projects_repository.dart';
 import '../domain/project.dart';
+import 'project_delivery_sections.dart';
 
 /// One project, in full.
 class ProjectDetailScreen extends ConsumerStatefulWidget {
@@ -153,6 +154,10 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
 
     final theme = Theme.of(context);
 
+    // Every Project Manager sees every project; only the one who added it
+    // (or Super Admin) changes it. The server says which.
+    final canEdit = project.canEdit ?? scope.canManageProjects;
+
     return Scaffold(
       appBar: AppBar(title: Text(project.name)),
       body: RefreshIndicator(
@@ -171,6 +176,7 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
             _section('Details', [
               _row('Code', project.code),
               _row('Client', project.client),
+              _row('Main contractor', project.mainContractor),
               _row('Location', project.location),
               _row(
                 'Status',
@@ -180,6 +186,7 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
               _row('Start date', project.startDate),
               _row('End date', project.endDate),
               _row('Project manager', project.projectManagerName),
+              _row('Added by', project.createdByName),
               _row(
                 'Sites',
                 project.sitesCount?.toString(),
@@ -191,7 +198,12 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
                 key: const ValueKey('detail-employees-count'),
               ),
             ]),
-            _eventsSection(project, canManage: scope.canManageProjects),
+            ProjectDeliverySections(
+              project: project,
+              canEdit: canEdit,
+              onChanged: _load,
+            ),
+            _eventsSection(project, canManage: canEdit),
             if (project.description != null &&
                 project.description!.trim().isNotEmpty)
               _section('Description', [
@@ -204,7 +216,16 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
                 ),
               ]),
             const SizedBox(height: 8),
-            if (scope.canManageProjects)
+            if (scope.canManageProjects && !canEdit)
+              Padding(
+                key: const ValueKey('detail-read-only'),
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Text(
+                  'Only ${project.createdByName ?? 'the Project Manager who added this project'} can change it.',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+            if (canEdit)
               Row(
                 children: [
                   Expanded(

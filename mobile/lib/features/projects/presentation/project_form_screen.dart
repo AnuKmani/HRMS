@@ -8,7 +8,10 @@ import '../../../core/presentation/form_controls.dart';
 import '../../../core/presentation/remote_picker.dart';
 import '../../employees/presentation/employees_controller.dart';
 import '../data/api_projects_repository.dart';
+import '../data/project_delivery_api.dart';
 import '../domain/project.dart';
+import '../domain/project_delivery.dart';
+import 'project_delivery_sections.dart';
 import '../domain/projects_repository.dart';
 
 final _projectStatuses = [
@@ -29,6 +32,11 @@ class _ProjectFormScreenState extends ConsumerState<ProjectFormScreen> {
   late final TextEditingController _name;
   late final TextEditingController _code;
   late final TextEditingController _client;
+  late final TextEditingController _mainContractor;
+
+  /// Only on create — afterwards they are managed on the project page.
+  final List<Map<String, Object?>> _subcontractors = [];
+  List<TeamMember> _team = const [];
   late final TextEditingController _location;
   late final TextEditingController _description;
   late final TextEditingController _startDate;
@@ -55,6 +63,7 @@ class _ProjectFormScreenState extends ConsumerState<ProjectFormScreen> {
     _name = TextEditingController();
     _code = TextEditingController();
     _client = TextEditingController();
+    _mainContractor = TextEditingController();
     _location = TextEditingController();
     _description = TextEditingController();
     _startDate = TextEditingController();
@@ -71,6 +80,7 @@ class _ProjectFormScreenState extends ConsumerState<ProjectFormScreen> {
     _name.dispose();
     _code.dispose();
     _client.dispose();
+    _mainContractor.dispose();
     _location.dispose();
     _description.dispose();
     _startDate.dispose();
@@ -89,6 +99,7 @@ class _ProjectFormScreenState extends ConsumerState<ProjectFormScreen> {
         _name.text = project.name;
         _code.text = project.code;
         _client.text = project.client ?? '';
+        _mainContractor.text = project.mainContractor ?? '';
         _location.text = project.location ?? '';
         _description.text = project.description ?? '';
         _startDate.text = project.startDate ?? '';
@@ -119,7 +130,9 @@ class _ProjectFormScreenState extends ConsumerState<ProjectFormScreen> {
 
     final local = <String, String>{};
     if (_name.text.trim().isEmpty) local['name'] = 'This field is required.';
-    if (_code.text.trim().isEmpty) local['code'] = 'This field is required.';
+    if (!_isCreate && _code.text.trim().isEmpty) {
+      local['code'] = 'This field is required.';
+    }
 
     if (local.isNotEmpty) {
       setState(() => _errors = local);
@@ -135,8 +148,20 @@ class _ProjectFormScreenState extends ConsumerState<ProjectFormScreen> {
 
     final body = <String, Object?>{
       'name': _name.text.trim(),
-      'code': _code.text.trim(),
+      'code': blank(_code.text),
       'client': blank(_client.text),
+      'main_contractor': blank(_mainContractor.text),
+      if (_isCreate) ...{
+        'subcontractors': _subcontractors,
+        'site_engineer_ids': [
+          for (final m in _team)
+            if (m.role == 'site_engineer') m.employeeId,
+        ],
+        'site_supervisor_ids': [
+          for (final m in _team)
+            if (m.role == 'site_supervisor') m.employeeId,
+        ],
+      },
       'location': blank(_location.text),
       'description': blank(_description.text),
       'project_manager_id': _projectManagerId,
@@ -168,11 +193,131 @@ class _ProjectFormScreenState extends ConsumerState<ProjectFormScreen> {
         _forbidden = failure.statusCode == 403;
         _errors = failure.errors;
       });
+
+      // Someone already added this project: say so plainly.
+      final duplicate = failure.errors['name'];
+      if (duplicate != null && duplicate.contains('already added')) {
+        await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            key: const ValueKey('duplicate-project'),
+            icon: const Icon(Icons.info_outline),
+            title: const Text('Project already added'),
+            content: Text(duplicate),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
     } catch (_) {
       if (!mounted) return;
 
       setState(() => _saving = false);
     }
+  }
+
+  /// Subcontractors and the site team, chosen while adding the project.
+  List<Widget> _createExtras(BuildContext context) {
+    final theme = Theme.of(context);
+    return [
+      const SizedBox(height: 8),
+      Text('Subcontractors', style: theme.textTheme.titleSmall),
+      for (var i = 0; i < _subcontractors.length; i++)
+        ListTile(
+          key: ValueKey('new-sub-$i'),
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.handyman_outlined),
+          title: Text('${_subcontractors[i]['name']}'),
+          subtitle: Text(
+            [
+              _subcontractors[i]['trade'],
+              _subcontractors[i]['contact_name'],
+              _subcontractors[i]['contact_phone'],
+            ].whereType<String>().join(' · '),
+          ),
+          trailing: IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () => setState(() => _subcontractors.removeAt(i)),
+          ),
+        ),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          key: const ValueKey('form-add-sub'),
+          icon: const Icon(Icons.add),
+          label: const Text('Add subcontractor'),
+          onPressed: _saving
+              ? null
+              : () async {
+                  final body = await showSubcontractorDialog(context);
+                  if (body != null) setState(() => _subcontractors.add(body));
+                },
+        ),
+      ),
+      const SizedBox(height: 8),
+      Text('Site team', style: theme.textTheme.titleSmall),
+      if (_team.isEmpty)
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 4),
+          child: Text('No site engineers or supervisors chosen yet.'),
+        ),
+      for (final m in _team)
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.engineering_outlined),
+          title: Text(m.name),
+          subtitle: Text(m.roleLabel),
+        ),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          key: const ValueKey('form-team'),
+          icon: const Icon(Icons.group_add_outlined),
+          label: const Text('Choose site engineers & supervisors'),
+          onPressed: _saving ? null : _chooseTeam,
+        ),
+      ),
+      const Padding(
+        padding: EdgeInsets.only(bottom: 8),
+        child: Text(
+          'Progress stages start from the standard template '
+          '(Mobilisation, Foundation, Structure, MEP, Finishing, Handover). '
+          'You can change them on the project page.',
+          style: TextStyle(fontSize: 12, color: Colors.grey),
+        ),
+      ),
+    ];
+  }
+
+  Future<void> _chooseTeam() async {
+    final api = ref.read(projectDeliveryApiProvider);
+    final candidates = await api.teamCandidates().catchError(
+      (_) => <TeamCandidate>[],
+    );
+    if (!mounted) return;
+    final result = await showTeamPicker(context, api, _team);
+    if (result == null) return;
+    final names = {for (final c in candidates) c.id: c.name};
+    setState(() {
+      _team = [
+        for (final id in result.$1)
+          TeamMember(
+            employeeId: id,
+            name: names[id] ?? '#$id',
+            role: 'site_engineer',
+          ),
+        for (final id in result.$2)
+          TeamMember(
+            employeeId: id,
+            name: names[id] ?? '#$id',
+            role: 'site_supervisor',
+          ),
+      ];
+    });
   }
 
   @override
@@ -201,12 +346,14 @@ class _ProjectFormScreenState extends ConsumerState<ProjectFormScreen> {
                     LabeledTextField(
                       label: 'Code',
                       controller: _code,
-                      isRequired: true,
+                      isRequired: !_isCreate,
                       enabled: !_saving,
                       textInputAction: TextInputAction.next,
                       errorText: _errors['code'],
-                      hint: 'RT-01',
-                      helper: 'Letters, numbers, dashes and underscores.',
+                      hint: _isCreate ? 'Automatic (PRJ-0001…)' : 'RT-01',
+                      helper: _isCreate
+                          ? 'Leave blank and a code is given automatically.'
+                          : 'Letters, numbers, dashes and underscores.',
                     ),
                     LabeledTextField(
                       label: 'Client',
@@ -214,6 +361,13 @@ class _ProjectFormScreenState extends ConsumerState<ProjectFormScreen> {
                       enabled: !_saving,
                       textInputAction: TextInputAction.next,
                       errorText: _errors['client'],
+                    ),
+                    LabeledTextField(
+                      label: 'Main contractor',
+                      controller: _mainContractor,
+                      enabled: !_saving,
+                      textInputAction: TextInputAction.next,
+                      errorText: _errors['main_contractor'],
                     ),
                     LabeledTextField(
                       label: 'Location',
@@ -267,6 +421,7 @@ class _ProjectFormScreenState extends ConsumerState<ProjectFormScreen> {
                           : (v) => setState(() => _status = v),
                       errorText: _errors['status'],
                     ),
+                    if (_isCreate) ..._createExtras(context),
                     const SizedBox(height: 8),
                     FilledButton(
                       key: const ValueKey('form-save'),
