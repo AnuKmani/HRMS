@@ -66,7 +66,7 @@ class SettingsTest extends TestCase
         // Phase 6: the deadline is configurable and defaults to two days.
         // A type's own `document_deadline_days` overrides it when set above
         // zero — see LeaveType::documentDeadlineDays().
-        $this->assertSame(2, $this->service()->int('leave.sick_certificate_deadline_days'));
+        $this->assertSame(1, $this->service()->int('leave.sick_certificate_deadline_days'));
 
         $this->assertIsArray($this->service()->json('working_hours.default'));
         $this->assertSame(8, $this->service()->json('working_hours.default')['daily_hours']);

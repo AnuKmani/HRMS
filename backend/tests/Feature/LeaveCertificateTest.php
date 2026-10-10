@@ -244,7 +244,7 @@ class LeaveCertificateTest extends TestCase
         // The chain is closed, not left waiting on somebody for a request
         // that can never be approved again.
         $this->assertSame(
-            ['skipped', 'skipped', 'skipped'],
+            ['skipped', 'skipped'],
             ApprovalRecord::query()
                 ->where('subject_id', $id)
                 ->orderBy('sequence')

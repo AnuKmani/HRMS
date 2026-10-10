@@ -6,6 +6,8 @@ use App\Jobs\SendNotificationEmail;
 use App\Mail\NotificationMail;
 use App\Models\Employee;
 use App\Models\InAppNotification;
+use App\Models\Project;
+use App\Models\ProjectMember;
 use App\Models\Setting;
 use App\Models\User;
 use App\Services\SettingsService;
@@ -137,7 +139,8 @@ class HrIssuedLoginAndLeaveAlertsTest extends TestCase
 
         [$hr, $employee] = $this->hrCreatesLogin();
         $employee->user->forceFill(['must_change_password' => false])->save();
-        [$manager] = $this->makeSeat('Project Manager');
+        [$manager, $managerEmployee] = $this->makeSeat('Project Manager');
+        $this->onTeamOf($employee, $managerEmployee);
 
         // The employee applies.
         $this->become($employee->user);
@@ -171,7 +174,8 @@ class HrIssuedLoginAndLeaveAlertsTest extends TestCase
     {
         [, $employee] = $this->hrCreatesLogin();
         $employee->user->forceFill(['must_change_password' => false])->save();
-        [$manager] = $this->makeSeat('Project Manager');
+        [$manager, $managerEmployee] = $this->makeSeat('Project Manager');
+        $this->onTeamOf($employee, $managerEmployee);
 
         $this->become($employee->user);
         $leave = $this->draftLeave($this->leaveTypeId('AL'), '2026-10-05', '2026-10-06');
@@ -181,6 +185,13 @@ class HrIssuedLoginAndLeaveAlertsTest extends TestCase
         $this->postJson("/api/v1/leave/{$leave['id']}/reject", ['remarks' => 'Site handover that week'])->assertOk();
 
         $this->assertSame(1, $this->alerts($employee->user, 'leave.rejected'));
+    }
+
+    /** The employee works on a project this manager runs. */
+    private function onTeamOf(Employee $employee, Employee $manager): void
+    {
+        $project = Project::factory()->create(['project_manager_id' => $manager->id]);
+        ProjectMember::query()->create(['project_id' => $project->id, 'employee_id' => $employee->id, 'role' => 'site_engineer']);
     }
 
     private function alerts(User $user, string $type): int

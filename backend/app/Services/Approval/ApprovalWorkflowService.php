@@ -6,9 +6,12 @@ use App\Models\ApprovalRecord;
 use App\Models\ApprovalWorkflow;
 use App\Models\ApprovalWorkflowStep;
 use App\Models\Employee;
+use App\Models\EmployeeSiteAssignment;
 use App\Models\Expense;
 use App\Models\LeaveRequest;
 use App\Models\OvertimeRequest;
+use App\Models\Project;
+use App\Models\ProjectMember;
 use App\Models\User;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -121,9 +124,11 @@ final class ApprovalWorkflowService
                     // Resolved ONCE, here. A reorganisation next month must
                     // not re-route a request that is already in somebody's
                     // queue.
-                    'approver_employee_id' => $step->approver_type === ApprovalWorkflowStep::TYPE_REPORTING_MANAGER
-                        ? $employee->reporting_manager_id
-                        : null,
+                    'approver_employee_id' => match ($step->approver_type) {
+                        ApprovalWorkflowStep::TYPE_REPORTING_MANAGER => $employee->reporting_manager_id,
+                        ApprovalWorkflowStep::TYPE_PROJECT_MANAGER => $this->projectManagerOf($employee),
+                        default => null,
+                    },
                     'status' => ApprovalRecord::STATUS_WAITING,
                 ]);
             }
@@ -247,6 +252,49 @@ final class ApprovalWorkflowService
     /* ------------------------------------------------------------ internals */
 
     /**
+     * The Project Manager this employee works under, or null.
+     *
+     * In order: a project whose team they are on (the newest active one),
+     * the project of their active site posting, their primary project, and
+     * finally their reporting manager. Never themselves — a Project
+     * Manager's own leave skips this step and goes straight to HR.
+     */
+    public function projectManagerOf(Employee $employee): ?int
+    {
+        $live = ['planned', 'active', 'handing_over', 'on_hold'];
+
+        $candidates = [
+            ...Project::query()
+                ->whereIn('id', ProjectMember::query()->where('employee_id', $employee->id)->select('project_id'))
+                ->whereIn('status', $live)
+                ->whereNotNull('project_manager_id')
+                ->orderByDesc('id')
+                ->pluck('project_manager_id')
+                ->all(),
+            ...Project::query()
+                ->whereIn('id', EmployeeSiteAssignment::query()
+                    ->where('employee_id', $employee->id)
+                    ->where('status', EmployeeSiteAssignment::STATUS_ACTIVE)
+                    ->select('project_id'))
+                ->whereNotNull('project_manager_id')
+                ->pluck('project_manager_id')
+                ->all(),
+            $employee->primary_project_id !== null
+                ? Project::query()->whereKey($employee->primary_project_id)->value('project_manager_id')
+                : null,
+            $employee->reporting_manager_id,
+        ];
+
+        foreach ($candidates as $id) {
+            if ($id !== null && (int) $id !== (int) $employee->id) {
+                return (int) $id;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Find the first `waiting` step that can actually be answered, opening it
      * and skipping any ahead of it that cannot.
      */
@@ -365,7 +413,8 @@ final class ApprovalWorkflowService
     private function matches(ApprovalRecord $record, User $actor): bool
     {
         return match ($record->approver_type) {
-            ApprovalWorkflowStep::TYPE_REPORTING_MANAGER => $record->approver_employee_id !== null
+            ApprovalWorkflowStep::TYPE_REPORTING_MANAGER,
+            ApprovalWorkflowStep::TYPE_PROJECT_MANAGER => $record->approver_employee_id !== null
                 && $record->approver_employee_id === $actor->employee?->id,
             ApprovalWorkflowStep::TYPE_ROLE => $record->approver_role !== null
                 && $actor->hasRole($record->approver_role),
@@ -386,7 +435,8 @@ final class ApprovalWorkflowService
     private function isResolvable(ApprovalRecord $record, LeaveRequest|OvertimeRequest|Expense $subject): bool
     {
         return match ($record->approver_type) {
-            ApprovalWorkflowStep::TYPE_REPORTING_MANAGER => $record->approver_employee_id !== null,
+            ApprovalWorkflowStep::TYPE_REPORTING_MANAGER,
+            ApprovalWorkflowStep::TYPE_PROJECT_MANAGER => $record->approver_employee_id !== null,
             ApprovalWorkflowStep::TYPE_ROLE => $record->approver_role !== null
                 && Role::query()->where('name', $record->approver_role)->exists(),
             ApprovalWorkflowStep::TYPE_PERMISSION => $record->approver_permission !== null

@@ -27,8 +27,16 @@ class ApprovalWorkflowStep extends Model
     /** Anybody holding this permission, e.g. `leave.approve`. */
     public const TYPE_PERMISSION = 'permission';
 
+    /**
+     * The Project Manager running the requester's project — resolved at
+     * submit time from the project team, then the active site posting, then
+     * the primary project. Falls back to the reporting manager.
+     */
+    public const TYPE_PROJECT_MANAGER = 'project_manager';
+
     public const TYPES = [
         self::TYPE_REPORTING_MANAGER,
+        self::TYPE_PROJECT_MANAGER,
         self::TYPE_ROLE,
         self::TYPE_PERMISSION,
     ];
@@ -83,7 +91,7 @@ class ApprovalWorkflowStep extends Model
         return match ($this->approver_type) {
             self::TYPE_ROLE => $this->approver_role !== null && $this->approver_role !== '',
             self::TYPE_PERMISSION => $this->approver_permission !== null && $this->approver_permission !== '',
-            self::TYPE_REPORTING_MANAGER => true,
+            self::TYPE_REPORTING_MANAGER, self::TYPE_PROJECT_MANAGER => true,
             default => false,
         };
     }

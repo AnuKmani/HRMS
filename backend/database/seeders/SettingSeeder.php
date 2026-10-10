@@ -91,7 +91,8 @@ class SettingSeeder extends Seeder
             // with its own `document_deadline_days` overrides this — see
             // LeaveType::documentDeadlineDays().
             'key' => 'leave.sick_certificate_deadline_days',
-            'value' => '2',
+            // One day: the certificate is due the day after sick leave ends.
+            'value' => '1',
             'type' => 'integer',
             'group' => 'leave',
             'label' => 'Sick certificate deadline',

@@ -60,11 +60,13 @@ class ApprovalWorkflowSeeder extends Seeder
             'name' => 'Standard leave approval',
             'subject_type' => ApprovalWorkflow::SUBJECT_LEAVE,
             'is_default' => true,
-            'description' => 'Supervisor, then Project Manager, then HR.',
+            // The worker's own Project Manager (the one running their
+            // project), then HR confirms. A Project Manager's own leave has
+            // no one above them on a project, so it goes straight to HR.
+            'description' => 'Their Project Manager, then HR.',
             'steps' => [
-                ['sequence' => 1, 'name' => 'Supervisor', 'approver_type' => ApprovalWorkflowStep::TYPE_REPORTING_MANAGER],
-                ['sequence' => 2, 'name' => 'Project Manager', 'approver_type' => ApprovalWorkflowStep::TYPE_ROLE, 'approver_role' => 'Project Manager'],
-                ['sequence' => 3, 'name' => 'HR', 'approver_type' => ApprovalWorkflowStep::TYPE_ROLE, 'approver_role' => 'HR Admin'],
+                ['sequence' => 1, 'name' => 'Project Manager', 'approver_type' => ApprovalWorkflowStep::TYPE_PROJECT_MANAGER],
+                ['sequence' => 2, 'name' => 'HR', 'approver_type' => ApprovalWorkflowStep::TYPE_ROLE, 'approver_role' => 'HR Admin'],
             ],
         ],
         [

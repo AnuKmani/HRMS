@@ -8,6 +8,7 @@ use App\Models\LeaveBalance;
 use App\Models\LeaveRequest;
 use App\Models\LeaveType;
 use App\Models\Project;
+use App\Models\ProjectMember;
 use App\Models\Site;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Feature\Concerns\BuildsLeaveStack;
@@ -235,42 +236,39 @@ class LeaveRequestTest extends TestCase
 
     public function test_the_chain_walks_in_order_and_completes_at_the_last_step(): void
     {
-        $supervisor = $this->makeSeat('Site Supervisor');
         $manager = $this->makeSeat('Project Manager');
+        $otherManager = $this->makeSeat('Project Manager');
         $hr = $this->makeSeat('HR Admin');
-        [, $employee] = $this->signInAs('Employee', ['reporting_manager_id' => $supervisor[1]->id]);
+        [, $employee] = $this->signInAs('Site Engineer');
+
+        // The engineer is on the team of a project this manager runs.
+        $project = Project::factory()->create(['project_manager_id' => $manager[1]->id]);
+        ProjectMember::query()->create(['project_id' => $project->id, 'employee_id' => $employee->id, 'role' => 'site_engineer']);
 
         $leaveType = $this->leaveTypeId('AL');
         $draft = $this->draftLeave($leaveType, '2026-09-28', '2026-10-02');
 
-        // Step 1 opens on the requester's own line manager, resolved at
-        // submit time rather than re-read on every approval.
+        // Step 1 opens on their own Project Manager, resolved at submit.
         $this->postJson("/api/v1/leave/{$draft['id']}/submit")
             ->assertOk()
             ->assertJsonPath('data.status', 'pending')
             ->assertJsonPath('data.current_approval_step', 1);
 
         $chain = $this->getJson("/api/v1/leave/{$draft['id']}")->assertOk()->json('data.approval_chain');
-        $this->assertCount(3, $chain);
-        $this->assertSame(
-            ['reporting_manager', 'role', 'role'],
-            array_column($chain, 'approver_type'),
-        );
+        $this->assertSame(['project_manager', 'role'], array_column($chain, 'approver_type'));
+        $this->assertSame($manager[1]->id, $chain[0]['approver_employee_id']);
 
-        // Somebody who is NOT the current step may not act — the coarse
-        // permission is held, and it still fails.
+        // Neither HR (not yet its turn) nor another Project Manager may act.
         $this->become($hr[0]);
         $this->postJson("/api/v1/leave/{$draft['id']}/approve")->assertForbidden();
+        $this->become($otherManager[0]);
+        $this->postJson("/api/v1/leave/{$draft['id']}/approve")->assertForbidden();
 
-        $this->become($supervisor[0]);
+        $this->become($manager[0]);
+        $this->getJson("/api/v1/leave/{$draft['id']}")->assertOk();
         $this->postJson("/api/v1/leave/{$draft['id']}/approve")
             ->assertOk()
             ->assertJsonPath('data.current_approval_step', 2);
-
-        $this->become($manager[0]);
-        $this->postJson("/api/v1/leave/{$draft['id']}/approve")
-            ->assertOk()
-            ->assertJsonPath('data.current_approval_step', 3);
 
         $this->become($hr[0]);
         $this->postJson("/api/v1/leave/{$draft['id']}/approve")
@@ -286,7 +284,24 @@ class LeaveRequestTest extends TestCase
         $this->assertSame(5.0, (float) $balance->used);
 
         $chain = $this->getJson("/api/v1/leave/{$draft['id']}")->assertOk()->json('data.approval_chain');
-        $this->assertSame(['approved', 'approved', 'approved'], array_column($chain, 'status'));
+        $this->assertSame(['approved', 'approved'], array_column($chain, 'status'));
+    }
+
+    public function test_a_project_managers_own_leave_goes_straight_to_hr(): void
+    {
+        $hr = $this->makeSeat('HR Admin');
+        [, $pm] = $this->signInAs('Project Manager');
+        Project::factory()->create(['project_manager_id' => $pm->id]);
+
+        $draft = $this->draftLeave($this->leaveTypeId('AL'), '2026-09-28', '2026-10-02');
+        $this->postJson("/api/v1/leave/{$draft['id']}/submit")
+            ->assertOk()
+            ->assertJsonPath('data.current_approval_step', 2);
+
+        $this->become($hr[0]);
+        $this->postJson("/api/v1/leave/{$draft['id']}/approve")
+            ->assertOk()
+            ->assertJsonPath('data.status', 'approved');
     }
 
     public function test_a_workflow_can_be_configured_and_changes_who_approves(): void
@@ -381,7 +396,7 @@ class LeaveRequestTest extends TestCase
 
         // The chain is closed rather than left holding an open step.
         $this->assertSame(
-            ['skipped', 'skipped', 'skipped'],
+            ['skipped', 'skipped'],
             ApprovalRecord::query()
                 ->where('subject_id', $draft['id'])
                 ->orderBy('sequence')

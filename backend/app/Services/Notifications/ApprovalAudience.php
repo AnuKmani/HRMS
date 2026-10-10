@@ -86,7 +86,7 @@ class ApprovalAudience
     private function resolve(ApprovalRecord $record): array
     {
         $ids = match ($record->approver_type) {
-            'reporting_manager' => $record->approver_employee_id !== null
+            'reporting_manager', 'project_manager' => $record->approver_employee_id !== null
                 ? $this->employeeUserIds([(int) $record->approver_employee_id])
                 : [],
             'role' => $record->approver_role !== null

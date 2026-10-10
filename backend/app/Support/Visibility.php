@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\Allowance;
+use App\Models\ApprovalRecord;
 use App\Models\Asset;
 use App\Models\AssetAssignment;
 use App\Models\Attendance;
@@ -515,7 +516,25 @@ final class Visibility
             return $query;
         }
 
-        return $query->whereHas('employee', fn ($q) => self::employeesFor($q, $user));
+        // Plus anything whose approval chain names them — a Project Manager
+        // always sees the leave waiting on them, whoever's team it is.
+        return $query->where(function ($q) use ($user) {
+            $q->whereHas('employee', fn ($e) => self::employeesFor($e, $user))
+                ->orWhereIn('leave_requests.id', self::leaveIdsNaming($user));
+        });
+    }
+
+    /**
+     * Leave requests whose approval chain names this user as a person.
+     *
+     * @return Builder<ApprovalRecord>
+     */
+    private static function leaveIdsNaming(User $user)
+    {
+        return ApprovalRecord::query()
+            ->where('subject_type', ApprovalRecord::TYPE_LEAVE)
+            ->where('approver_employee_id', $user->employee?->id ?? 0)
+            ->select('subject_id');
     }
 
     /**
@@ -524,6 +543,14 @@ final class Visibility
     public static function leaveIsVisible(User $user, LeaveRequest $leave): bool
     {
         if ($user->employee?->id === $leave->employee_id) {
+            return true;
+        }
+
+        if ($user->employee !== null && ApprovalRecord::query()
+            ->where('subject_type', ApprovalRecord::TYPE_LEAVE)
+            ->where('subject_id', $leave->id)
+            ->where('approver_employee_id', $user->employee->id)
+            ->exists()) {
             return true;
         }
 

@@ -31,7 +31,7 @@ class ApprovalStep {
   final int sequence;
   final String name;
 
-  /// `reporting_manager`, `role` or `permission`.
+  /// `reporting_manager`, `project_manager`, `role` or `permission`.
   final String approverType;
   final String? approverRole;
   final String? approverPermission;
@@ -69,6 +69,8 @@ class ApprovalStep {
     if (approverPermission != null && approverPermission!.isNotEmpty) {
       return 'Anyone with ${approverPermission!}';
     }
+
+    if (approverType == 'project_manager') return 'Your Project Manager';
 
     return 'Your reporting manager';
   }

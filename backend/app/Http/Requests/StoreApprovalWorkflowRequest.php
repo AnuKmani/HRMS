@@ -142,7 +142,7 @@ class StoreApprovalWorkflowRequest extends FormRequest
                     continue;
                 }
 
-                if ($type === ApprovalWorkflowStep::TYPE_REPORTING_MANAGER) {
+                if (in_array($type, [ApprovalWorkflowStep::TYPE_REPORTING_MANAGER, ApprovalWorkflowStep::TYPE_PROJECT_MANAGER], true)) {
                     // A manager step has no role to name — but naming one
                     // anyway means somebody intended a different type, and
                     // the runtime would quietly ignore the field.
