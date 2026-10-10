@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
+import 'core/config/server_address.dart';
+import 'core/config/server_address_prefs.dart';
 import 'features/attendance/data/offline_queue.dart';
 
 Future<void> main() async {
@@ -24,6 +26,9 @@ Future<void> main() async {
       overrides: [
         offlineQueueStoreProvider.overrideWithValue(
           SharedPreferencesOfflineQueueStore(preferences),
+        ),
+        serverAddressStoreProvider.overrideWithValue(
+          PrefsServerAddressStore(preferences),
         ),
       ],
       child: const HrmsApp(),

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/config/server_address.dart';
+
 import 'auth_controller.dart';
 
 /// The sign-in form.
@@ -168,6 +170,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           : () => context.push('/forgot-password'),
                       child: const Text('Forgot password?'),
                     ),
+                    if (ref.watch(serverSettingAllowedProvider))
+                      _ServerAddressLine(enabled: !busy),
                   ],
                 ),
               ),
@@ -231,6 +235,149 @@ class _FeedbackBanner extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// "Server: 192.168.1.164:8000 · Change" — test builds only.
+class _ServerAddressLine extends ConsumerWidget {
+  const _ServerAddressLine({required this.enabled});
+
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final url = ref.watch(serverAddressProvider);
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.dns_outlined, size: 16, color: theme.hintColor),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              'Server: ${serverAddressLabel(url)}',
+              key: const ValueKey('server-address'),
+              style: theme.textTheme.bodySmall,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          TextButton(
+            key: const ValueKey('server-address-change'),
+            onPressed: enabled
+                ? () => showDialog<void>(
+                    context: context,
+                    builder: (context) => const _ServerAddressDialog(),
+                  )
+                : null,
+            child: const Text('Change'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ServerAddressDialog extends ConsumerStatefulWidget {
+  const _ServerAddressDialog();
+
+  @override
+  ConsumerState<_ServerAddressDialog> createState() =>
+      _ServerAddressDialogState();
+}
+
+class _ServerAddressDialogState extends ConsumerState<_ServerAddressDialog> {
+  late final TextEditingController _address = TextEditingController(
+    text: serverAddressLabel(ref.read(serverAddressProvider)),
+  );
+  bool _checking = false;
+  String? _result;
+  bool _ok = false;
+
+  @override
+  void dispose() {
+    _address.dispose();
+    super.dispose();
+  }
+
+  Future<void> _test() async {
+    if (_address.text.trim().isEmpty) return;
+    setState(() {
+      _checking = true;
+      _result = null;
+    });
+    final url = normaliseServerAddress(_address.text);
+    final problem = await ref.read(serverProbeProvider)(url);
+    if (!mounted) return;
+    setState(() {
+      _checking = false;
+      _ok = problem == null;
+      _result = problem ?? 'Connected to ${serverAddressLabel(url)}.';
+    });
+  }
+
+  Future<void> _save() async {
+    await ref.read(serverAddressProvider.notifier).set(_address.text);
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final result = _result;
+
+    return AlertDialog(
+      title: const Text('Server address'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'The laptop running the HRMS server. Use the IPv4 address from '
+            '`ipconfig`, e.g. 192.168.1.164',
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const ValueKey('server-address-field'),
+            controller: _address,
+            keyboardType: TextInputType.url,
+            decoration: const InputDecoration(
+              labelText: 'Address',
+              hintText: '192.168.1.164',
+            ),
+          ),
+          if (_checking)
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: LinearProgressIndicator(),
+            ),
+          if (result != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(
+                result,
+                key: const ValueKey('server-address-result'),
+                style: TextStyle(
+                  color: _ok ? Colors.green.shade700 : Colors.red.shade700,
+                ),
+              ),
+            ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          key: const ValueKey('server-address-test'),
+          onPressed: _checking ? null : _test,
+          child: const Text('Test'),
+        ),
+        FilledButton(
+          key: const ValueKey('server-address-save'),
+          onPressed: _checking ? null : _save,
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }

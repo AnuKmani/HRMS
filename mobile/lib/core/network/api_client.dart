@@ -5,13 +5,13 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../config/app_config.dart';
+import '../config/server_address.dart';
 import '../storage/token_store.dart';
 import 'api_exception.dart';
 
 final apiClientProvider = Provider<ApiClient>((ref) {
   final client = ApiClient(
-    baseUrl: AppConfig.baseUrl,
+    baseUrl: ref.watch(serverAddressProvider),
     tokenStore: ref.watch(tokenStoreProvider),
   );
 

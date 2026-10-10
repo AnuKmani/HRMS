@@ -14,9 +14,9 @@ class AppConfig {
   ///
   ///     flutter run --dart-define=API_BASE_URL=http://192.168.1.20:8000/api/v1
   ///
-  /// Not configurable at runtime: the app has exactly one server to talk to,
-  /// and a UI that could repoint it would turn a device into a credential
-  /// forwarder for whoever can edit that setting.
+  /// Not configurable at runtime in production: a UI that could repoint it
+  /// would turn a device into a credential forwarder for whoever can edit
+  /// that setting. Test builds may opt in with [allowServerSetting].
   /// Which build this is, shown at the foot of the dashboard so a tester
   /// can tell at a glance which APK is installed. Set at build time with
   /// `--dart-define=APP_BUILD=v7`; plain `flutter run` says `dev`.
@@ -28,5 +28,12 @@ class AppConfig {
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'http://10.0.2.2:8000/api/v1',
+  );
+
+  /// Test (UAT) builds only: show a "Server address" setting on the sign-in
+  /// screen so a tester can follow the laptop's Wi-Fi address without a new
+  /// build. `--dart-define=ALLOW_SERVER_SETTING=true`. Off by default.
+  static const bool allowServerSetting = bool.fromEnvironment(
+    'ALLOW_SERVER_SETTING',
   );
 }
