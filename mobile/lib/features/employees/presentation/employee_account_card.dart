@@ -38,6 +38,19 @@ class EmployeeAccount {
       );
 }
 
+/// The account half of `GET /employees/{id}/account`, or null when the
+/// employee has no login yet. The API's envelope turns "no login" into an
+/// empty object `{}`, not null — reading that as an account would show a
+/// login with a blank username and hide the Create login button.
+EmployeeAccount? parseEmployeeAccount(Object? data) {
+  if (data is! Map<String, dynamic>) return null;
+  final email = data['email'];
+  if (data['user_id'] == null || email is! String || email.isEmpty) {
+    return null;
+  }
+  return EmployeeAccount.fromJson(data);
+}
+
 abstract class EmployeeAccountRepository {
   Future<EmployeeAccount?> find(int employeeId);
   Future<EmployeeAccount> create(
@@ -62,7 +75,7 @@ class ApiEmployeeAccountRepository implements EmployeeAccountRepository {
   @override
   Future<EmployeeAccount?> find(int employeeId) async {
     final data = (await _client.get('/employees/$employeeId/account')).data;
-    return data is Map<String, dynamic> ? EmployeeAccount.fromJson(data) : null;
+    return parseEmployeeAccount(data);
   }
 
   @override

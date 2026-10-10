@@ -245,4 +245,20 @@ void main() {
       findsOneWidget,
     );
   });
+
+  test('"no login yet" arrives as {} and is read as no account', () {
+    expect(parseEmployeeAccount(<String, dynamic>{}), isNull);
+    expect(parseEmployeeAccount(null), isNull);
+    final account = parseEmployeeAccount(<String, dynamic>{
+      'user_id': 2,
+      'email': 'meera@example.test',
+      'status': 'active',
+      'roles': ['Employee'],
+      'must_change_password': true,
+      'temporary_password': '12345',
+    });
+    expect(account?.email, 'meera@example.test');
+    expect(account?.temporaryPassword, '12345');
+    expect(account?.mustChangePassword, isTrue);
+  });
 }
