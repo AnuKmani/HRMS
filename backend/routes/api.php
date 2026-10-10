@@ -47,6 +47,7 @@ use App\Http\Controllers\Api\V1\SalarySlipRequestController;
 use App\Http\Controllers\Api\V1\SiteActivityReportController;
 use App\Http\Controllers\Api\V1\SiteController;
 use App\Http\Controllers\Api\V1\SiteVisitController;
+use App\Http\Controllers\Api\V1\SiteVisitTaskController;
 use App\Http\Controllers\Api\V1\TimesheetController;
 use App\Http\Controllers\Api\V1\TrainingProgramController;
 use App\Http\Controllers\Api\V1\TrainingTypeController;
@@ -308,6 +309,20 @@ Route::prefix('v1')->group(function () {
             ->middleware('throttle:attendance');
 
         Route::get('site-visits/today', [SiteVisitController::class, 'today']);
+
+        // Planned site visits (Project Manager -> field engineers).
+        Route::get('site-visit-plans', [SiteVisitTaskController::class, 'index'])
+            ->middleware('permission:site_visit_plans.view|site_visit_plans.manage');
+        Route::get('site-visit-plans/assignees', [SiteVisitTaskController::class, 'assignees'])
+            ->middleware('permission:site_visit_plans.manage');
+        Route::post('site-visit-plans', [SiteVisitTaskController::class, 'store'])
+            ->middleware(['permission:site_visit_plans.manage', 'throttle:write']);
+        Route::post('site-visit-plans/{siteVisitTask}/complete', [SiteVisitTaskController::class, 'complete'])
+            ->whereNumber('siteVisitTask')
+            ->middleware('permission:site_visit_plans.view|site_visit_plans.manage');
+        Route::post('site-visit-plans/{siteVisitTask}/cancel', [SiteVisitTaskController::class, 'cancel'])
+            ->whereNumber('siteVisitTask')
+            ->middleware('permission:site_visit_plans.manage');
         Route::get('site-visits', [SiteVisitController::class, 'index'])
             ->middleware('permission:attendance.view');
         Route::post('site-visits/start', [SiteVisitController::class, 'store'])

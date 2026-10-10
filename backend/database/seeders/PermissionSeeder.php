@@ -184,6 +184,12 @@ class PermissionSeeder extends Seeder
         'site_visits' => [
             'site_visits.create',
         ],
+        // Planned site visits: a Project Manager plans (manage), the field
+        // roles see the visits planned for them (view).
+        'site_visit_plans' => [
+            'site_visit_plans.view',
+            'site_visit_plans.manage',
+        ],
         'shifts' => [
             'shifts.view',
             'shifts.manage',

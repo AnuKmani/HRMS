@@ -114,6 +114,8 @@ final class NotificationCategory
 
         'site.assigned' => self::SITE,
         'site_report.submitted' => self::SITE,
+        'site_task.assigned' => self::SITE,
+        'site_task.completed' => self::SITE,
 
         'asset.assigned' => self::ASSET,
         'asset.returned' => self::ASSET,

@@ -140,6 +140,9 @@ final class SiteVisitService
             $locked->end_client_event_id = $eventId;
             $locked->save();
 
+            // A planned visit to this place today is now done.
+            app(SiteVisitTaskService::class)->completeFromVisit($locked);
+
             return $locked;
         });
     }

@@ -183,6 +183,7 @@ class RolePermissionSeeder extends Seeder
         // Project Manager of that project. Nobody deletes a report.
         'Project Manager' => [
             'dashboard.view',
+            'site_visit_plans.view', 'site_visit_plans.manage',
             'site_visits.create',
             'employees.view',
             'projects.view', 'projects.manage',
@@ -233,6 +234,7 @@ class RolePermissionSeeder extends Seeder
 
         'Site Engineer' => [
             'dashboard.view',
+            'site_visit_plans.view',
             'site_visits.create',
             'projects.view',
             'sites.view',
@@ -260,6 +262,7 @@ class RolePermissionSeeder extends Seeder
 
         'Site Supervisor' => [
             'dashboard.view',
+            'site_visit_plans.view',
             'site_visits.create',
             'employees.view',
             'projects.view',
@@ -386,6 +389,7 @@ class RolePermissionSeeder extends Seeder
         // option: they go out to sites, and the visit records where and when.
         'Site Officer' => [
             'dashboard.view',
+            'site_visit_plans.view',
             'site_visits.create',
             'sites.view',
             'attendance.view',
@@ -401,6 +405,7 @@ class RolePermissionSeeder extends Seeder
 
         'Technician' => [
             'dashboard.view',
+            'site_visit_plans.view',
             'site_visits.create',
             'sites.view',
             'attendance.view',

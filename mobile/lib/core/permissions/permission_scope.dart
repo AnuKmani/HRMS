@@ -203,6 +203,13 @@ class PermissionScope {
   /// record a review reads.
   bool get canViewDailySiteReports => can('daily_site_reports.view');
 
+  /// A Project Manager planning site visits for engineers.
+  bool get canPlanSiteVisits => can('site_visit_plans.manage');
+
+  /// Seeing planned site visits — the engineer's own, or the planner's.
+  bool get canViewSiteVisitPlans =>
+      can('site_visit_plans.view') || canPlanSiteVisits;
+
   bool get canCreateDailySiteReports => can('daily_site_reports.create');
 
   bool get canUpdateDailySiteReports => can('daily_site_reports.update');

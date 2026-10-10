@@ -10,6 +10,8 @@ import '../attendance/presentation/attendance_quick_card.dart';
 import '../auth/auth_models.dart';
 import '../dashboard/my_summary.dart';
 import '../dashboard/my_summary_card.dart';
+import '../site_visit_plans/site_visit_plans.dart';
+import '../site_visit_plans/site_visit_plans_screens.dart';
 import '../notifications/presentation/notifications_controller.dart';
 
 /// Where a signed-in user lands, and the way into each module.
@@ -133,6 +135,15 @@ class HomeScreen extends ConsumerWidget {
           Icons.bolt,
           '/site-assignments/quick',
           'Set up an office or site here and assign staff',
+        ),
+      if (scope.canViewSiteVisitPlans)
+        _Module(
+          'Planned site visits',
+          Icons.assignment_outlined,
+          '/site-visit-plans',
+          scope.canPlanSiteVisits
+              ? 'Send engineers to projects, up to a month ahead'
+              : 'Visits planned for you',
         ),
       if (scope.canViewAssignments)
         _Module(
@@ -374,6 +385,12 @@ class HomeScreen extends ConsumerWidget {
                   AttendanceQuickCard(
                     onOpen: (path) => _open(context, ref, path),
                   ),
+                // Visits a Project Manager planned for this engineer.
+                if (user?.employee != null &&
+                    scope.can('site_visit_plans.view'))
+                  MyPlannedVisitsCard(
+                    onOpenAll: () => _open(context, ref, '/site-visit-plans'),
+                  ),
                 if (scope.canViewDashboard)
                   MySummaryCard(onOpen: (path) => _open(context, ref, path)),
                 if (modules.isEmpty)
@@ -463,7 +480,8 @@ class HomeScreen extends ConsumerWidget {
     ref
       ..invalidate(unreadNotificationsProvider)
       ..invalidate(mySummaryProvider)
-      ..invalidate(attendanceTodayProvider);
+      ..invalidate(attendanceTodayProvider)
+      ..invalidate(myUpcomingPlansProvider);
   }
 
   String? _subtitle(EmployeeBrief? employee) {
@@ -514,6 +532,7 @@ String _sectionOf(String label) => switch (label) {
   'Sites' ||
   'Site assignments' ||
   'Quick site setup' ||
+  'Planned site visits' ||
   'Site reports' ||
   'Daily site reports' => 'Projects & sites',
   'Payroll' ||

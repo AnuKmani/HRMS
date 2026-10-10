@@ -68,6 +68,7 @@ import '../../features/training/presentation/training_list_screen.dart';
 import '../../features/training/presentation/training_program_form_screen.dart';
 import '../../features/training/presentation/training_programs_screen.dart';
 import '../../features/account/change_password_screen.dart';
+import '../../features/site_visit_plans/site_visit_plans_screens.dart';
 import '../../features/site_assignments/quick_site_setup_screen.dart';
 import '../../features/site_assignments/site_assignments_screens.dart';
 import '../../features/attendance/presentation/attendance_records_screen.dart';
@@ -204,6 +205,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/site-assignments',
         builder: (context, state) => const SiteAssignmentsScreen(),
+      ),
+      GoRoute(
+        path: '/site-visit-plans',
+        builder: (context, state) => const SiteVisitPlansScreen(),
       ),
       GoRoute(
         path: '/site-assignments/quick',
