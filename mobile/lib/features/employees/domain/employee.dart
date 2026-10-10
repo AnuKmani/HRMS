@@ -25,6 +25,7 @@ class Employee {
     required this.employmentType,
     required this.employmentStatus,
     this.joiningDate,
+    this.exitDate,
     this.reportingManagerId,
     this.reportingManagerName,
     this.primaryProjectId,
@@ -71,6 +72,13 @@ class Employee {
 
   /// `YYYY-MM-DD`, or null.
   final String? joiningDate;
+
+  /// Last working day of someone who has left.
+  final String? exitDate;
+
+  /// Resigned or terminated — no longer working here, history kept.
+  bool get hasLeft =>
+      employmentStatus == 'resigned' || employmentStatus == 'terminated';
 
   final int? reportingManagerId;
   final String? reportingManagerName;
@@ -129,6 +137,7 @@ class Employee {
     designationName: _nestedName(json['designation']),
     employmentType: json['employment_type'] as String? ?? 'permanent',
     employmentStatus: json['employment_status'] as String? ?? 'active',
+    exitDate: json['exit_date'] as String?,
     joiningDate: json['joining_date'] as String?,
     reportingManagerId: _int(json['reporting_manager_id']),
     reportingManagerName: _employeeName(json['reporting_manager']),

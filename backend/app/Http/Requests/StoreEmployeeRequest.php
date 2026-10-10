@@ -40,7 +40,8 @@ class StoreEmployeeRequest extends FormRequest
     public function rules(): array
     {
         return array_merge([
-            'employee_code' => ['required', 'string', 'max:30', 'alpha_dash', Rule::unique('employees', 'employee_code')],
+            // Blank: the next EMP code is assigned (EmployeeService).
+            'employee_code' => ['nullable', 'string', 'max:30', 'alpha_dash', Rule::unique('employees', 'employee_code')],
             'first_name' => ['required', 'string', 'max:80'],
             'middle_name' => ['nullable', 'string', 'max:80'],
             'last_name' => ['required', 'string', 'max:80'],

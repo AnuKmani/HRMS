@@ -11,11 +11,16 @@ use App\Http\Resources\EmployeeResource;
 use App\Http\Responses\ApiResponse;
 use App\Http\Responses\PaginatedResponse;
 use App\Models\Employee;
+use App\Models\EmployeeSiteAssignment;
+use App\Models\User;
 use App\Services\EmployeeService;
+use App\Support\EmployeeHistory;
 use App\Support\Visibility;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 /**
  * /api/v1/employees
@@ -125,17 +130,113 @@ class EmployeeController extends Controller
         );
     }
 
+    /**
+     * Delete — only for a record created by mistake.
+     *
+     * Someone with history (attendance, leave, pay, visits, reports, ...)
+     * is never deleted: hiding them would leave every one of those records
+     * pointing at a person who "is no longer in the company". They leave
+     * with POST /employees/{id}/offboard instead, which keeps the history
+     * and their name on it.
+     */
     public function destroy(Employee $employee): JsonResponse
     {
         $this->authorize('delete', $employee);
 
-        // Soft delete, always. The row is referenced by assignments,
-        // direct reports and primary placements; removing it outright would
-        // erase who reported to whom and who stood where. Archived, not
-        // destroyed.
-        $employee->delete();
+        $found = EmployeeHistory::summary($employee);
+        if ($found !== []) {
+            return ApiResponse::error(
+                sprintf(
+                    '%s has records in the system (%s), so they cannot be deleted. Use "Mark as left" instead — their history stays intact.',
+                    $employee->full_name,
+                    implode(', ', $found),
+                ),
+                ['history' => $found],
+                409,
+            );
+        }
+
+        DB::transaction(function () use ($employee) {
+            $this->deactivateLogin($employee);
+            $employee->delete();
+        });
 
         return ApiResponse::success('Employee deleted.');
+    }
+
+    /**
+     * POST /employees/{employee}/offboard — the person has left.
+     *
+     * Status resigned / terminated with a last working day; their login
+     * stops working and their open site postings end that day. Every
+     * record they made stays, with their name on it.
+     */
+    public function offboard(Request $request, Employee $employee): JsonResponse
+    {
+        $this->authorize('update', $employee);
+
+        $data = $request->validate([
+            'status' => ['required', Rule::in([Employee::STATUS_RESIGNED, Employee::STATUS_TERMINATED])],
+            'exit_date' => ['nullable', 'date_format:Y-m-d'],
+        ]);
+
+        $exit = $data['exit_date'] ?? now()->toDateString();
+
+        DB::transaction(function () use ($employee, $data, $exit) {
+            $employee->forceFill([
+                'employment_status' => $data['status'],
+                'exit_date' => $exit,
+            ])->save();
+
+            $this->deactivateLogin($employee);
+
+            EmployeeSiteAssignment::query()
+                ->where('employee_id', $employee->id)
+                ->where('status', EmployeeSiteAssignment::STATUS_ACTIVE)
+                ->update([
+                    'status' => EmployeeSiteAssignment::STATUS_ENDED,
+                    'end_date' => $exit,
+                ]);
+        });
+
+        return ApiResponse::success(
+            $employee->full_name.' is marked as left. Their records are kept.',
+            new EmployeeResource($employee->refresh()->load(['department', 'designation'])),
+        );
+    }
+
+    /**
+     * POST /employees/{employee}/reinstate — back to active, login on.
+     */
+    public function reinstate(Employee $employee): JsonResponse
+    {
+        $this->authorize('update', $employee);
+
+        DB::transaction(function () use ($employee) {
+            $employee->forceFill([
+                'employment_status' => Employee::STATUS_ACTIVE,
+                'exit_date' => null,
+            ])->save();
+
+            $employee->user?->forceFill(['status' => User::STATUS_ACTIVE])->save();
+        });
+
+        return ApiResponse::success(
+            $employee->full_name.' is active again.',
+            new EmployeeResource($employee->refresh()->load(['department', 'designation'])),
+        );
+    }
+
+    private function deactivateLogin(Employee $employee): void
+    {
+        $user = $employee->user;
+
+        if ($user === null) {
+            return;
+        }
+
+        $user->forceFill(['status' => User::STATUS_INACTIVE])->save();
+        $user->tokens()->delete();
     }
 
     /**

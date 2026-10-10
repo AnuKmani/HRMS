@@ -55,6 +55,7 @@ class EmployeeResource extends JsonResource
             'employment_type' => $resource->employment_type,
             'employment_status' => $resource->employment_status,
             'joining_date' => $resource->joining_date?->toDateString(),
+            'exit_date' => $resource->exit_date?->toDateString(),
 
             'reporting_manager_id' => $resource->reporting_manager_id,
             'reporting_manager' => $this->whenLoaded('reportingManager', fn () => $resource->reportingManager

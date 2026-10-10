@@ -89,7 +89,7 @@ class _EmployeesList extends ConsumerWidget {
           employee.fullName.isEmpty ? employee.employeeCode : employee.fullName,
         ),
         subtitle: Text(employee.summary),
-        trailing: employee.isActive ? null : const _StatusTag(),
+        trailing: employee.isActive ? null : _StatusTag(employee),
         onTap: canView ? () => context.push('/employees/${employee.id}') : null,
       ),
     );
@@ -97,14 +97,23 @@ class _EmployeesList extends ConsumerWidget {
 }
 
 class _StatusTag extends StatelessWidget {
-  const _StatusTag();
+  const _StatusTag(this.employee);
+
+  final Employee employee;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final label = employee.hasLeft
+        ? 'Left'
+        : switch (employee.employmentStatus) {
+            'on_leave' => 'On leave',
+            _ => 'Inactive',
+          };
 
     return Chip(
-      label: const Text('Inactive'),
+      key: ValueKey('employee-status-${employee.id}'),
+      label: Text(label),
       visualDensity: VisualDensity.compact,
       backgroundColor: scheme.surfaceContainerHighest,
       side: BorderSide.none,

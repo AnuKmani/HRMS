@@ -159,7 +159,7 @@ class EmployeeApiTest extends TestCase
         $this->postJson('/api/v1/employees', [])
             ->assertStatus(422)
             ->assertJsonValidationErrors([
-                'employee_code', 'first_name', 'last_name', 'email',
+                'first_name', 'last_name', 'email',
                 'joining_date', 'employment_type', 'employment_status',
             ]);
 

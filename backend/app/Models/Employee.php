@@ -57,11 +57,13 @@ class Employee extends Model
         'primary_site_id',
         'salary',
         'employment_status',
+        'exit_date',
     ];
 
     protected $casts = [
         'date_of_birth' => 'date',
         'joining_date' => 'date',
+        'exit_date' => 'date',
         'salary' => 'decimal:2',
     ];
 

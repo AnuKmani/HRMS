@@ -132,4 +132,47 @@ void main() {
       expect(find.text('0.00'), findsNothing);
     },
   );
+
+  testWidgets('HR marks someone as left instead of deleting them', (
+    tester,
+  ) async {
+    await pumpDetail(
+      tester,
+      permissions: const [
+        'employees.view',
+        'employees.update',
+        'employees.delete',
+      ],
+    );
+
+    // Leaving is the main action; delete is only for a mistake.
+    expect(find.byKey(const ValueKey('detail-mark-left')), findsOneWidget);
+    expect(find.text('Delete (created by mistake)'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('detail-mark-left')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('leave-terminated')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('leave-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(script.offboarded, hasLength(1));
+    expect(script.offboarded.single, startsWith('12:terminated:'));
+    expect(find.textContaining('Left (terminated)'), findsOneWidget);
+
+    // Someone who left can be brought back.
+    await tester.tap(find.byKey(const ValueKey('detail-reinstate')));
+    await tester.pumpAndSettle();
+    expect(script.reinstated, [12]);
+    expect(find.byKey(const ValueKey('detail-mark-left')), findsOneWidget);
+  });
+
+  testWidgets('without update rights there is nothing to press', (
+    tester,
+  ) async {
+    await pumpDetail(tester, permissions: const ['employees.view']);
+
+    expect(find.byKey(const ValueKey('detail-mark-left')), findsNothing);
+    expect(find.byKey(const ValueKey('detail-delete')), findsNothing);
+  });
 }

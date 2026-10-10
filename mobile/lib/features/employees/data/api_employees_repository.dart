@@ -54,6 +54,22 @@ class ApiEmployeesRepository implements EmployeesRepository {
   @override
   Future<void> remove(int id) => _client.delete('$_path/$id');
 
+  @override
+  Future<Employee> offboard(
+    int id, {
+    required String status,
+    String? exitDate,
+  }) async => _one(
+    (await _client.post(
+      '$_path/$id/offboard',
+      body: <String, Object?>{'status': status, 'exit_date': ?exitDate},
+    )).data,
+  );
+
+  @override
+  Future<Employee> reinstate(int id) async =>
+      _one((await _client.post('$_path/$id/reinstate')).data);
+
   Employee _one(Object? data) {
     if (data is! Map<String, dynamic>) throw unexpectedShapeException;
 

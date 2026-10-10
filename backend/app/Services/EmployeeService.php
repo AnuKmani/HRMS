@@ -35,6 +35,11 @@ class EmployeeService
         return DB::transaction(function () use ($data) {
             $employee = new Employee;
             $employee->fill($this->normalise($data));
+
+            if (blank($employee->employee_code)) {
+                $employee->employee_code = $this->nextEmployeeCode();
+            }
+
             $employee->save();
 
             return $employee;
@@ -52,6 +57,23 @@ class EmployeeService
 
             return $employee->refresh();
         });
+    }
+
+    /**
+     * The next code in the EMP sequence: EMP00001, EMP00002, … one past
+     * the highest EMP number ever issued, deleted rows included, so a code
+     * is never handed out twice.
+     */
+    public function nextEmployeeCode(): string
+    {
+        $highest = Employee::withTrashed()
+            ->where('employee_code', 'like', 'EMP%')
+            ->lockForUpdate()
+            ->pluck('employee_code')
+            ->map(fn (string $code) => preg_match('/^EMP(\d+)$/', $code, $m) ? (int) $m[1] : 0)
+            ->max() ?? 0;
+
+        return 'EMP'.str_pad((string) ($highest + 1), 5, '0', STR_PAD_LEFT);
     }
 
     /**

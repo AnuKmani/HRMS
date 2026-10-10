@@ -122,12 +122,8 @@ void main() {
       );
 
       expect(script.findCalls, 1);
-      // Read the controller, not the text on screen: the employee-code hint is
-      // the same sentence as its value, so a text finder counts twice.
-      expect(
-        tester.widget<TextField>(find.byType(TextField).at(0)).controller?.text,
-        'EMP-1001',
-      );
+      // The code is shown, not editable: it is the permanent number.
+      expect(find.text('EMP-1001'), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('form-save')));
       await advance(tester);
@@ -174,7 +170,9 @@ void main() {
     await advance(tester);
 
     expect(script.createCalls, 0);
-    expect(find.text('Employee code is required.'), findsOneWidget);
+    // The code is assigned by the server, so it is never asked for.
+    expect(find.text('Employee code is required.'), findsNothing);
+    expect(find.text('Assigned automatically when you save'), findsOneWidget);
     expect(find.text('First name is required.'), findsOneWidget);
     expect(find.text('Last name is required.'), findsOneWidget);
     expect(find.text('Email is required.'), findsOneWidget);

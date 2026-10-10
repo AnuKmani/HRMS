@@ -74,15 +74,60 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
     }
   }
 
+  Future<void> _markLeft(Employee employee) async {
+    final answer = await showDialog<(String, String)>(
+      context: context,
+      builder: (context) => _LeaveDialog(name: employee.fullName),
+    );
+    if (answer == null || !mounted) return;
+
+    try {
+      final updated = await ref
+          .read(employeesRepositoryProvider)
+          .offboard(employee.id, status: answer.$1, exitDate: answer.$2);
+      if (!mounted) return;
+      setState(() => _employee = updated);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${employee.fullName} is marked as left. Their records are '
+            'kept and their login no longer works.',
+          ),
+        ),
+      );
+    } on ApiException catch (failure) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(failure.message)));
+    }
+  }
+
+  Future<void> _reinstate(Employee employee) async {
+    try {
+      final updated = await ref
+          .read(employeesRepositoryProvider)
+          .reinstate(employee.id);
+      if (!mounted) return;
+      setState(() => _employee = updated);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${employee.fullName} is active again.')),
+      );
+    } on ApiException catch (failure) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(failure.message)));
+    }
+  }
+
   Future<void> _delete(Employee employee) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Remove employee?'),
+        title: const Text('Delete a record created by mistake?'),
         content: Text(
-          '${employee.fullName} will be removed from the directory. '
-          'Their record is kept, and anything already recorded against it '
-          'stays intact.',
+          'Only for a record entered by mistake. If ${employee.fullName} '
+          'has any attendance, leave, pay or other records, the system will '
+          'refuse — use "Mark as left" for someone who has left.',
         ),
         actions: [
           TextButton(
@@ -92,7 +137,7 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
           FilledButton(
             key: const ValueKey('confirm-delete'),
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Remove'),
+            child: const Text('Delete'),
           ),
         ],
       ),
@@ -211,7 +256,14 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
           const SizedBox(height: 24),
           _section('Employment', [
             _row('Employee code', employee.employeeCode),
-            _row('Status', employee.employmentStatus.replaceAll('_', ' ')),
+            _row(
+              'Status',
+              employee.hasLeft
+                  ? 'Left (${employee.employmentStatus})'
+                        '${employee.exitDate == null ? '' : ' · last day ${employee.exitDate}'}'
+                  : employee.employmentStatus.replaceAll('_', ' '),
+              key: const ValueKey('detail-status'),
+            ),
             _row('Type', employee.employmentType.replaceAll('_', ' ')),
             _row('Joining date', employee.joiningDate),
             _row('Reporting manager', employee.reportingManagerName),
@@ -249,34 +301,51 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
               ),
             ]),
           const SizedBox(height: 24),
-          if (scope.canUpdateEmployees || scope.canDeleteEmployees)
+          if (scope.canUpdateEmployees)
             Row(
               children: [
-                if (scope.canUpdateEmployees)
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      key: const ValueKey('detail-edit'),
-                      icon: const Icon(Icons.edit_outlined),
-                      label: const Text('Edit'),
-                      onPressed: () =>
-                          context.push('/employees/${employee.id}/edit'),
-                    ),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    key: const ValueKey('detail-edit'),
+                    icon: const Icon(Icons.edit_outlined),
+                    label: const Text('Edit'),
+                    onPressed: () =>
+                        context.push('/employees/${employee.id}/edit'),
                   ),
-                if (scope.canUpdateEmployees && scope.canDeleteEmployees)
-                  const SizedBox(width: 12),
-                if (scope.canDeleteEmployees)
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      key: const ValueKey('detail-delete'),
-                      icon: const Icon(Icons.delete_outline),
-                      label: const Text('Remove'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: theme.colorScheme.error,
-                      ),
-                      onPressed: () => _delete(employee),
-                    ),
-                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: employee.hasLeft
+                      ? FilledButton.icon(
+                          key: const ValueKey('detail-reinstate'),
+                          icon: const Icon(Icons.restart_alt),
+                          label: const Text('Reinstate'),
+                          onPressed: () => _reinstate(employee),
+                        )
+                      : OutlinedButton.icon(
+                          key: const ValueKey('detail-mark-left'),
+                          icon: const Icon(Icons.logout),
+                          label: const Text('Mark as left'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: theme.colorScheme.error,
+                          ),
+                          onPressed: () => _markLeft(employee),
+                        ),
+                ),
               ],
+            ),
+          if (scope.canDeleteEmployees)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                key: const ValueKey('detail-delete'),
+                icon: const Icon(Icons.delete_outline, size: 18),
+                label: const Text('Delete (created by mistake)'),
+                style: TextButton.styleFrom(
+                  foregroundColor: theme.colorScheme.error,
+                ),
+                onPressed: () => _delete(employee),
+              ),
             ),
         ],
       ),
@@ -320,4 +389,83 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
       ),
     );
   }
+}
+
+/// Resigned or terminated, and the last working day.
+class _LeaveDialog extends StatefulWidget {
+  const _LeaveDialog({required this.name});
+
+  final String name;
+
+  @override
+  State<_LeaveDialog> createState() => _LeaveDialogState();
+}
+
+class _LeaveDialogState extends State<_LeaveDialog> {
+  String _status = 'resigned';
+  DateTime _date = DateTime.now();
+
+  String _ymd(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-'
+      '${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text('${widget.name} has left'),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        RadioGroup<String>(
+          groupValue: _status,
+          onChanged: (v) => setState(() => _status = v ?? _status),
+          child: const Column(
+            children: [
+              RadioListTile<String>(
+                key: ValueKey('leave-resigned'),
+                value: 'resigned',
+                title: Text('Resigned'),
+              ),
+              RadioListTile<String>(
+                key: ValueKey('leave-terminated'),
+                value: 'terminated',
+                title: Text('Terminated'),
+              ),
+            ],
+          ),
+        ),
+        ListTile(
+          key: const ValueKey('leave-date'),
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.event),
+          title: Text('Last working day: ${_ymd(_date)}'),
+          onTap: () async {
+            final picked = await showDatePicker(
+              context: context,
+              initialDate: _date,
+              firstDate: DateTime(2000),
+              lastDate: DateTime.now().add(const Duration(days: 365)),
+            );
+            if (picked != null) setState(() => _date = picked);
+          },
+        ),
+        const Text(
+          'Their attendance, leave, pay and reports stay as they are, with '
+          'their name. Their app login stops working.',
+        ),
+      ],
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        key: const ValueKey('leave-confirm'),
+        onPressed: () => Navigator.of(context).pop((_status, _ymd(_date))),
+        child: const Text('Mark as left'),
+      ),
+    ],
+  );
 }

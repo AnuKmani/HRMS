@@ -220,6 +220,44 @@ class ScriptedEmployees extends Scripted<Employee>
     required super.idOf,
     super.fallback,
   });
+
+  final List<String> offboarded = [];
+  final List<int> reinstated = [];
+
+  @override
+  Future<Employee> offboard(
+    int id, {
+    required String status,
+    String? exitDate,
+  }) async {
+    offboarded.add('$id:$status:$exitDate');
+    return Employee.fromJson({
+      'id': id,
+      'employee_code': 'EMP00001',
+      'first_name': 'A',
+      'last_name': 'B',
+      'full_name': 'A B',
+      'email': 'a@b.c',
+      'employment_type': 'permanent',
+      'employment_status': status,
+      'exit_date': exitDate,
+    });
+  }
+
+  @override
+  Future<Employee> reinstate(int id) async {
+    reinstated.add(id);
+    return Employee.fromJson({
+      'id': id,
+      'employee_code': 'EMP00001',
+      'first_name': 'A',
+      'last_name': 'B',
+      'full_name': 'A B',
+      'email': 'a@b.c',
+      'employment_type': 'permanent',
+      'employment_status': 'active',
+    });
+  }
 }
 
 class ScriptedDepartments extends Scripted<Department>

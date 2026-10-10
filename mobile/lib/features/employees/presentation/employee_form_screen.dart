@@ -9,8 +9,6 @@ import '../../../core/presentation/form_controls.dart';
 import '../../../core/presentation/remote_picker.dart';
 import '../../departments/presentation/departments_controller.dart';
 import '../../designations/presentation/designations_controller.dart';
-import '../../projects/presentation/projects_controller.dart';
-import '../../sites/presentation/sites_controller.dart';
 import '../data/api_employees_repository.dart';
 import '../domain/employees_repository.dart';
 import 'employees_controller.dart';
@@ -77,10 +75,6 @@ class _EmployeeFormScreenState extends ConsumerState<EmployeeFormScreen> {
   String? _designationLabel;
   int? _reportingManagerId;
   String? _reportingManagerLabel;
-  int? _projectId;
-  String? _projectLabel;
-  int? _siteId;
-  String? _siteLabel;
 
   bool _loading = false;
   bool _saving = false;
@@ -169,10 +163,6 @@ class _EmployeeFormScreenState extends ConsumerState<EmployeeFormScreen> {
         _designationLabel = employee.designationName;
         _reportingManagerId = employee.reportingManagerId;
         _reportingManagerLabel = employee.reportingManagerName;
-        _projectId = employee.primaryProjectId;
-        _projectLabel = employee.primaryProjectName;
-        _siteId = employee.primarySiteId;
-        _siteLabel = employee.primarySiteName;
       });
     } on ApiException catch (failure) {
       if (!mounted) return;
@@ -199,7 +189,6 @@ class _EmployeeFormScreenState extends ConsumerState<EmployeeFormScreen> {
       if (value.trim().isEmpty) local[field] = '$label is required.';
     }
 
-    require('employee_code', _code.text, 'Employee code');
     require('first_name', _firstName.text, 'First name');
     require('last_name', _lastName.text, 'Last name');
     require('email', _email.text, 'Email');
@@ -218,7 +207,10 @@ class _EmployeeFormScreenState extends ConsumerState<EmployeeFormScreen> {
     }
 
     final body = <String, Object?>{
-      'employee_code': _code.text.trim(),
+      // New hires get the next EMP code from the server; an existing
+      // code is never changed from here.
+      if (widget.employeeId != null && _code.text.trim().isNotEmpty)
+        'employee_code': _code.text.trim(),
       'first_name': _firstName.text.trim(),
       'middle_name': blank(_middleName.text),
       'last_name': _lastName.text.trim(),
@@ -234,8 +226,6 @@ class _EmployeeFormScreenState extends ConsumerState<EmployeeFormScreen> {
       'department_id': _departmentId,
       'designation_id': _designationId,
       'reporting_manager_id': _reportingManagerId,
-      'primary_project_id': _projectId,
-      'primary_site_id': _siteId,
       'employment_type': _employmentType,
       'employment_status': _employmentStatus,
     };
@@ -291,15 +281,18 @@ class _EmployeeFormScreenState extends ConsumerState<EmployeeFormScreen> {
                     if (_banner != null)
                       FormBanner(message: _banner!, forbidden: _forbidden),
                     _sectionTitle('Identity'),
-                    LabeledTextField(
-                      label: 'Employee code',
-                      controller: _code,
-                      isRequired: true,
-                      enabled: !_saving,
-                      textInputAction: TextInputAction.next,
-                      errorText: _errors['employee_code'],
-                      hint: 'EMP-1001',
-                      helper: 'Letters, numbers, dashes and underscores.',
+                    // Assigned by the server (EMP00001, EMP00002, …) and
+                    // never edited: it is the employee's permanent number.
+                    ListTile(
+                      key: const ValueKey('employee-code-auto'),
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.badge_outlined),
+                      title: const Text('Employee code'),
+                      subtitle: Text(
+                        widget.employeeId == null || _code.text.isEmpty
+                            ? 'Assigned automatically when you save'
+                            : _code.text,
+                      ),
                     ),
                     LabeledTextField(
                       label: 'First name',
@@ -414,36 +407,6 @@ class _EmployeeFormScreenState extends ConsumerState<EmployeeFormScreen> {
                       onChanged: (id) => setState(() {
                         _designationId = id;
                         if (id == null) _designationLabel = null;
-                      }),
-                    ),
-                    RemotePickerField(
-                      label: 'Primary project',
-                      provider: projectsPickerProvider,
-                      idOf: (project) => project.id,
-                      labelOf: (project) => project.name,
-                      value: _projectId,
-                      selectedLabel: _projectLabel,
-                      searchHint: 'Search projects',
-                      sheetTitle: 'Primary project',
-                      errorText: _errors['primary_project_id'],
-                      onChanged: (id) => setState(() {
-                        _projectId = id;
-                        if (id == null) _projectLabel = null;
-                      }),
-                    ),
-                    RemotePickerField(
-                      label: 'Primary site',
-                      provider: sitesPickerProvider,
-                      idOf: (site) => site.id,
-                      labelOf: (site) => site.name,
-                      value: _siteId,
-                      selectedLabel: _siteLabel,
-                      searchHint: 'Search sites',
-                      sheetTitle: 'Primary site',
-                      errorText: _errors['primary_site_id'],
-                      onChanged: (id) => setState(() {
-                        _siteId = id;
-                        if (id == null) _siteLabel = null;
                       }),
                     ),
                     _sectionTitle('Personal'),

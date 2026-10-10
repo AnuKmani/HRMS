@@ -16,5 +16,14 @@ abstract class EmployeesRepository {
 
   /// Soft-deleted server-side; the record stays in the database so anything
   /// that referenced it keeps making sense.
+  /// Only for a record created by mistake: refused (409) for anyone with
+  /// history — they are marked as left instead.
   Future<void> remove(int id);
+
+  /// The person has left: resigned or terminated, last working day.
+  /// History is kept; their login stops.
+  Future<Employee> offboard(int id, {required String status, String? exitDate});
+
+  /// Back to active, login on again.
+  Future<Employee> reinstate(int id);
 }

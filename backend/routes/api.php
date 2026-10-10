@@ -203,6 +203,11 @@ Route::prefix('v1')->group(function () {
             ->middleware('throttle:write');
         Route::delete('employees/{employee}', [EmployeeController::class, 'destroy'])
             ->middleware('permission:employees.delete');
+        // Leaving keeps the history; delete is for a record made by mistake.
+        Route::post('employees/{employee}/offboard', [EmployeeController::class, 'offboard'])
+            ->middleware(['permission:employees.update', 'throttle:write']);
+        Route::post('employees/{employee}/reinstate', [EmployeeController::class, 'reinstate'])
+            ->middleware(['permission:employees.update', 'throttle:write']);
 
         // An employee's app login and its one role. HR issues it when a
         // person joins; the role decides everything they can do — a
