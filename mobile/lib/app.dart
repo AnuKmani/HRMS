@@ -16,6 +16,17 @@ class HrmsApp extends ConsumerWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       routerConfig: router,
+      // Newer Android draws the app under the bottom navigation bar; keep
+      // every screen's last buttons above it.
+      builder: (context, child) => ColoredBox(
+        color: Theme.of(context).colorScheme.surface,
+        child: SafeArea(
+          top: false,
+          left: false,
+          right: false,
+          child: child ?? const SizedBox.shrink(),
+        ),
+      ),
     );
   }
 }

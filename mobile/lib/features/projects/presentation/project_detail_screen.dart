@@ -159,7 +159,26 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
     final canEdit = project.canEdit ?? scope.canManageProjects;
 
     return Scaffold(
-      appBar: AppBar(title: Text(project.name)),
+      appBar: AppBar(
+        title: Text(project.name),
+        // At the top so they are always in reach, however long the page.
+        actions: [
+          if (canEdit) ...[
+            IconButton(
+              key: const ValueKey('detail-edit'),
+              tooltip: 'Edit project',
+              icon: const Icon(Icons.edit_outlined),
+              onPressed: () => context.push('/projects/${project.id}/edit'),
+            ),
+            IconButton(
+              key: const ValueKey('detail-delete'),
+              tooltip: 'Remove project',
+              icon: const Icon(Icons.delete_outline),
+              onPressed: () => _delete(project),
+            ),
+          ],
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
@@ -224,32 +243,6 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
                   'Only ${project.createdByName ?? 'the Project Manager who added this project'} can change it.',
                   style: theme.textTheme.bodySmall,
                 ),
-              ),
-            if (canEdit)
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      key: const ValueKey('detail-edit'),
-                      icon: const Icon(Icons.edit_outlined),
-                      label: const Text('Edit'),
-                      onPressed: () =>
-                          context.push('/projects/${project.id}/edit'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      key: const ValueKey('detail-delete'),
-                      icon: const Icon(Icons.delete_outline),
-                      label: const Text('Remove'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: theme.colorScheme.error,
-                      ),
-                      onPressed: () => _delete(project),
-                    ),
-                  ),
-                ],
               ),
           ],
         ),
