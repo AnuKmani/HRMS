@@ -18,6 +18,7 @@ use App\Models\Loan;
 use App\Models\OvertimeRequest;
 use App\Models\Payroll;
 use App\Models\Project;
+use App\Models\ProjectMember;
 use App\Models\SalaryCertificateRequest;
 use App\Models\Site;
 use App\Models\SiteActivityReport;
@@ -205,6 +206,13 @@ final class Visibility
         // the site hangs off, which is a stranger boundary than either alone.
         return $query->where(function ($q) use ($employeeId) {
             $q->where('projects.project_manager_id', $employeeId)
+                // On the project's team (named by its Project Manager).
+                ->orWhereExists(function ($sub) use ($employeeId) {
+                    $sub->selectRaw('1')
+                        ->from('project_members')
+                        ->whereColumn('project_members.project_id', 'projects.id')
+                        ->where('project_members.employee_id', $employeeId);
+                })
                 ->orWhereExists(function ($sub) use ($employeeId) {
                     $sub->selectRaw('1')
                         ->from('sites')
@@ -230,6 +238,10 @@ final class Visibility
         }
 
         if ($project->project_manager_id === $employeeId) {
+            return true;
+        }
+
+        if (ProjectMember::query()->where('project_id', $project->id)->where('employee_id', $employeeId)->exists()) {
             return true;
         }
 

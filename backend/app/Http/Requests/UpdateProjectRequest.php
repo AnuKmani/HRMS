@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Models\Project;
+use App\Services\Projects\ProjectService;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -37,6 +38,7 @@ class UpdateProjectRequest extends FormRequest
                 Rule::unique('projects', 'code')->ignore($id),
             ],
             'client' => ['nullable', 'string', 'max:150'],
+            'main_contractor' => ['nullable', 'string', 'max:150'],
             'description' => ['nullable', 'string', 'max:1000'],
             'location' => ['nullable', 'string', 'max:500'],
             'project_manager_id' => ['sometimes', 'nullable', 'integer', Rule::exists('employees', 'id')->whereNull('deleted_at')],
@@ -49,6 +51,11 @@ class UpdateProjectRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator) {
+            $id = $this->route('project')?->id ?? $this->route('project');
+            if (is_string($this->input('name')) && ($existing = ProjectService::duplicateOf($this->input('name'), (int) $id)) !== null) {
+                $validator->errors()->add('name', sprintf('This project is already added: %s (%s).', $existing->name, $existing->code));
+            }
+
             if (! array_key_exists('end_date', $this->all())) {
                 return;
             }

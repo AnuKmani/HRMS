@@ -4,6 +4,7 @@ namespace App\Policies;
 
 use App\Models\Project;
 use App\Models\User;
+use App\Services\Projects\ProjectService;
 use App\Support\Visibility;
 
 /**
@@ -36,10 +37,15 @@ class ProjectPolicy
         return $user->can('projects.manage');
     }
 
+    /**
+     * Only the Project Manager who created the project edits it (and
+     * whoever holds projects.manage_all, i.e. Super Admin). Every other
+     * Project Manager can see it, not change it.
+     */
     public function update(User $user, Project $project): bool
     {
-        return $user->can('projects.manage')
-            && Visibility::projectIsVisible($user, $project);
+        return Visibility::projectIsVisible($user, $project)
+            && ProjectService::canEdit($user, $project);
     }
 
     /**
@@ -50,7 +56,6 @@ class ProjectPolicy
      */
     public function delete(User $user, Project $project): bool
     {
-        return $user->can('projects.manage')
-            && Visibility::projectIsVisible($user, $project);
+        return $this->update($user, $project);
     }
 }

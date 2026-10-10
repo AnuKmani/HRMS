@@ -123,9 +123,10 @@ class ProjectApiTest extends TestCase
 
     public function test_shortening_a_project_cannot_move_its_end_date_before_the_stored_start(): void
     {
-        $this->actingAsRole('Project Manager');
+        // Only the Project Manager who added a project edits it.
+        $pm = $this->actingAsRole('Project Manager');
 
-        $project = Project::factory()->create([
+        $project = Project::factory()->create(['created_by' => $pm->id] + [
             'start_date' => '2026-03-01',
             'end_date' => '2026-09-01',
         ]);
@@ -143,9 +144,10 @@ class ProjectApiTest extends TestCase
 
     public function test_a_duplicate_project_code_is_rejected_and_existing_codes_can_be_kept(): void
     {
-        $this->actingAsRole('Project Manager');
+        // Only the Project Manager who added a project edits it.
+        $pm = $this->actingAsRole('Project Manager');
 
-        $project = Project::factory()->create(['code' => 'KEEP']);
+        $project = Project::factory()->create(['created_by' => $pm->id] + ['code' => 'KEEP']);
 
         $this->postJson('/api/v1/projects', [
             'name' => 'Clash', 'code' => 'KEEP', 'status' => 'planned',
@@ -209,9 +211,10 @@ class ProjectApiTest extends TestCase
 
     public function test_a_project_with_sites_cannot_be_deleted(): void
     {
-        $this->actingAsRole('Project Manager');
+        // Only the Project Manager who added a project edits it.
+        $pm = $this->actingAsRole('Project Manager');
 
-        $project = Project::factory()->create();
+        $project = Project::factory()->create(['created_by' => $pm->id]);
         Site::factory()->create(['project_id' => $project->id]);
 
         $this->deleteJson("/api/v1/projects/{$project->id}")->assertStatus(422);

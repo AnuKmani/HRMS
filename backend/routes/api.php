@@ -37,6 +37,7 @@ use App\Http\Controllers\Api\V1\PasswordResetController;
 use App\Http\Controllers\Api\V1\PayrollAdjustmentController;
 use App\Http\Controllers\Api\V1\PayrollController;
 use App\Http\Controllers\Api\V1\ProjectController;
+use App\Http\Controllers\Api\V1\ProjectDeliveryController;
 use App\Http\Controllers\Api\V1\ProjectEventController;
 use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\ReportExportController;
@@ -247,6 +248,43 @@ Route::prefix('v1')->group(function () {
         Route::delete('projects/{project}/events/{projectEvent}', [ProjectEventController::class, 'destroy'])
             ->whereNumber('projectEvent')
             ->middleware('permission:projects.manage');
+
+        // Running a project: subcontractors, team, stages, milestones,
+        // documents. Changes are for the project's creator (policy).
+        Route::controller(ProjectDeliveryController::class)->group(function () {
+            Route::middleware('permission:projects.manage')->group(function () {
+                Route::post('projects/{project}/subcontractors', 'storeSubcontractor');
+                Route::put('projects/{project}/subcontractors/{subcontractor}', 'updateSubcontractor')->whereNumber('subcontractor');
+                Route::post('projects/{project}/subcontractors/{subcontractor}/remove', 'removeSubcontractor')->whereNumber('subcontractor');
+                Route::post('projects/{project}/subcontractors/{subcontractor}/restore', 'restoreSubcontractor')->whereNumber('subcontractor');
+                Route::post('projects/{project}/subcontractors/{subcontractor}/document', 'uploadSubcontractorDocument')->whereNumber('subcontractor');
+                Route::get('projects/{project}/subcontractors/{subcontractor}/document', 'downloadSubcontractorDocument')->whereNumber('subcontractor');
+                Route::put('projects/{project}/team', 'updateTeam');
+                Route::put('projects/{project}/stages', 'replaceStages');
+                Route::post('projects/{project}/stages/{stage}/correct', 'correctStage')->whereNumber('stage');
+                Route::post('projects/{project}/milestones', 'storeMilestone');
+                Route::put('projects/{project}/milestones/{milestone}', 'updateMilestone')->whereNumber('milestone');
+                Route::delete('projects/{project}/milestones/{milestone}', 'destroyMilestone')->whereNumber('milestone');
+                Route::post('projects/{project}/documents', 'storeDocument');
+                Route::delete('projects/{project}/documents/{document}', 'destroyDocument')->whereNumber('document');
+            });
+
+            Route::middleware('permission:projects.view')->group(function () {
+                Route::get('projects/{project}/documents', 'documents');
+                Route::get('projects/{project}/documents/{document}', 'downloadDocument')->whereNumber('document');
+            });
+
+            // Progress: the project team, managers — and Sales, read-only.
+            Route::get('projects/{project}/stages', 'stages');
+            Route::get('projects/{project}/progress-history', 'history');
+            Route::get('projects/{project}/milestones', 'milestones');
+            Route::post('projects/{project}/milestones/{milestone}/status', 'milestoneStatus')
+                ->whereNumber('milestone')
+                ->middleware('permission:projects.billing.manage');
+            Route::get('project-progress', 'progressIndex');
+            Route::get('project-progress/{project}', 'progressShow');
+            Route::get('project-progress/{project}/pdf', 'progressPdf');
+        });
 
         // Sites.
         Route::get('sites', [SiteController::class, 'index'])

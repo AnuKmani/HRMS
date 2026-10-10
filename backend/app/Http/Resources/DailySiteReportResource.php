@@ -5,6 +5,7 @@ namespace App\Http\Resources;
 use App\Models\DailySiteReport;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\DB;
 
 /**
  * One daily site report — the document, plus the four child sets that make
@@ -51,6 +52,14 @@ class DailySiteReportResource extends JsonResource
                 : null),
 
             'report_date' => $resource->report_date?->toDateString(),
+
+            'stage_progress' => DB::table('daily_site_report_stage_progress')
+                ->join('project_stages', 'project_stages.id', '=', 'daily_site_report_stage_progress.project_stage_id')
+                ->where('daily_site_report_id', $resource->id)
+                ->orderBy('project_stages.sort_order')
+                ->get(['project_stages.id as stage_id', 'project_stages.name', 'daily_site_report_stage_progress.percent'])
+                ->map(fn ($r) => ['stage_id' => (int) $r->stage_id, 'name' => $r->name, 'percent' => (float) $r->percent])
+                ->values(),
 
             'total_manpower' => $resource->total_manpower,
 

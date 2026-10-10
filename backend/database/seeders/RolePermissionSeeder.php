@@ -183,6 +183,7 @@ class RolePermissionSeeder extends Seeder
         // Project Manager of that project. Nobody deletes a report.
         'Project Manager' => [
             'dashboard.view',
+            'projects.progress.view',
             'site_visit_plans.view', 'site_visit_plans.manage',
             'site_visits.create',
             'employees.view',
@@ -234,6 +235,7 @@ class RolePermissionSeeder extends Seeder
 
         'Site Engineer' => [
             'dashboard.view',
+            'projects.progress.view',
             'site_visit_plans.view',
             'site_visits.create',
             'projects.view',
@@ -262,6 +264,7 @@ class RolePermissionSeeder extends Seeder
 
         'Site Supervisor' => [
             'dashboard.view',
+            'projects.progress.view',
             'site_visit_plans.view',
             'site_visits.create',
             'employees.view',
@@ -408,6 +411,23 @@ class RolePermissionSeeder extends Seeder
             'site_visit_plans.view',
             'site_visits.create',
             'sites.view',
+            'attendance.view',
+            'leave.view', 'leave.create',
+            'leave.balance.view',
+            'timesheets.view',
+            'overtime.view',
+            'assets.view',
+            'salary_slips.view',
+            'salary_certificates.view',
+            'loans.view', 'loans.create',
+        ],
+
+        // Sales follows how far each project has got — and nothing else of
+        // it — to know when to ask the client for the next payment.
+        'Sales' => [
+            'dashboard.view',
+            'projects.progress.view',
+            'projects.billing.manage',
             'attendance.view',
             'leave.view', 'leave.create',
             'leave.balance.view',

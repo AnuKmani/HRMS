@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Models\Project;
+use App\Services\Projects\ProjectService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -29,6 +30,7 @@ class ProjectResource extends JsonResource
             'name' => $resource->name,
             'code' => $resource->code,
             'client' => $resource->client,
+            'main_contractor' => $resource->main_contractor,
             'description' => $resource->description,
             'location' => $resource->location,
 
@@ -40,6 +42,52 @@ class ProjectResource extends JsonResource
             'start_date' => $resource->start_date?->toDateString(),
             'end_date' => $resource->end_date?->toDateString(),
             'status' => $resource->status,
+
+            // Progress, and how it compares with where it should be by now.
+            'progress_percent' => (float) $resource->progress_percent,
+            'progress_updated_at' => $resource->progress_updated_at?->toIso8601String(),
+            'expected_percent' => $resource->expectedPercent(),
+            'behind_schedule' => $resource->isBehindSchedule(),
+
+            // Who added it — the only Project Manager who may edit it.
+            'created_by_name' => $this->whenLoaded('creator', fn () => $resource->creator?->name),
+            'can_edit' => $request->user() !== null && ProjectService::canEdit($request->user(), $resource),
+
+            'stages' => $this->whenLoaded('stages', fn () => $resource->stages->map(fn ($s) => [
+                'id' => $s->id,
+                'name' => $s->name,
+                'weight' => (float) $s->weight,
+                'percent_complete' => (float) $s->percent_complete,
+            ])->values()),
+            'subcontractors' => $this->whenLoaded('subcontractors', fn () => $resource->subcontractors->map(fn ($c) => [
+                'id' => $c->id,
+                'name' => $c->name,
+                'trade' => $c->trade,
+                'contact_name' => $c->contact_name,
+                'contact_phone' => $c->contact_phone,
+                'contract_value' => $c->contract_value !== null ? (float) $c->contract_value : null,
+                'start_date' => $c->start_date?->toDateString(),
+                'end_date' => $c->end_date?->toDateString(),
+                'has_document' => $c->document_path !== null,
+                'document_name' => $c->document_name,
+                'status' => $c->status,
+                'removed_on' => $c->removed_on?->toDateString(),
+                'removed_reason' => $c->removed_reason,
+            ])->values()),
+            'team' => $this->whenLoaded('members', fn () => $resource->members->map(fn ($m) => [
+                'employee_id' => $m->employee_id,
+                'name' => $m->employee?->full_name,
+                'role' => $m->role,
+            ])->values()),
+            'payment_milestones' => $this->whenLoaded('paymentMilestones', fn () => ProjectMilestoneResource::collection($resource->paymentMilestones)),
+            'documents' => $this->whenLoaded('documents', fn () => $resource->documents->map(fn ($d) => [
+                'id' => $d->id,
+                'title' => $d->title,
+                'category' => $d->category,
+                'original_name' => $d->original_name,
+                'size' => (int) $d->size,
+                'uploaded_at' => $d->created_at?->toIso8601String(),
+            ])->values()),
 
             // DCD / Civil Defence / handover dates. `upcoming_events` on the
             // list (today on), `events` with history on a single project.

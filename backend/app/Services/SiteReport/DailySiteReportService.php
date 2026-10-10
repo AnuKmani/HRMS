@@ -5,6 +5,7 @@ namespace App\Services\SiteReport;
 use App\Models\DailySiteReport;
 use App\Models\Site;
 use App\Models\User;
+use App\Services\Projects\ProjectProgressService;
 use App\Support\Visibility;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -84,12 +85,18 @@ class DailySiteReportService
 
         $this->authorizeSite($user, $site);
 
-        return $this->guardDuplicate(function () use ($report, $data, $site) {
-            return DB::transaction(function () use ($report, $data, $site) {
+        return $this->guardDuplicate(function () use ($user, $report, $data, $site) {
+            return DB::transaction(function () use ($user, $report, $data, $site) {
                 $report->fill($this->attributes($data, $site));
                 $report->save();
 
                 $this->syncChildren($report, $data);
+
+                // A same-day correction to a report already sent moves the
+                // project's progress with it.
+                if (! $report->isDraft() && array_key_exists('stage_progress', $data)) {
+                    app(ProjectProgressService::class)->applyReport($report, $user);
+                }
 
                 return $report;
             });
@@ -128,6 +135,8 @@ class DailySiteReportService
             'submitted_at' => now(),
         ]);
         $report->save();
+
+        app(ProjectProgressService::class)->applyReport($report, $user);
 
         app(ReportSubmittedNotifier::class)->notify(
             $report,
@@ -231,6 +240,18 @@ class DailySiteReportService
                     'condition' => $row['condition'] ?? null,
                     'remarks' => $row['remarks'] ?? null,
                     'sort_order' => $index,
+                ]);
+            }
+        }
+
+        if (array_key_exists('stage_progress', $data)) {
+            DB::table('daily_site_report_stage_progress')->where('daily_site_report_id', $report->id)->delete();
+
+            foreach ((array) $data['stage_progress'] as $row) {
+                DB::table('daily_site_report_stage_progress')->insert([
+                    'daily_site_report_id' => $report->id,
+                    'project_stage_id' => (int) $row['stage_id'],
+                    'percent' => round((float) $row['percent'], 2),
                 ]);
             }
         }

@@ -23,6 +23,7 @@ class RoleSeeder extends Seeder
         'Site Supervisor',
         'Site Officer',
         'Technician',
+        'Sales',
         'Finance',
         'Management',
         'Employee',

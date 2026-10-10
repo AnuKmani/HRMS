@@ -10,6 +10,8 @@ use App\Http\Resources\ProjectResource;
 use App\Http\Responses\ApiResponse;
 use App\Http\Responses\PaginatedResponse;
 use App\Models\Project;
+use App\Services\Projects\ProjectProgressService;
+use App\Services\Projects\ProjectService;
 use App\Support\Visibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -32,7 +34,7 @@ class ProjectController extends Controller
         $this->authorize('viewAny', Project::class);
 
         $query = Project::query()
-            ->with(['projectManager', 'upcomingEvents'])
+            ->with(['projectManager', 'creator', 'upcomingEvents'])
             ->withCount(['sites', 'employees']);
 
         Visibility::projectsAndSitesFor($query, $request->user());
@@ -92,20 +94,27 @@ class ProjectController extends Controller
     {
         $this->authorize('view', $project);
 
-        $project->load(['projectManager', 'events', 'upcomingEvents'])->loadCount(['sites', 'employees']);
+        $project->load(self::DETAIL)->loadCount(['sites', 'employees']);
 
         return ApiResponse::success('Project retrieved.', new ProjectResource($project));
     }
 
     public function store(StoreProjectRequest $request): JsonResponse
     {
-        $project = Project::create($request->validated());
+        $project = app(ProjectService::class)->create($request->user(), $request->validated());
+        app(ProjectProgressService::class)->recompute($project);
 
         return ApiResponse::created(
             'Project created.',
-            new ProjectResource($project->load('projectManager')->loadCount(['sites', 'employees'])),
+            new ProjectResource($project->refresh()->load(self::DETAIL)->loadCount(['sites', 'employees'])),
         );
     }
+
+    /** Everything the project page shows. */
+    private const DETAIL = [
+        'projectManager', 'creator', 'events', 'upcomingEvents', 'stages',
+        'subcontractors', 'members.employee', 'paymentMilestones', 'documents',
+    ];
 
     public function update(UpdateProjectRequest $request, Project $project): JsonResponse
     {
@@ -115,7 +124,7 @@ class ProjectController extends Controller
 
         return ApiResponse::success(
             'Project updated.',
-            new ProjectResource($project->refresh()->load('projectManager')->loadCount(['sites', 'employees'])),
+            new ProjectResource($project->refresh()->load(self::DETAIL)->loadCount(['sites', 'employees'])),
         );
     }
 

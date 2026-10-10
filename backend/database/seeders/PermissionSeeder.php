@@ -174,6 +174,12 @@ class PermissionSeeder extends Seeder
         'projects' => [
             'projects.view',
             'projects.manage',
+            // Edit any project, not only the ones you created (Super Admin).
+            'projects.manage_all',
+            // Progress only: stages, %, history, milestones (Sales).
+            'projects.progress.view',
+            // Mark payment milestones requested / paid (Sales).
+            'projects.billing.manage',
         ],
         'sites' => [
             'sites.view',

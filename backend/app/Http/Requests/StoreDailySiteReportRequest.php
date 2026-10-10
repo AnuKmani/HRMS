@@ -81,6 +81,12 @@ class StoreDailySiteReportRequest extends FormRequest
             'delays' => ['nullable', 'string', 'max:1000'],
             'issues' => ['nullable', 'string', 'max:1000'],
             'remarks' => ['nullable', 'string', 'max:500'],
+
+            // How far each project stage has got, as of this report. On
+            // submit these become the project's progress.
+            'stage_progress' => ['nullable', 'array', 'max:50'],
+            'stage_progress.*.stage_id' => ['required', 'integer', 'distinct', Rule::exists('project_stages', 'id')->where('project_id', (int) $this->input('project_id', $this->route('dailySiteReport')?->project_id))],
+            'stage_progress.*.percent' => ['required', 'numeric', 'min:0', 'max:100'],
         ];
     }
 
