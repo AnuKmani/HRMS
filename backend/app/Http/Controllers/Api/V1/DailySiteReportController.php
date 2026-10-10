@@ -88,11 +88,11 @@ class DailySiteReportController extends Controller
         }
 
         if ($from = $this->param($request, 'from', 'date_from')) {
-            $query->where('report_date', '>=', $from);
+            $query->whereDate('report_date', '>=', $from);
         }
 
         if ($to = $this->param($request, 'to', 'date_to')) {
-            $query->where('report_date', '<=', $to);
+            $query->whereDate('report_date', '<=', $to);
         }
 
         if ($term = $this->searchTerm($request)) {

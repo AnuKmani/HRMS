@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\DailySiteReport;
+use App\Models\InAppNotification;
 use App\Models\Site;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -304,7 +305,7 @@ class DailySiteReportTest extends TestCase
 
     /* --------------------------------------------------------------- state */
 
-    public function test_the_document_can_be_corrected_only_while_it_is_a_draft(): void
+    public function test_the_document_can_be_corrected_until_the_end_of_the_submission_day(): void
     {
         $world = $this->world('Site Supervisor');
         $id = $this->postJson('/api/v1/daily-site-reports', $this->dailyPayload($world['site']))
@@ -318,11 +319,27 @@ class DailySiteReportTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.status', DailySiteReport::STATUS_SUBMITTED);
 
+        // Still the day it was submitted: the engineer can correct it.
         $this->putJson('/api/v1/daily-site-reports/'.$id, [
             'work_completed' => 'One more sentence.',
-        ])->assertStatus(409);
+        ])->assertOk()
+            ->assertJsonPath('data.status', DailySiteReport::STATUS_SUBMITTED)
+            ->assertJsonPath('data.is_editable', true)
+            ->assertJsonPath('data.work_completed', 'One more sentence.');
+        $this->assertNotNull($this->getJson('/api/v1/daily-site-reports/'.$id)->json('data.editable_until'));
 
+        // It is not submitted twice.
         $this->postJson('/api/v1/daily-site-reports/'.$id.'/submit')->assertStatus(409);
+
+        // From the next day it is the record: read-only for everybody.
+        $this->travel(1)->days();
+        $this->getJson('/api/v1/daily-site-reports/'.$id)
+            ->assertOk()
+            ->assertJsonPath('data.is_editable', false)
+            ->assertJsonPath('data.editable_until', null);
+        $this->putJson('/api/v1/daily-site-reports/'.$id, [
+            'work_completed' => 'Too late.',
+        ])->assertStatus(409);
     }
 
     public function test_filters_narrow_the_list_without_reaching_through_the_scope(): void
@@ -396,5 +413,37 @@ class DailySiteReportTest extends TestCase
 
         $this->getJson('/api/v1/daily-site-reports')->assertStatus(403);
         $this->postJson('/api/v1/daily-site-reports', [])->assertStatus(403);
+    }
+
+    public function test_the_engineer_submits_and_the_project_manager_finds_it_by_project_and_date(): void
+    {
+        $world = $this->world('Project Manager');
+        [$engineer] = $this->colleagueOn('Site Engineer', $world['site']);
+
+        $this->become($engineer);
+        $id = $this->postJson('/api/v1/daily-site-reports', $this->dailyPayload($world['site']))
+            ->assertCreated()->json('data.id');
+        $this->postJson('/api/v1/daily-site-reports/'.$id.'/submit')->assertOk();
+
+        // The project manager is told, and finds it by project and date.
+        $this->assertTrue(InAppNotification::query()
+            ->where('user_id', $world['user']->id)
+            ->where('type', 'site_report.submitted')
+            ->exists());
+
+        $this->become($world['user']);
+        $date = $this->getJson('/api/v1/daily-site-reports/'.$id)->assertOk()->json('data.report_date');
+        $found = $this->getJson('/api/v1/daily-site-reports?project_id='.$world['project']->id.'&from='.$date.'&to='.$date)
+            ->assertOk()->json('data.items');
+        $this->assertSame([$id], array_column($found, 'id'));
+
+        // Reads, never edits — even on the day.
+        $this->putJson('/api/v1/daily-site-reports/'.$id, ['work_completed' => 'PM edit'])->assertForbidden();
+
+        // Both can still open it long after.
+        $this->travel(40)->days();
+        $this->getJson('/api/v1/daily-site-reports/'.$id)->assertOk();
+        $this->become($engineer);
+        $this->getJson('/api/v1/daily-site-reports/'.$id)->assertOk()->assertJsonPath('data.is_editable', false);
     }
 }

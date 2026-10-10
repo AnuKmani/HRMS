@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
 
 /**
  * The official record of one site-day.
@@ -126,9 +127,28 @@ class DailySiteReport extends Model
         return $this->status === self::STATUS_SUBMITTED;
     }
 
+    /**
+     * A draft, or a submitted report on the day it was submitted. From the
+     * next day on the report is the record and nobody can change it.
+     */
     public function isEditable(): bool
     {
-        return $this->isDraft();
+        if ($this->isDraft()) {
+            return true;
+        }
+
+        return $this->isSubmitted()
+            && $this->approved_at === null
+            && $this->submitted_at !== null
+            && $this->submitted_at->isSameDay(now());
+    }
+
+    /** End of the day a submitted report can still be edited, or null. */
+    public function editableUntil(): ?Carbon
+    {
+        return $this->isSubmitted() && $this->isEditable()
+            ? $this->submitted_at->copy()->endOfDay()
+            : null;
     }
 
     /**

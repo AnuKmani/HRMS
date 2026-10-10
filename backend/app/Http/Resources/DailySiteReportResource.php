@@ -65,6 +65,8 @@ class DailySiteReportResource extends JsonResource
             'status' => $resource->status,
             'is_draft' => $resource->isDraft(),
             'is_editable' => $resource->isEditable(),
+            // Submitted reports stay editable until the end of that day.
+            'editable_until' => $resource->editableUntil()?->toIso8601String(),
             'submitted_at' => $resource->submitted_at?->toIso8601String(),
             'approved_at' => $resource->approved_at?->toIso8601String(),
 

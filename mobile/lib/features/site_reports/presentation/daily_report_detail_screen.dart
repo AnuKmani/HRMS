@@ -413,6 +413,26 @@ class _DailySiteReportDetailScreenState
               ),
               const SizedBox(height: 16),
             ],
+            if (editable && report.isSubmitted)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  'Submitted today — you can still correct it until '
+                  'midnight. After that it is locked.',
+                  key: const ValueKey('daily-report-editable-today'),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            if (!report.isEditable && report.isSubmitted)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  'Locked — a report can be changed only on the day it was '
+                  'submitted.',
+                  key: const ValueKey('daily-report-locked'),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
             if (editable)
               FilledButton(
                 key: const ValueKey('edit-daily-report'),

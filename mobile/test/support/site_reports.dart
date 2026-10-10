@@ -112,6 +112,7 @@ Map<String, dynamic> _photoJson(SiteReportPhoto photo) => <String, dynamic>{
 DailySiteReport testDailyReport({
   int id = 1,
   String status = DailySiteReport.statusDraft,
+  bool submittedToday = false,
   String date = '2026-09-28',
   bool editable = true,
   List<ManpowerRow> manpower = const <ManpowerRow>[
@@ -137,7 +138,9 @@ DailySiteReport testDailyReport({
   'status': status,
   'is_draft': status == DailySiteReport.statusDraft,
   // As on the activity fixture: a filed document is never editable.
-  'is_editable': editable && status == DailySiteReport.statusDraft,
+  'is_editable':
+      editable && (status == DailySiteReport.statusDraft || submittedToday),
+  'editable_until': submittedToday ? '2026-09-28T23:59:59+00:00' : null,
   'submitted_at': status == DailySiteReport.statusSubmitted
       ? '2026-09-28 18:30:00'
       : null,

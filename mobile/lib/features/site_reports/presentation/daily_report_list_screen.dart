@@ -56,21 +56,40 @@ class DailySiteReportListScreen extends ConsumerWidget {
         emptyHint:
             'One document per site per day. It appears here as soon as '
             'somebody starts it.',
-        filter: _DailyReportStatusFilter(
-          value: ref.watch(
-            dailySiteReportsListProvider.select(
-              (state) => state.query['status'] as String?,
+        filter: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _DailyReportStatusFilter(
+              value: ref.watch(
+                dailySiteReportsListProvider.select(
+                  (state) => state.query['status'] as String?,
+                ),
+              ),
+              onChanged: (status) => ref
+                  .read(dailySiteReportsListProvider.notifier)
+                  .setFilter('status', status),
             ),
-          ),
-          onChanged: (status) => ref
-              .read(dailySiteReportsListProvider.notifier)
-              .setFilter('status', status),
+            const SizedBox(height: 8),
+            _DailyReportDateFilter(
+              value: ref.watch(
+                dailySiteReportsListProvider.select(
+                  (state) => state.query['from'] as String?,
+                ),
+              ),
+              onChanged: (date) {
+                final list = ref.read(dailySiteReportsListProvider.notifier);
+                list.setFilter('from', date);
+                list.setFilter('to', date);
+              },
+            ),
+          ],
         ),
         itemBuilder: (context, report, index) => ListTile(
           key: ValueKey('daily-report-row-${report.id}'),
           title: Text('${report.reportDate} · ${report.siteName ?? 'Site'}'),
           subtitle: Text(
             [
+              if (report.projectName != null) report.projectName!,
               'By ${report.creatorName ?? 'someone'}',
               '${report.displayTotalManpower} on site',
             ].join(' · '),
@@ -124,6 +143,53 @@ class _DailyReportStatusFilter extends StatelessWidget {
           onChanged: onChanged,
         ),
       ),
+    );
+  }
+}
+
+/// "All dates" or one day — reports are kept date-wise for every project.
+class _DailyReportDateFilter extends StatelessWidget {
+  const _DailyReportDateFilter({required this.value, required this.onChanged});
+
+  final String? value;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = this.value;
+
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            key: const ValueKey('daily-report-date-filter'),
+            icon: const Icon(Icons.calendar_month),
+            label: Text(value == null ? 'All dates' : 'Date: $value'),
+            onPressed: () async {
+              final now = DateTime.now();
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: DateTime.tryParse(value ?? '') ?? now,
+                firstDate: DateTime(now.year - 5),
+                lastDate: now,
+              );
+              if (picked == null) return;
+              onChanged(
+                '${picked.year.toString().padLeft(4, '0')}-'
+                '${picked.month.toString().padLeft(2, '0')}-'
+                '${picked.day.toString().padLeft(2, '0')}',
+              );
+            },
+          ),
+        ),
+        if (value != null)
+          IconButton(
+            key: const ValueKey('daily-report-date-clear'),
+            tooltip: 'All dates',
+            icon: const Icon(Icons.close),
+            onPressed: () => onChanged(null),
+          ),
+      ],
     );
   }
 }

@@ -132,6 +132,9 @@ class _DailySiteReportFormScreenState
   bool _loading = false;
   bool _saving = false;
   bool _submitting = false;
+
+  /// Editing a report already submitted today: saved, not submitted again.
+  bool _alreadySubmitted = false;
   bool _forbidden = false;
   bool _draftRestored = false;
 
@@ -250,6 +253,7 @@ class _DailySiteReportFormScreenState
       _disposeRows(_equipment);
 
       setState(() {
+        _alreadySubmitted = report.isSubmitted;
         _date.text = report.reportDate;
         _workPlanned.text = report.workPlanned;
         _workCompleted.text = report.workCompleted;
@@ -1094,17 +1098,26 @@ class _DailySiteReportFormScreenState
                           ),
                   ),
                   const SizedBox(height: 12),
-                  OutlinedButton(
-                    key: const ValueKey('submit-daily-report'),
-                    onPressed: _saving || _submitting ? null : _submit,
-                    child: _submitting
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Submit report'),
-                  ),
+                  if (_alreadySubmitted)
+                    Text(
+                      'Already submitted to your project manager. You can '
+                      'correct it until midnight today; after that it is '
+                      'locked.',
+                      key: const ValueKey('daily-report-submitted-note'),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    )
+                  else
+                    OutlinedButton(
+                      key: const ValueKey('submit-daily-report'),
+                      onPressed: _saving || _submitting ? null : _submit,
+                      child: _submitting
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Submit report'),
+                    ),
                   const SizedBox(height: 16),
                   Text(
                     'There is one report per site per day. If somebody has '

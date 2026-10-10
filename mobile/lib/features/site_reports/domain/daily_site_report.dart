@@ -41,6 +41,7 @@ class DailySiteReport {
     this.updatedAt,
     this.isDraft = true,
     this.isEditable = true,
+    this.editableUntil,
     this.manpower = const <ManpowerRow>[],
     this.materials = const <MaterialRow>[],
     this.equipment = const <EquipmentRow>[],
@@ -81,6 +82,10 @@ class DailySiteReport {
 
   final bool isDraft;
   final bool isEditable;
+
+  /// For a submitted report: the end of the submission day, after which it
+  /// is read-only. Null for a draft or a locked report.
+  final String? editableUntil;
 
   /// The four child sets. Each is empty both for "this report has none" and
   /// for "this response did not carry them" â€” the list endpoint omits all
@@ -144,6 +149,7 @@ class DailySiteReport {
         updatedAt: json['updated_at'] as String?,
         isDraft: json['is_draft'] == true,
         isEditable: json['is_editable'] == true,
+        editableUntil: json['editable_until'] as String?,
         manpower: _rows(json['manpower'], ManpowerRow.fromJson),
         materials: _rows(json['materials'], MaterialRow.fromJson),
         equipment: _rows(json['equipment'], EquipmentRow.fromJson),

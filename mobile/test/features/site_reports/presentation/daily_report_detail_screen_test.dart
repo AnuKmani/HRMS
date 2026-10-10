@@ -186,6 +186,33 @@ void main() {
       expect(find.text('2026-09-28 18:30:00'), findsOneWidget);
     });
 
+    testWidgets('a report submitted today can still be corrected today', (
+      tester,
+    ) async {
+      await openDetail(
+        tester,
+        report: testDailyReport(
+          status: DailySiteReport.statusSubmitted,
+          submittedToday: true,
+        ),
+      );
+
+      expect(find.byKey(const ValueKey('edit-daily-report')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('daily-report-editable-today')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('from the next day it says it is locked', (tester) async {
+      await openDetail(
+        tester,
+        report: testDailyReport(status: DailySiteReport.statusSubmitted),
+      );
+
+      expect(find.byKey(const ValueKey('daily-report-locked')), findsOneWidget);
+    });
+
     testWidgets('walks to the edit form with the row it named', (tester) async {
       await openDetail(tester);
 

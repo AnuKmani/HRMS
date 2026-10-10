@@ -107,6 +107,10 @@ class DailySiteReportService
      */
     public function submit(User $user, DailySiteReport $report): DailySiteReport
     {
+        if (! $report->isDraft()) {
+            abort(409, 'This report has already been submitted. You can still edit it today.');
+        }
+
         $this->assertEditable($report);
 
         $site = $report->site;
@@ -293,7 +297,7 @@ class DailySiteReportService
     private function assertEditable(DailySiteReport $report): void
     {
         if (! $report->isEditable()) {
-            abort(409, 'Only a draft can be edited. This report has already been submitted.');
+            abort(409, 'This report can no longer be edited. A submitted report can be changed only on the day it was submitted.');
         }
     }
 }

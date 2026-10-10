@@ -93,8 +93,8 @@ void main() {
 
       expect(find.text('2026-09-28 · Block A'), findsOneWidget);
       expect(find.text('2026-09-29 · Block A'), findsOneWidget);
-      expect(find.text('By Anu Kmani · 18 on site'), findsOneWidget);
-      expect(find.text('By Anu Kmani · 4 on site'), findsOneWidget);
+      expect(find.textContaining('By Anu Kmani · 18 on site'), findsOneWidget);
+      expect(find.textContaining('By Anu Kmani · 4 on site'), findsOneWidget);
       expect(find.text('Draft'), findsOneWidget);
       expect(find.text('Submitted'), findsOneWidget);
     });
