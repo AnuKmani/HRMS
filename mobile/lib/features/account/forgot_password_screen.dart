@@ -98,8 +98,11 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Open the link in the email to choose a new password, then '
-              'sign in here with it.',
+              'HR will give you a new temporary password (in person, by '
+              'phone or message). Sign in with it and the app will ask you '
+              'to choose your own. If email is set up for your company, a '
+              'reset link may also arrive by email.',
+              key: const ValueKey('reset-next-steps'),
               style: Theme.of(context).textTheme.bodyMedium,
             ),
           ] else ...[
@@ -107,8 +110,8 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
             Padding(
               padding: const EdgeInsets.only(bottom: 16),
               child: Text(
-                'Enter the email address of your work account and we will '
-                'send you a link to choose a new password.',
+                'Enter the email address of your work account. HR will be '
+                'asked to reset your password and give you a temporary one.',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
             ),
@@ -132,7 +135,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                       width: 20,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('Send reset link'),
+                  : const Text('Ask HR to reset my password'),
             ),
           ],
         ],

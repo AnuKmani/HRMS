@@ -121,6 +121,7 @@ final class NotificationCategory
         'asset.returned' => self::ASSET,
 
         'security.password_changed' => self::SECURITY,
+        'security.password_help' => self::SECURITY,
         'security.session_revoked' => self::SECURITY,
     ];
 

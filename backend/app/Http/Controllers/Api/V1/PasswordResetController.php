@@ -6,6 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\ForgotPasswordRequest;
 use App\Http\Requests\Auth\ResetPasswordRequest;
 use App\Http\Responses\ApiResponse;
+use App\Models\User;
+use App\Services\Notifications\NotificationMessage;
+use App\Services\Notifications\NotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -87,11 +90,67 @@ class PasswordResetController extends Controller
             'ip' => $request->ip(),
         ]);
 
+        // Telling HR is a courtesy: whatever goes wrong there (no roles
+        // seeded, a notification failing) must never break this answer.
+        try {
+            $this->askHrToHelp((string) $request->validated('email'));
+        } catch (\Throwable $exception) {
+            Log::warning('auth.password_help_failed', ['error' => $exception->getMessage()]);
+        }
+
+        // Identical whether or not the address exists: the answer must not
+        // tell a stranger which emails have accounts.
         return ApiResponse::success(
-            'If that email address is registered, a password reset link has been sent.',
+            'If that email address is registered, HR has been asked to reset your password. They will give you a new temporary password.',
             null,
             202,
         );
+    }
+
+    /**
+     * Someone who forgot their password cannot sign in to say so. Tell the
+     * people who can reset it — HR / Super Admin (users.manage) — with a
+     * link to that person's profile, where Reset password is. Once per
+     * person per day, so a worried tapper does not flood the bell.
+     */
+    private function askHrToHelp(string $email): void
+    {
+        $user = User::query()
+            ->with('employee')
+            ->where('email', strtolower(trim($email)))
+            ->where('status', User::STATUS_ACTIVE)
+            ->first();
+
+        if ($user === null) {
+            return;
+        }
+
+        $helpers = User::permission('users.manage')
+            ->where('status', User::STATUS_ACTIVE)
+            ->whereKeyNot($user->id)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        if ($helpers === []) {
+            return;
+        }
+
+        $name = $user->employee?->full_name ?: $user->name;
+
+        app(NotificationService::class)->send(new NotificationMessage(
+            type: 'security.password_help',
+            title: 'Password reset requested',
+            body: sprintf(
+                '%s (%s) forgot their password. Open their profile and tap Reset password to give them a new temporary one.',
+                $name,
+                $user->email,
+            ),
+            recipients: $helpers,
+            data: $user->employee !== null ? ['route' => '/employees/'.$user->employee->id] : [],
+            mandatory: true,
+            dedupeKey: 'password-help:'.$user->id.':'.now()->toDateString(),
+        ));
     }
 
     /**

@@ -93,7 +93,7 @@ class FakeAccount implements AccountRepository {
   @override
   Future<String> requestPasswordReset(String email) async {
     resets.add(email);
-    return 'If that email address is registered, a password reset link has been sent.';
+    return 'If that email address is registered, HR has been asked to reset your password. They will give you a new temporary password.';
   }
 
   final List<DeviceSession> devices = [
@@ -398,16 +398,18 @@ void main() {
       expect(find.byType(ForgotPasswordScreen), findsOneWidget);
 
       await tester.enterText(find.byType(TextField), ' someone@example.com ');
+      expect(find.text('Ask HR to reset my password'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('send-reset-link')));
       await advance(tester);
 
       expect(account.resets, ['someone@example.com']);
       expect(
         find.text(
-          'If that email address is registered, a password reset link has been sent.',
+          'If that email address is registered, HR has been asked to reset your password. They will give you a new temporary password.',
         ),
         findsOneWidget,
       );
+      expect(find.byKey(const ValueKey('reset-next-steps')), findsOneWidget);
 
       await tester.pageBack();
       await advance(tester);
