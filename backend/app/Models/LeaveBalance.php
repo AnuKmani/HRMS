@@ -90,7 +90,7 @@ class LeaveBalance extends Model
      */
     public function wouldGoNegative(float $days): bool
     {
-        if ((bool) $this->leaveType?->allow_negative_balance) {
+        if ((bool) $this->leaveType?->allow_negative_balance || (bool) $this->leaveType?->is_unlimited) {
             return false;
         }
 

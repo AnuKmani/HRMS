@@ -9,6 +9,7 @@ use App\Http\Requests\UpdateLeaveTypeRequest;
 use App\Http\Resources\LeaveTypeResource;
 use App\Http\Responses\ApiResponse;
 use App\Http\Responses\PaginatedResponse;
+use App\Models\LeaveBalance;
 use App\Models\LeaveType;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -82,7 +83,18 @@ class LeaveTypeController extends Controller
 
     public function update(UpdateLeaveTypeRequest $request, LeaveType $leaveType): JsonResponse
     {
+        $before = (int) $leaveType->entitlement_days;
         $leaveType->update($request->validated());
+
+        // New days per year reach everyone this year — except people HR
+        // has already given their own figure.
+        if ((int) $leaveType->entitlement_days !== $before) {
+            LeaveBalance::query()
+                ->where('leave_type_id', $leaveType->id)
+                ->where('year', now()->year)
+                ->where('entitlement', $before)
+                ->update(['entitlement' => $leaveType->entitlement_days]);
+        }
 
         return ApiResponse::success('Leave type updated.', new LeaveTypeResource($leaveType->refresh()));
     }

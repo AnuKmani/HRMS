@@ -44,6 +44,7 @@ import '../../features/payroll/presentation/payroll_detail_screen.dart';
 import '../../features/payroll/presentation/payroll_list_screen.dart';
 import '../../features/payroll/presentation/salary_slips_screen.dart';
 import '../../features/projects/presentation/project_detail_screen.dart';
+import '../../features/leave/presentation/hr_leave_screens.dart';
 import '../../features/projects/presentation/project_form_screen.dart';
 import '../../features/projects/presentation/project_progress_screens.dart';
 import '../../features/projects/presentation/projects_list_screen.dart';
@@ -335,6 +336,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/leave/new',
         builder: (context, state) => const LeaveFormScreen(),
+      ),
+      GoRoute(
+        path: '/leave-overview',
+        builder: (context, state) => const LeaveOverviewScreen(),
+      ),
+      GoRoute(
+        path: '/leave-types',
+        builder: (context, state) => const LeaveTypesAdminScreen(),
       ),
       GoRoute(
         path: '/leave-balances',

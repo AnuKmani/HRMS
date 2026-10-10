@@ -46,6 +46,7 @@ class StoreLeaveTypeRequest extends FormRequest
             'description' => ['nullable', 'string', 'max:500'],
 
             'entitlement_days' => ['required', 'integer', 'min:0', 'max:365'],
+            'is_unlimited' => ['sometimes', 'boolean'],
             'carry_forward_enabled' => ['sometimes', 'boolean'],
             'carry_forward_limit' => ['sometimes', 'integer', 'min:0', 'max:365'],
             'maximum_days_per_request' => ['required', 'integer', 'min:0', 'max:365'],

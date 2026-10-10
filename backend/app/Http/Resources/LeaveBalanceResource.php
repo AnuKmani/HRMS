@@ -43,6 +43,7 @@ class LeaveBalanceResource extends JsonResource
             'used' => (float) $resource->used,
             'pending' => (float) $resource->pending,
             'remaining' => $resource->remaining(),
+            'unlimited' => (bool) $resource->leaveType?->is_unlimited,
 
             // Kept so a client can flag a pot that has been driven below zero
             // by an adjustment without repeating the formula in Dart.

@@ -36,6 +36,7 @@ class LeaveTypeResource extends JsonResource
             'description' => $resource->description,
 
             'entitlement_days' => $resource->entitlement_days,
+            'is_unlimited' => (bool) $resource->is_unlimited,
             'carry_forward_enabled' => $resource->carry_forward_enabled,
             'carry_forward_limit' => $resource->carry_forward_limit,
             'maximum_days_per_request' => $resource->maximum_days_per_request,

@@ -33,6 +33,7 @@ class LeaveType extends Model
         'code',
         'description',
         'entitlement_days',
+        'is_unlimited',
         'carry_forward_enabled',
         'carry_forward_limit',
         'maximum_days_per_request',
@@ -46,6 +47,7 @@ class LeaveType extends Model
 
     protected $casts = [
         'entitlement_days' => 'integer',
+        'is_unlimited' => 'boolean',
         'carry_forward_enabled' => 'boolean',
         'carry_forward_limit' => 'integer',
         'maximum_days_per_request' => 'integer',

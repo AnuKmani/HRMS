@@ -24,6 +24,7 @@ use App\Http\Controllers\Api\V1\EmployeeTrainingController;
 use App\Http\Controllers\Api\V1\ExpenseController;
 use App\Http\Controllers\Api\V1\HolidayController;
 use App\Http\Controllers\Api\V1\LeaveBalanceController;
+use App\Http\Controllers\Api\V1\LeaveOverviewController;
 use App\Http\Controllers\Api\V1\LeaveRequestController;
 use App\Http\Controllers\Api\V1\LeaveTypeController;
 use App\Http\Controllers\Api\V1\LoanController;
@@ -413,6 +414,10 @@ Route::prefix('v1')->group(function () {
         Route::delete('leave-types/{leaveType}', [LeaveTypeController::class, 'destroy'])
             ->whereNumber('leaveType')
             ->middleware('permission:leave.manage');
+
+        // HR's company-wide leave picture.
+        Route::get('leave-overview', LeaveOverviewController::class)
+            ->middleware('permission:leave.balance.manage');
 
         // Leave balances — read with leave, write with HR.
         Route::get('leave-balances', [LeaveBalanceController::class, 'index'])

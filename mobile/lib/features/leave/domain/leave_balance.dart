@@ -25,7 +25,11 @@ class LeaveBalance {
     required this.isNegative,
     this.leaveType,
     this.employeeName,
+    this.unlimited = false,
   });
+
+  /// The type has no yearly limit.
+  final bool unlimited;
 
   final int id;
   final int employeeId;
@@ -52,16 +56,16 @@ class LeaveBalance {
 
   /// A whole number of days renders without a trailing `.0`; a half day does
   /// not lose the half.
-  String get remainingLabel => _days(remaining);
+  String get remainingLabel => unlimited ? 'Unlimited' : _days(remaining);
 
   String get usedLabel => _days(used);
 
   String get pendingLabel => _days(pending);
 
   /// One line for a list row: what was granted, what is gone, what is left.
-  String get summary =>
-      '$usedLabel used · $pendingLabel pending · '
-      '$remainingLabel left';
+  String get summary => unlimited
+      ? '$usedLabel used · $pendingLabel pending · no limit'
+      : '$usedLabel used · $pendingLabel pending · $remainingLabel left';
 
   static String _days(double value) {
     if (value == value.roundToDouble()) return value.toStringAsFixed(0);
@@ -83,6 +87,7 @@ class LeaveBalance {
     isNegative: json['is_negative'] == true,
     leaveType: _typeName(json['leave_type']),
     employeeName: _typeName(json['employee']),
+    unlimited: json['unlimited'] == true,
   );
 }
 

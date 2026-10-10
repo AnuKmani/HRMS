@@ -22,7 +22,11 @@ class LeaveType {
     required this.allowNegativeBalance,
     required this.status,
     this.approvalWorkflowId,
+    this.isUnlimited = false,
   });
+
+  /// No yearly limit — requests are never refused for want of days.
+  final bool isUnlimited;
 
   final int id;
   final String name;
@@ -55,7 +59,12 @@ class LeaveType {
   String get pickerLabel {
     final parts = <String>[
       name,
-      if (isPaid) '$entitlementDays days' else 'unpaid',
+      if (isUnlimited)
+        'unlimited'
+      else if (isPaid)
+        '$entitlementDays days'
+      else
+        'unpaid',
       if (requiresDocument) 'certificate',
     ];
 
@@ -67,7 +76,10 @@ class LeaveType {
   String get helpText {
     final parts = <String>[
       if (isPaid) 'Paid leave' else 'Unpaid leave',
-      if (entitlementDays > 0) 'Entitlement $entitlementDays days',
+      if (isUnlimited)
+        'No yearly limit'
+      else if (entitlementDays > 0)
+        'Entitlement $entitlementDays days',
       if (maximumDaysPerRequest != null)
         'Up to $maximumDaysPerRequest days per request',
       if (requiresDocument)
@@ -93,6 +105,7 @@ class LeaveType {
     allowNegativeBalance: json['allow_negative_balance'] == true,
     status: json['status'] as String? ?? 'active',
     approvalWorkflowId: _int(json['approval_workflow_id']),
+    isUnlimited: json['is_unlimited'] == true,
   );
 }
 

@@ -171,6 +171,22 @@ class HomeScreen extends ConsumerWidget {
           '/leave',
           'Apply, approve and track time off',
         ),
+      // HR: everyone's leave left, approved / rejected / cancelled, and the
+      // leave types themselves.
+      if (scope.canManageLeaveBalances)
+        _Module(
+          'Leave overview',
+          Icons.event_note_outlined,
+          '/leave-overview',
+          "Everyone's leave left and history",
+        ),
+      if (scope.canManageLeave)
+        _Module(
+          'Leave types',
+          Icons.tune,
+          '/leave-types',
+          'Days per year, unlimited, certificate',
+        ),
       if (scope.canViewTimesheets)
         _Module(
           'Timesheets',
@@ -535,8 +551,11 @@ String _sectionOf(String label) => switch (label) {
   'Designations' ||
   'Onboarding' ||
   'Documents' ||
+  'Leave overview' ||
+  'Leave types' ||
   'Training' => 'People',
   'Projects' ||
+  'Project progress' ||
   'Sites' ||
   'Site assignments' ||
   'Quick site setup' ||
@@ -553,7 +572,7 @@ String _sectionOf(String label) => switch (label) {
 
 Color _colorOf(String label) => switch (label) {
   'Attendance' || 'Attendance records' => ModuleColors.attendance,
-  'Leave' => ModuleColors.leave,
+  'Leave' || 'Leave overview' || 'Leave types' => ModuleColors.leave,
   'Timesheets' || 'Overtime' => ModuleColors.time,
   'Holidays' => ModuleColors.calendar,
   'Employees' || 'Onboarding' => ModuleColors.people,
