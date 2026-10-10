@@ -111,8 +111,12 @@ final class AttendanceService
                     abort(409, 'You have already checked in today.');
                 }
 
-                // 3. Nothing may start while something else is unfinished.
-                $open = $this->openAttendanceQuery($employee)->lockForUpdate()->first();
+                // 3. Nothing may start while something else is unfinished —
+                //    except a forgotten earlier day already flagged
+                //    "missing check-out": that one is HR's to correct, and
+                //    it must not stop this morning's check-in.
+                $this->flagMissingCheckouts($employee);
+                $open = $this->pendingAttendanceQuery($employee)->lockForUpdate()->first();
 
                 if ($open !== null) {
                     abort(
@@ -234,10 +238,10 @@ final class AttendanceService
                     abort(409, 'You have already checked out today.');
                 }
 
-                // The row being closed may be yesterday's — that is exactly
-                // the missing-checkout case, and it is closed here rather
-                // than silently abandoned.
-                $open = $this->openAttendanceQuery($employee)->lockForUpdate()->first();
+                // The row being closed may be yesterday's (a night shift
+                // still inside its schedule). One already flagged "missing
+                // check-out" is left for HR rather than closed a day late.
+                $open = $this->pendingAttendanceQuery($employee)->lockForUpdate()->first();
 
                 if ($open === null) {
                     throw ValidationException::withMessages([
@@ -372,7 +376,7 @@ final class AttendanceService
             ->where('attendance_date', now()->toDateString())
             ->first();
 
-        $open = $this->openAttendanceQuery($employee)
+        $open = $this->pendingAttendanceQuery($employee)
             ->with(['site.project', 'shift'])
             ->first();
 
@@ -469,6 +473,23 @@ final class AttendanceService
                     });
             })
             ->update(['status' => $this->statuses->missingCheckout()]);
+    }
+
+    /**
+     * The open day this employee can still act on: today's, or an earlier
+     * one that has not been flagged as a missing check-out (a night shift
+     * inside its schedule). A forgotten earlier day is excluded — the
+     * morning after shows CHECK IN, not yesterday's CHECK OUT.
+     */
+    public function pendingAttendanceQuery(Employee $employee)
+    {
+        $today = now()->toDateString();
+
+        return $this->openAttendanceQuery($employee)
+            ->where(function ($query) use ($today) {
+                $query->whereDate('attendance_date', $today)
+                    ->orWhere('status', '!=', $this->statuses->missingCheckout());
+            });
     }
 
     public function openAttendanceQuery(Employee $employee)

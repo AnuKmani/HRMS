@@ -292,6 +292,10 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
           ] else
             const SizedBox(height: 8),
           ..._actions(state, controller),
+          if (today.canStartSiteVisit || state.visits.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            _visitsCard(state),
+          ],
           if (state.pending.isNotEmpty) ...[
             const SizedBox(height: 20),
             _queueCard(state, controller),
@@ -553,10 +557,16 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
       buttons.add(
         _bigButton(
           valueKey: const ValueKey('attendance-site-visit'),
-          label: state.openVisit == null
+          label: state.openVisit != null
+              ? 'END SITE VISIT (SITE OUT)'
+              : state.visits.isEmpty
               ? 'START SITE VISIT'
-              : 'END SITE VISIT',
-          icon: Icons.explore_outlined,
+              : 'ADD ANOTHER SITE VISIT',
+          icon: state.openVisit != null
+              ? Icons.logout
+              : state.visits.isEmpty
+              ? Icons.explore_outlined
+              : Icons.add_location_alt_outlined,
           enabled: canAct && hasLocation && !noSites,
           loading: state.submitting,
           outlined: true,
@@ -627,6 +637,74 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
             icon: Icon(icon),
             label: child,
           );
+  }
+
+  /// Today's site visits, in order: where, why, in and out, how long, and
+  /// how far the phone was from the site when it was recorded.
+  Widget _visitsCard(AttendanceState state) {
+    final theme = Theme.of(context);
+    final visits = state.visits;
+
+    return Card(
+      key: const ValueKey('attendance-visits'),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              visits.isEmpty
+                  ? "Today's site visits"
+                  : "Today's site visits (${visits.length})",
+              style: theme.textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            if (visits.isEmpty)
+              Text(
+                'None yet. Tap START SITE VISIT when you reach a site, and '
+                'END SITE VISIT when you leave it.',
+                style: theme.textTheme.bodySmall,
+              ),
+            for (final (index, visit) in visits.indexed)
+              ListTile(
+                key: ValueKey('visit-row-${visit.id}'),
+                contentPadding: EdgeInsets.zero,
+                leading: CircleAvatar(
+                  radius: 16,
+                  backgroundColor: visit.isOpen
+                      ? Colors.green.shade600
+                      : theme.colorScheme.surfaceContainerHighest,
+                  child: Text(
+                    '${index + 1}',
+                    style: TextStyle(
+                      color: visit.isOpen ? Colors.white : null,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                title: Text(
+                  visit.siteName ?? 'Site',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                subtitle: Text(
+                  [
+                    visit.isOpen
+                        ? 'In ${_hhmm(visit.startedAt)} · on site now'
+                        : 'In ${_hhmm(visit.startedAt)} · Out ${_hhmm(visit.endedAt)}'
+                              '${visit.durationMinutes == null ? '' : ' · ${_minutes(visit.durationMinutes!)}'}',
+                    visit.purpose,
+                    if (visit.startDistance != null)
+                      visit.startDistance! <= 150
+                          ? 'At the site'
+                          : '${visit.startDistance!.round()} m from the site',
+                  ].join('\n'),
+                ),
+                isThreeLine: true,
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _queueCard(AttendanceState state, AttendanceController controller) {

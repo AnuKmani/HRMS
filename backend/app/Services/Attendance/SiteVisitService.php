@@ -6,6 +6,8 @@ use App\Models\Employee;
 use App\Models\Site;
 use App\Models\SiteVisit;
 use App\Models\User;
+use App\Services\SettingsService;
+use App\Support\Geo;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -26,6 +28,7 @@ final class SiteVisitService
     public function __construct(
         private readonly GeofenceService $geofence,
         private readonly SiteAccessValidator $siteAccess,
+        private readonly SettingsService $settings,
     ) {}
 
     /**
@@ -70,16 +73,7 @@ final class SiteVisitService
             }
 
             $point = ClientInput::point($data);
-            $result = $this->geofence->evaluate(
-                $site,
-                $point['latitude'],
-                $point['longitude'],
-                $point['accuracy'],
-            );
-
-            if (! $result->allowed) {
-                throw ValidationException::withMessages(['location' => $result->message]);
-            }
+            $distance = $this->distanceFrom($site, $point);
 
             $visit = new SiteVisit;
             $visit->employee_id = $employee->id;
@@ -89,7 +83,7 @@ final class SiteVisitService
             $visit->start_latitude = $point['latitude'];
             $visit->start_longitude = $point['longitude'];
             $visit->start_accuracy = $point['accuracy'];
-            $visit->start_distance = $result->distanceMetresRounded();
+            $visit->start_distance = $distance;
             $visit->purpose = (string) $data['purpose'];
             $visit->remarks = $data['remarks'] ?? null;
             $visit->status = SiteVisit::STATUS_OPEN;
@@ -133,25 +127,14 @@ final class SiteVisitService
                 abort(409, 'That site visit has already been ended.');
             }
 
-            $site = $locked->site;
-
             $point = ClientInput::point($data);
-            $result = $this->geofence->evaluate(
-                $site,
-                $point['latitude'],
-                $point['longitude'],
-                $point['accuracy'],
-            );
-
-            if (! $result->allowed) {
-                throw ValidationException::withMessages(['location' => $result->message]);
-            }
+            $distance = $this->distanceFrom($locked->site, $point);
 
             $locked->ended_at = now();
             $locked->end_latitude = $point['latitude'];
             $locked->end_longitude = $point['longitude'];
             $locked->end_accuracy = $point['accuracy'];
-            $locked->end_distance = $result->distanceMetresRounded();
+            $locked->end_distance = $distance;
             $locked->remarks = $data['remarks'] ?? $locked->remarks;
             $locked->status = SiteVisit::STATUS_COMPLETED;
             $locked->end_client_event_id = $eventId;
@@ -159,6 +142,42 @@ final class SiteVisitService
 
             return $locked;
         });
+    }
+
+    /**
+     * How far the phone was from the site, in metres — recorded, not
+     * judged. A site visit is a record of where somebody went and when; a
+     * weak GPS fix or a site nobody has pinned on the map must not stop it
+     * being written. The distance (null when the site has no location) is
+     * what a manager reads to see whether they were really there.
+     *
+     * A deployment that wants visits refused outside the site radius sets
+     * `attendance.site_visit_requires_geofence`.
+     *
+     * @param  array{latitude: float, longitude: float, accuracy: ?float}  $point
+     */
+    private function distanceFrom(?Site $site, array $point): ?int
+    {
+        if ($site !== null && $this->settings->bool('attendance.site_visit_requires_geofence', false)) {
+            $result = $this->geofence->evaluate($site, $point['latitude'], $point['longitude'], $point['accuracy']);
+
+            if (! $result->allowed) {
+                throw ValidationException::withMessages(['location' => $result->message]);
+            }
+
+            return $result->distanceMetresRounded();
+        }
+
+        if ($site === null || $site->latitude === null || $site->longitude === null) {
+            return null;
+        }
+
+        return (int) round(Geo::distanceMetres(
+            (float) $site->latitude,
+            (float) $site->longitude,
+            $point['latitude'],
+            $point['longitude'],
+        ));
     }
 
     /**

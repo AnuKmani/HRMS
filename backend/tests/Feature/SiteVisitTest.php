@@ -5,9 +5,11 @@ namespace Tests\Feature;
 use App\Models\Employee;
 use App\Models\EmployeeSiteAssignment;
 use App\Models\Project;
+use App\Models\Setting;
 use App\Models\Site;
 use App\Models\SiteVisit;
 use App\Models\User;
+use App\Services\SettingsService;
 use Database\Seeders\PermissionSeeder;
 use Database\Seeders\RolePermissionSeeder;
 use Database\Seeders\RoleSeeder;
@@ -174,6 +176,8 @@ class SiteVisitTest extends TestCase
 
     public function test_a_visit_outside_the_geofence_is_refused(): void
     {
+        $this->requireGeofence();
+
         $world = $this->world();
         Sanctum::actingAs($world['user']);
 
@@ -323,6 +327,8 @@ class SiteVisitTest extends TestCase
 
     public function test_a_visit_cannot_be_ended_from_outside_its_geofence(): void
     {
+        $this->requireGeofence();
+
         $world = $this->world();
         Sanctum::actingAs($world['user']);
 
@@ -500,5 +506,52 @@ class SiteVisitTest extends TestCase
             'longitude' => 77.5946,
             'accuracy' => 5.0,
         ])->assertStatus(403);
+    }
+
+    private function requireGeofence(): void
+    {
+        Setting::query()
+            ->where('key', 'attendance.site_visit_requires_geofence')
+            ->update(['value' => '1']);
+        app(SettingsService::class)->refresh();
+    }
+
+    public function test_by_default_a_visit_far_from_the_site_is_still_recorded_with_its_distance(): void
+    {
+        $world = $this->world();
+        Sanctum::actingAs($world['user']);
+
+        // Roughly 1.1 km north of the site.
+        $far = [
+            'latitude' => (float) $world['site']->latitude + 0.01,
+            'longitude' => (float) $world['site']->longitude,
+        ];
+
+        $id = $this->postJson('/api/v1/site-visits/start', $far + $this->payload($world['site']))
+            ->assertCreated()
+            ->json('data.id');
+
+        $visit = SiteVisit::query()->findOrFail($id);
+        $this->assertGreaterThan(1000, (float) $visit->start_distance);
+
+        $this->postJson("/api/v1/site-visits/{$id}/end", $far + ['accuracy' => 15])
+            ->assertOk();
+        $this->assertNotNull($visit->fresh()->ended_at);
+        $this->assertGreaterThan(1000, (float) $visit->fresh()->end_distance);
+    }
+
+    public function test_a_second_visit_can_follow_the_first_the_same_day(): void
+    {
+        $world = $this->world();
+        $second = Site::factory()->create(['project_id' => $world['site']->project_id]);
+        Sanctum::actingAs($world['user']);
+
+        $first = $this->postJson('/api/v1/site-visits/start', $this->payload($world['site']))->assertCreated()->json('data.id');
+        $this->postJson("/api/v1/site-visits/{$first}/end", ['latitude' => (float) $world['site']->latitude, 'longitude' => (float) $world['site']->longitude, 'accuracy' => 10])->assertOk();
+        $this->postJson('/api/v1/site-visits/start', $this->payload($second))->assertCreated();
+
+        $today = $this->getJson('/api/v1/site-visits/today')->assertOk()->json('data');
+        $items = $today['items'] ?? $today;
+        $this->assertCount(2, $items);
     }
 }

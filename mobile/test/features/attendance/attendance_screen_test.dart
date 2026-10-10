@@ -180,7 +180,23 @@ void main() {
       await tap(tester, find.byTooltip('Refresh'));
       await settle(tester);
 
-      expect(find.text('END SITE VISIT'), findsOneWidget);
+      expect(find.text('END SITE VISIT (SITE OUT)'), findsOneWidget);
+      // ...and it appears in today's list as on site now.
+      expect(find.byKey(const ValueKey('attendance-visits')), findsOneWidget);
+      expect(find.textContaining('on site now'), findsOneWidget);
+    });
+
+    testWidgets('after a visit ends, the next one is offered as another', (
+      tester,
+    ) async {
+      harness.repository.todayVisits = [
+        siteVisit(endedAt: '2026-09-27T12:30:00+00:00', durationMinutes: 70),
+      ];
+      await open(tester);
+
+      expect(find.text('ADD ANOTHER SITE VISIT'), findsOneWidget);
+      expect(find.textContaining("Today's site visits (1)"), findsOneWidget);
+      expect(find.textContaining('Out 12:30 · 1 h 10 min'), findsOneWidget);
     });
   });
 

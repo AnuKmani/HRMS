@@ -118,8 +118,9 @@ class AttendanceQuickCard extends ConsumerWidget {
     key: const ValueKey('quick-check-out'),
     style: FilledButton.styleFrom(
       minimumSize: const Size.fromHeight(56),
-      backgroundColor: theme.colorScheme.error,
-      foregroundColor: theme.colorScheme.onError,
+      // Not red: checking out is the normal end of the day, not an error.
+      backgroundColor: const Color(0xFF0F766E),
+      foregroundColor: Colors.white,
     ),
     icon: const Icon(Icons.logout),
     label: const Text('CHECK OUT'),

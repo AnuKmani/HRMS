@@ -450,10 +450,12 @@ class AttendanceCheckInTest extends TestCase
         $this->assertSame(1, Attendance::query()->count());
     }
 
-    public function test_an_unclosed_yesterday_blocks_a_new_check_in(): void
+    public function test_a_forgotten_check_out_yesterday_does_not_block_this_morning(): void
     {
+        // The default mode: attendance needs no site.
+        config(['hrms.attendance.require_site' => false]);
         $world = $this->world();
-        Attendance::factory()->open()->create([
+        $yesterday = Attendance::factory()->open()->create([
             'employee_id' => $world['employee']->id,
             'project_id' => $world['project']->id,
             'site_id' => $world['site']->id,
@@ -464,10 +466,23 @@ class AttendanceCheckInTest extends TestCase
 
         Sanctum::actingAs($world['user']);
 
-        $response = $this->post('/api/v1/attendance/check-in', $this->payload($world['site']));
+        // The morning screen offers CHECK IN, not yesterday's CHECK OUT.
+        $this->getJson('/api/v1/attendance/today')
+            ->assertOk()
+            ->assertJsonPath('data.can_check_in', true)
+            ->assertJsonPath('data.can_check_out', false);
 
-        $response->assertStatus(409);
-        $this->assertStringContainsString('have not checked out', $response->json('message'));
+        $this->post('/api/v1/attendance/check-in', $this->payload($world['site']))
+            ->assertCreated();
+
+        // Yesterday stays open and flagged for HR to correct.
+        $this->assertNull($yesterday->fresh()->check_out_at);
+        $this->assertSame(Attendance::STATUS_MISSING_CHECKOUT, $yesterday->fresh()->status);
+
+        // Today's check-out closes today, not yesterday.
+        $this->travelTo(Carbon::parse('2026-09-27 18:05:00'));
+        $this->post('/api/v1/attendance/check-out', $this->payload($world['site']))->assertOk();
+        $this->assertNull($yesterday->fresh()->check_out_at);
     }
 
     public function test_a_replayed_offline_event_returns_the_original_row_not_a_second_one(): void

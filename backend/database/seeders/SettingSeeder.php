@@ -53,6 +53,14 @@ class SettingSeeder extends Seeder
         ],
 
         [
+            'key' => 'attendance.site_visit_requires_geofence',
+            'value' => '0',
+            'type' => 'boolean',
+            'group' => 'attendance',
+            'label' => 'Site visits must be inside the site radius',
+            'description' => 'Off: every site visit is recorded with its GPS position and distance from the site. On: a visit outside the site radius is refused.',
+        ],
+        [
             // On by default: a late check-out should not depend on the
             // employee remembering to file a claim. The claim still needs
             // approval before payroll reads it.
