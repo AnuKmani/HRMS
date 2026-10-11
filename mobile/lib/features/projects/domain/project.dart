@@ -30,6 +30,9 @@ class Project {
     this.behindSchedule = false,
     this.createdByName,
     this.canEdit,
+    this.canCoordinate = false,
+    this.canReassign = false,
+    this.canSeeMoney = false,
     this.stages = const <ProjectStage>[],
     this.subcontractors = const <Subcontractor>[],
     this.team = const <TeamMember>[],
@@ -49,6 +52,15 @@ class Project {
 
   /// From the server; null when an older server did not say.
   final bool? canEdit;
+
+  /// A Project Coordinator on it (or its editor): dates, documents, contacts.
+  final bool canCoordinate;
+
+  /// May move it to another Project Manager (Operations, Senior PM).
+  final bool canReassign;
+
+  /// Sees values and billing (Project Manager and above, Sales).
+  final bool canSeeMoney;
 
   final List<ProjectStage> stages;
   final List<Subcontractor> subcontractors;
@@ -135,6 +147,9 @@ class Project {
     behindSchedule: json['behind_schedule'] == true,
     createdByName: json['created_by_name'] as String?,
     canEdit: json['can_edit'] is bool ? json['can_edit'] as bool : null,
+    canCoordinate: json['can_coordinate'] == true,
+    canReassign: json['can_reassign'] == true,
+    canSeeMoney: json['can_see_money'] == true,
     stages: listOf(json['stages'], ProjectStage.fromJson),
     subcontractors: listOf(json['subcontractors'], Subcontractor.fromJson),
     team: listOf(json['team'], TeamMember.fromJson),

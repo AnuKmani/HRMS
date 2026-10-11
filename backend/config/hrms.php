@@ -33,7 +33,7 @@ return [
         | `projects.manage` and `sites.manage`, i.e. it owns those modules
         | and can see all of them. Its narrowing is on employees instead.
         */
-        'project' => ['Site Supervisor', 'Site Engineer'],
+        'project' => ['Site Supervisor', 'Site Engineer', 'Project Coordinator'],
 
         /*
         | Only employees attached to the projects/sites they run — plus

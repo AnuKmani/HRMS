@@ -161,6 +161,10 @@ class _ProjectFormScreenState extends ConsumerState<ProjectFormScreen> {
           for (final m in _team)
             if (m.role == 'site_supervisor') m.employeeId,
         ],
+        'coordinator_ids': [
+          for (final m in _team)
+            if (m.role == 'coordinator') m.employeeId,
+        ],
       },
       'location': blank(_location.text),
       'description': blank(_description.text),
@@ -315,6 +319,12 @@ class _ProjectFormScreenState extends ConsumerState<ProjectFormScreen> {
             employeeId: id,
             name: names[id] ?? '#$id',
             role: 'site_supervisor',
+          ),
+        for (final id in result.$3)
+          TeamMember(
+            employeeId: id,
+            name: names[id] ?? '#$id',
+            role: 'coordinator',
           ),
       ];
     });

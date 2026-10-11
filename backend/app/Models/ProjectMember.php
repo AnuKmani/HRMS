@@ -12,6 +12,8 @@ class ProjectMember extends Model
 
     public const ROLE_SITE_SUPERVISOR = 'site_supervisor';
 
+    public const ROLE_COORDINATOR = 'coordinator';
+
     protected $fillable = ['project_id', 'employee_id', 'role'];
 
     public function project(): BelongsTo

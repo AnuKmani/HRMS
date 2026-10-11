@@ -180,6 +180,18 @@ class PermissionSeeder extends Seeder
             'projects.progress.view',
             // Mark payment milestones requested / paid (Sales).
             'projects.billing.manage',
+            // The money-and-progress dashboard of every project: values,
+            // own billing, subcontractor billing (Project Manager and up).
+            'projects.dashboard.view',
+            // Move a project to another Project Manager (Operations, Senior PM).
+            'projects.reassign',
+            // Edit the projects run by the Project Managers who report to you
+            // (Senior Project Manager).
+            'projects.manage_team',
+            // Keep a project's paperwork on the projects you are assigned to:
+            // inspection dates, documents, subcontractor contacts
+            // (Project Coordinator).
+            'projects.coordinate',
         ],
         'sites' => [
             'sites.view',

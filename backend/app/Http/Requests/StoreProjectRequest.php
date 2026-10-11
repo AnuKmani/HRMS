@@ -46,7 +46,10 @@ class StoreProjectRequest extends FormRequest
             // when none are sent).
             'stages' => ['sometimes', 'array', 'min:1', 'max:30'],
             'stages.*.name' => ['required_with:stages', 'string', 'max:120'],
-            'stages.*.weight' => ['required_with:stages', 'numeric', 'min:0.5', 'max:100'],
+            'stages.*.weight' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            // A system's contract value; when every system has one, the
+            // weights follow from the values.
+            'stages.*.contract_value' => ['nullable', 'numeric', 'min:0', 'max:999999999999'],
 
             'subcontractors' => ['sometimes', 'array', 'max:100'],
             'subcontractors.*.name' => ['required_with:subcontractors', 'string', 'max:150'],
@@ -61,6 +64,8 @@ class StoreProjectRequest extends FormRequest
             'site_engineer_ids.*' => ['integer', Rule::exists('employees', 'id')->whereNull('deleted_at')],
             'site_supervisor_ids' => ['sometimes', 'array'],
             'site_supervisor_ids.*' => ['integer', Rule::exists('employees', 'id')->whereNull('deleted_at')],
+            'coordinator_ids' => ['sometimes', 'array'],
+            'coordinator_ids.*' => ['integer', Rule::exists('employees', 'id')->whereNull('deleted_at')],
         ];
     }
 
@@ -79,7 +84,7 @@ class StoreProjectRequest extends FormRequest
             }
 
             $stages = $this->input('stages');
-            if (is_array($stages) && $stages !== []) {
+            if (is_array($stages) && $stages !== [] && ! ProjectService::weightsFromValues($stages)) {
                 $total = array_sum(array_map(fn ($s) => (float) ($s['weight'] ?? 0), $stages));
                 if (abs($total - 100) > 0.01) {
                     $validator->errors()->add('stages', sprintf('Stage weights must add up to 100%% (they add up to %s%%).', rtrim(rtrim(number_format($total, 2), '0'), '.')));

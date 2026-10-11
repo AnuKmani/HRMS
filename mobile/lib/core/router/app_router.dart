@@ -45,6 +45,7 @@ import '../../features/payroll/presentation/payroll_list_screen.dart';
 import '../../features/payroll/presentation/salary_slips_screen.dart';
 import '../../features/projects/presentation/project_detail_screen.dart';
 import '../../features/leave/presentation/hr_leave_screens.dart';
+import '../../features/projects/presentation/project_dashboard_screen.dart';
 import '../../features/projects/presentation/project_form_screen.dart';
 import '../../features/projects/presentation/project_progress_screens.dart';
 import '../../features/projects/presentation/projects_list_screen.dart';
@@ -294,6 +295,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/projects/:id/edit',
         builder: (context, state) => ProjectFormScreen(projectId: idOf(state)),
+      ),
+      GoRoute(
+        path: '/project-dashboard',
+        builder: (context, state) => const ProjectDashboardScreen(),
       ),
       GoRoute(
         path: '/project-progress',

@@ -167,10 +167,18 @@ class BehindChip extends StatelessWidget {
 
 /// One row per stage with its own bar. [onTap] lets the PM correct it.
 class StageList extends StatelessWidget {
-  const StageList({super.key, required this.stages, this.onTap});
+  const StageList({
+    super.key,
+    required this.stages,
+    this.onTap,
+    this.showMoney = false,
+  });
 
   final List<ProjectStage> stages;
   final void Function(ProjectStage)? onTap;
+
+  /// Each system's value and what has been billed.
+  final bool showMoney;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -186,12 +194,25 @@ class StageList extends StatelessWidget {
           dense: true,
           onTap: onTap == null ? null : () => onTap!(stage),
           title: Text('${stage.name}  ·  weight ${pct(stage.weight)}'),
-          subtitle: Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: LinearProgressIndicator(
-              value: (stage.percentComplete / 100).clamp(0, 1),
-              minHeight: 6,
-            ),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: LinearProgressIndicator(
+                  value: (stage.percentComplete / 100).clamp(0, 1),
+                  minHeight: 6,
+                ),
+              ),
+              if (showMoney && stage.contractValue != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    '${money(stage.contractValue)} · billed '
+                    '${money(stage.billedAmount)} (${pct(stage.billedPercent)})',
+                  ),
+                ),
+            ],
           ),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
@@ -367,11 +388,22 @@ class ProjectDeliverySections extends ConsumerWidget {
     super.key,
     required this.project,
     required this.canEdit,
+    this.canCoordinate = false,
+    this.canSeeMoney = false,
+    this.canBill = false,
     required this.onChanged,
   });
 
   final Project project;
   final bool canEdit;
+
+  /// Dates, documents and subcontractor contacts (Project Coordinator).
+  final bool canCoordinate;
+
+  final bool canSeeMoney;
+
+  /// May record what the company billed (editor or Sales).
+  final bool canBill;
   final Future<void> Function() onChanged;
 
   @override
@@ -407,7 +439,10 @@ class ProjectDeliverySections extends ConsumerWidget {
             const Divider(height: 1),
             StageList(
               stages: p.stages,
-              onTap: canEdit ? (s) => _correct(context, ref, s) : null,
+              showMoney: canSeeMoney,
+              onTap: canEdit || canBill
+                  ? (s) => _stageActions(context, ref, s)
+                  : null,
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
@@ -424,7 +459,7 @@ class ProjectDeliverySections extends ConsumerWidget {
                     TextButton.icon(
                       key: const ValueKey('stages-edit'),
                       icon: const Icon(Icons.tune, size: 18),
-                      label: const Text('Edit stages'),
+                      label: const Text('Edit systems / stages'),
                       onPressed: () => _editStages(context, ref),
                     ),
                 ],
@@ -475,7 +510,7 @@ class ProjectDeliverySections extends ConsumerWidget {
 
         // ---- Team
         SectionCard(
-          title: 'Site team',
+          title: 'Project team',
           action: canEdit
               ? TextButton.icon(
                   key: const ValueKey('team-edit'),
@@ -490,7 +525,11 @@ class ProjectDeliverySections extends ConsumerWidget {
                 padding: EdgeInsets.all(12),
                 child: Text('Nobody on the team yet.'),
               ),
-            for (final m in [...engineers, ...supervisors])
+            for (final m in [
+              ...engineers,
+              ...supervisors,
+              ...p.team.where((m) => m.role == 'coordinator'),
+            ])
               ListTile(
                 dense: true,
                 leading: const Icon(Icons.engineering_outlined),
@@ -532,7 +571,7 @@ class ProjectDeliverySections extends ConsumerWidget {
         // ---- Documents
         SectionCard(
           title: 'Documents',
-          action: canEdit
+          action: canCoordinate
               ? TextButton.icon(
                   key: const ValueKey('doc-add'),
                   icon: const Icon(Icons.upload_file, size: 18),
@@ -555,7 +594,7 @@ class ProjectDeliverySections extends ConsumerWidget {
                 subtitle: Text([d.categoryLabel, ?d.originalName].join(' · ')),
                 onTap: () =>
                     runAction(context, () => api.openDocument(p.id, d)),
-                trailing: canEdit
+                trailing: canCoordinate
                     ? IconButton(
                         tooltip: 'Remove document',
                         icon: const Icon(Icons.delete_outline),
@@ -588,8 +627,11 @@ class ProjectDeliverySections extends ConsumerWidget {
       ?c.trade,
       if (c.contactName != null || c.contactPhone != null)
         [?c.contactName, ?c.contactPhone].join(' '),
-      if (canEdit && c.contractValue != null)
-        'AED ${c.contractValue!.toStringAsFixed(0)}',
+      if (c.projectStageId != null)
+        'System: ${project.stages.where((st) => st.id == c.projectStageId).map((st) => st.name).firstOrNull ?? '—'}',
+      if (canSeeMoney && c.contractValue != null)
+        '${money(c.contractValue)} · billed ${money(c.billedAmount)}'
+            '${c.contractValue! > 0 ? ' (${pct((c.billedAmount ?? 0) / c.contractValue! * 100)})' : ''}',
       if (c.startDate != null || c.endDate != null)
         '${c.startDate ?? '?'} → ${c.endDate ?? '?'}',
       if (c.isRemoved) 'Removed ${c.removedOn ?? ''}: ${c.removedReason ?? ''}',
@@ -607,7 +649,7 @@ class ProjectDeliverySections extends ConsumerWidget {
       ),
       subtitle: lines.isEmpty ? null : Text(lines.join('\n')),
       isThreeLine: lines.length > 1,
-      trailing: !canEdit
+      trailing: !canEdit && !canCoordinate
           ? null
           : PopupMenuButton<String>(
               key: ValueKey('sub-menu-${c.id}'),
@@ -664,19 +706,19 @@ class ProjectDeliverySections extends ConsumerWidget {
               itemBuilder: (_) => [
                 if (!c.isRemoved)
                   const PopupMenuItem(value: 'edit', child: Text('Edit')),
-                if (!c.isRemoved)
+                if (canEdit && !c.isRemoved)
                   const PopupMenuItem(
                     value: 'attach',
                     child: Text('Attach contract / LPO'),
                   ),
-                if (c.hasDocument)
+                if (canEdit && c.hasDocument)
                   PopupMenuItem(
                     value: 'open',
                     child: Text('Open ${c.documentName ?? 'document'}'),
                   ),
-                if (!c.isRemoved)
+                if (canEdit && !c.isRemoved)
                   const PopupMenuItem(value: 'remove', child: Text('Remove…')),
-                if (c.isRemoved)
+                if (canEdit && c.isRemoved)
                   const PopupMenuItem(
                     value: 'restore',
                     child: Text('Add back'),
@@ -684,6 +726,103 @@ class ProjectDeliverySections extends ConsumerWidget {
               ],
             ),
     );
+  }
+
+  /// Correct progress (the project's editor) or record billing.
+  Future<void> _stageActions(
+    BuildContext context,
+    WidgetRef ref,
+    ProjectStage stage,
+  ) async {
+    if (canEdit && !canBill) return _correct(context, ref, stage);
+    if (!canEdit) return _bill(context, ref, stage);
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(
+                stage.name,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+            ListTile(
+              key: const ValueKey('stage-correct'),
+              leading: const Icon(Icons.trending_up),
+              title: const Text('Correct progress %'),
+              onTap: () => Navigator.pop(context, 'correct'),
+            ),
+            ListTile(
+              key: const ValueKey('stage-bill'),
+              leading: const Icon(Icons.receipt_long_outlined),
+              title: const Text('Record amount billed'),
+              onTap: () => Navigator.pop(context, 'bill'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!context.mounted) return;
+    if (choice == 'correct') {
+      await _correct(context, ref, stage);
+    } else if (choice == 'bill') {
+      await _bill(context, ref, stage);
+    }
+  }
+
+  Future<void> _bill(
+    BuildContext context,
+    WidgetRef ref,
+    ProjectStage stage,
+  ) async {
+    final amount = TextEditingController(
+      text: (stage.billedAmount ?? 0).toStringAsFixed(0),
+    );
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Billed for ${stage.name}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (stage.contractValue != null)
+              Text('System value: ${money(stage.contractValue)}'),
+            TextField(
+              key: const ValueKey('bill-amount'),
+              controller: amount,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Total billed to the client so far (AED)',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('bill-save'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    final value = double.tryParse(amount.text.trim());
+    if (ok != true || value == null || !context.mounted) return;
+    final api = ref.read(projectDeliveryApiProvider);
+    if (await runAction(
+      context,
+      () => api.billStage(project.id, stage.id, value),
+      done: 'Billing saved.',
+    )) {
+      await onChanged();
+    }
   }
 
   Future<void> _correct(
@@ -770,7 +909,12 @@ class ProjectDeliverySections extends ConsumerWidget {
     WidgetRef ref,
     Subcontractor? existing,
   ) async {
-    final body = await showSubcontractorDialog(context, existing: existing);
+    final body = await showSubcontractorDialog(
+      context,
+      existing: existing,
+      withContract: canEdit,
+      systems: project.stages,
+    );
     if (body == null || !context.mounted) return;
     final api = ref.read(projectDeliveryApiProvider);
     final ok = await runAction(
@@ -869,7 +1013,7 @@ class ProjectDeliverySections extends ConsumerWidget {
     if (result == null || !context.mounted) return;
     if (await runAction(
       context,
-      () => api.updateTeam(project.id, result.$1, result.$2),
+      () => api.updateTeam(project.id, result.$1, result.$2, result.$3),
       done: 'Team updated.',
     )) {
       await onChanged();
@@ -1061,7 +1205,12 @@ Future<Map<String, Object?>?> showSubcontractorDialog(
   BuildContext context, {
   Subcontractor? existing,
   bool withContract = true,
+  List<ProjectStage> systems = const [],
 }) async {
+  final billed = TextEditingController(
+    text: existing?.billedAmount?.toStringAsFixed(0),
+  );
+  int? systemId = existing?.projectStageId;
   final name = TextEditingController(text: existing?.name);
   final trade = TextEditingController(text: existing?.trade);
   final contact = TextEditingController(text: existing?.contactName);
@@ -1084,71 +1233,102 @@ Future<Map<String, Object?>?> showSubcontractorDialog(
 
   final ok = await showDialog<bool>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: Text(
-        existing == null ? 'Add subcontractor' : 'Edit subcontractor',
-      ),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              key: const ValueKey('sub-name'),
-              controller: name,
-              decoration: const InputDecoration(labelText: 'Company name *'),
-            ),
-            TextField(
-              key: const ValueKey('sub-trade'),
-              controller: trade,
-              decoration: const InputDecoration(
-                labelText: 'Trade',
-                hintText: 'HVAC, electrical, plumbing…',
-              ),
-            ),
-            TextField(
-              controller: contact,
-              decoration: const InputDecoration(labelText: 'Contact person'),
-            ),
-            TextField(
-              controller: phone,
-              keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(labelText: 'Phone'),
-            ),
-            if (withContract) ...[
+    builder: (context) => StatefulBuilder(
+      builder: (context, setState) => AlertDialog(
+        title: Text(
+          existing == null ? 'Add subcontractor' : 'Edit subcontractor',
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               TextField(
-                controller: value,
-                keyboardType: TextInputType.number,
+                key: const ValueKey('sub-name'),
+                controller: name,
+                decoration: const InputDecoration(labelText: 'Company name *'),
+              ),
+              TextField(
+                key: const ValueKey('sub-trade'),
+                controller: trade,
                 decoration: const InputDecoration(
-                  labelText: 'Contract value (AED)',
+                  labelText: 'Trade',
+                  hintText: 'HVAC, electrical, plumbing…',
                 ),
               ),
               TextField(
-                controller: start,
-                readOnly: true,
-                onTap: () => pick(context, start),
-                decoration: const InputDecoration(labelText: 'Start date'),
+                controller: contact,
+                decoration: const InputDecoration(labelText: 'Contact person'),
               ),
               TextField(
-                controller: end,
-                readOnly: true,
-                onTap: () => pick(context, end),
-                decoration: const InputDecoration(labelText: 'End date'),
+                controller: phone,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Phone'),
               ),
+              if (withContract) ...[
+                if (systems.isNotEmpty)
+                  DropdownButtonFormField<int?>(
+                    key: const ValueKey('sub-system'),
+                    initialValue: systemId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'System they install',
+                    ),
+                    items: [
+                      const DropdownMenuItem<int?>(
+                        value: null,
+                        child: Text('—'),
+                      ),
+                      for (final s in systems)
+                        DropdownMenuItem<int?>(
+                          value: s.id,
+                          child: Text(s.name),
+                        ),
+                    ],
+                    onChanged: (v) => setState(() => systemId = v),
+                  ),
+                TextField(
+                  controller: value,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Contract value (AED)',
+                  ),
+                ),
+                TextField(
+                  key: const ValueKey('sub-billed'),
+                  controller: billed,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Billed so far (AED)',
+                  ),
+                ),
+                TextField(
+                  controller: start,
+                  readOnly: true,
+                  onTap: () => pick(context, start),
+                  decoration: const InputDecoration(labelText: 'Start date'),
+                ),
+                TextField(
+                  controller: end,
+                  readOnly: true,
+                  onTap: () => pick(context, end),
+                  decoration: const InputDecoration(labelText: 'End date'),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const ValueKey('sub-save'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Save'),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          key: const ValueKey('sub-save'),
-          onPressed: () => Navigator.pop(context, true),
-          child: const Text('Save'),
-        ),
-      ],
     ),
   );
   if (ok != true || name.text.trim().isEmpty) return null;
@@ -1161,6 +1341,8 @@ Future<Map<String, Object?>?> showSubcontractorDialog(
     'contact_phone': blank(phone),
     if (withContract) ...{
       'contract_value': double.tryParse(value.text.trim()),
+      'billed_amount': double.tryParse(billed.text.trim()) ?? 0,
+      'project_stage_id': systemId,
       'start_date': blank(start),
       'end_date': blank(end),
     },
@@ -1168,7 +1350,7 @@ Future<Map<String, Object?>?> showSubcontractorDialog(
 }
 
 /// Tick engineers and supervisors. Returns (engineer ids, supervisor ids).
-Future<(List<int>, List<int>)?> showTeamPicker(
+Future<(List<int>, List<int>, List<int>)?> showTeamPicker(
   BuildContext context,
   ProjectDeliveryApi api,
   List<TeamMember> current,
@@ -1183,7 +1365,7 @@ Future<(List<int>, List<int>)?> showTeamPicker(
     context: context,
     builder: (context) => StatefulBuilder(
       builder: (context, setState) => AlertDialog(
-        title: const Text('Site team'),
+        title: const Text('Project team'),
         content: SizedBox(
           width: double.maxFinite,
           child: candidates.isEmpty
@@ -1202,10 +1384,10 @@ Future<(List<int>, List<int>)?> showTeamPicker(
                             subtitle: c.role == null ? null : Text(c.role!),
                             onChanged: (on) => setState(() {
                               if (on == true) {
-                                roles[c.id] =
-                                    (c.role ?? '').toLowerCase().contains(
-                                      'supervisor',
-                                    )
+                                final role = (c.role ?? '').toLowerCase();
+                                roles[c.id] = role.contains('coordinator')
+                                    ? 'coordinator'
+                                    : role.contains('supervisor')
                                     ? 'site_supervisor'
                                     : 'site_engineer';
                               } else {
@@ -1228,6 +1410,10 @@ Future<(List<int>, List<int>)?> showTeamPicker(
                                   ButtonSegment(
                                     value: 'site_supervisor',
                                     label: Text('Supervisor'),
+                                  ),
+                                  ButtonSegment(
+                                    value: 'coordinator',
+                                    label: Text('Coordinator'),
                                   ),
                                 ],
                                 selected: {roles[c.id]!},
@@ -1264,6 +1450,10 @@ Future<(List<int>, List<int>)?> showTeamPicker(
       for (final e in roles.entries)
         if (e.value == 'site_supervisor') e.key,
     ],
+    [
+      for (final e in roles.entries)
+        if (e.value == 'coordinator') e.key,
+    ],
   );
 }
 
@@ -1278,86 +1468,135 @@ class StageEditorScreen extends StatefulWidget {
 }
 
 class _StageRow {
-  _StageRow(this.id, String name, double weight)
+  _StageRow(this.id, String name, double weight, double? value)
     : name = TextEditingController(text: name),
-      weight = TextEditingController(
-        text: weight == weight.roundToDouble()
-            ? weight.toStringAsFixed(0)
-            : '$weight',
-      );
+      weight = TextEditingController(text: _plain(weight)),
+      value = TextEditingController(text: value == null ? '' : _plain(value));
+
+  static String _plain(double v) =>
+      v == v.roundToDouble() ? v.toStringAsFixed(0) : '$v';
 
   final int? id;
   final TextEditingController name;
   final TextEditingController weight;
+  final TextEditingController value;
+
+  double? get valueNumber => double.tryParse(value.text.trim());
 }
 
 class _StageEditorScreenState extends State<StageEditorScreen> {
   late final List<_StageRow> _rows = widget.initial.isEmpty
-      ? [for (final (n, w) in stageTemplate) _StageRow(null, n, w)]
-      : [for (final s in widget.initial) _StageRow(s.id, s.name, s.weight)];
+      ? [for (final (n, w) in stageTemplate) _StageRow(null, n, w, null)]
+      : [
+          for (final s in widget.initial)
+            _StageRow(s.id, s.name, s.weight, s.contractValue),
+        ];
 
-  double get _total => _rows.fold(
+  /// Every system has a value: weights come from the values.
+  bool get _byValue => _rows.every((r) => (r.valueNumber ?? 0) > 0);
+
+  double get _valueTotal =>
+      _rows.fold(0, (sum, r) => sum + (r.valueNumber ?? 0));
+
+  double get _weightTotal => _rows.fold(
     0,
     (sum, r) => sum + (double.tryParse(r.weight.text.trim()) ?? 0),
   );
 
   @override
   Widget build(BuildContext context) {
-    final total = _total;
-    final valid =
-        (total - 100).abs() < 0.01 &&
-        _rows.every((r) => r.name.text.trim().isNotEmpty);
+    final byValue = _byValue;
+    final valueTotal = _valueTotal;
+    final weightTotal = _weightTotal;
+    final named = _rows.every((r) => r.name.text.trim().isNotEmpty);
+    final valid = named && (byValue || (weightTotal - 100).abs() < 0.01);
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Project stages')),
+      appBar: AppBar(title: const Text('Systems / stages')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           const Text(
-            'Each stage has a weight — how much of the whole job it is. Weights must add up to 100.',
+            'List the project\'s systems (HVAC, Electrical, Plumbing, Fire '
+            'fighting…) or stages. Give each system its contract value and '
+            'the weights are worked out for you. Without values, weights '
+            'must add up to 100.',
           ),
           const SizedBox(height: 12),
           for (var i = 0; i < _rows.length; i++)
-            Row(
+            Padding(
               key: ValueKey('stage-row-$i'),
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: TextField(
-                    controller: _rows[i].name,
-                    onChanged: (_) => setState(() {}),
-                    decoration: const InputDecoration(labelText: 'Stage'),
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: TextField(
+                      controller: _rows[i].name,
+                      onChanged: (_) => setState(() {}),
+                      decoration: const InputDecoration(
+                        labelText: 'System / stage',
+                      ),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: _rows[i].weight,
-                    keyboardType: TextInputType.number,
-                    onChanged: (_) => setState(() {}),
-                    decoration: const InputDecoration(labelText: 'Weight'),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 3,
+                    child: TextField(
+                      key: ValueKey('stage-value-$i'),
+                      controller: _rows[i].value,
+                      keyboardType: TextInputType.number,
+                      onChanged: (_) => setState(() {}),
+                      decoration: const InputDecoration(
+                        labelText: 'Value (AED)',
+                      ),
+                    ),
                   ),
-                ),
-                IconButton(
-                  tooltip: 'Remove stage',
-                  icon: const Icon(Icons.close),
-                  onPressed: _rows.length == 1
-                      ? null
-                      : () => setState(() => _rows.removeAt(i)),
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 2,
+                    child: byValue
+                        ? Padding(
+                            padding: const EdgeInsets.only(top: 16),
+                            child: Text(
+                              pct(
+                                (_rows[i].valueNumber ?? 0) / valueTotal * 100,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          )
+                        : TextField(
+                            controller: _rows[i].weight,
+                            keyboardType: TextInputType.number,
+                            onChanged: (_) => setState(() {}),
+                            decoration: const InputDecoration(
+                              labelText: 'Weight %',
+                            ),
+                          ),
+                  ),
+                  IconButton(
+                    tooltip: 'Remove',
+                    icon: const Icon(Icons.close),
+                    onPressed: _rows.length == 1
+                        ? null
+                        : () => setState(() => _rows.removeAt(i)),
+                  ),
+                ],
+              ),
             ),
-          const SizedBox(height: 8),
           Row(
             children: [
               TextButton.icon(
                 icon: const Icon(Icons.add),
-                label: const Text('Add stage'),
+                label: const Text('Add system / stage'),
                 onPressed: () =>
-                    setState(() => _rows.add(_StageRow(null, '', 0))),
+                    setState(() => _rows.add(_StageRow(null, '', 0, null))),
               ),
               const Spacer(),
               Text(
-                'Total ${pct(total)}',
+                byValue
+                    ? 'Project value ${money(valueTotal)}'
+                    : 'Total ${pct(weightTotal)}',
                 key: const ValueKey('stage-total'),
                 style: TextStyle(
                   color: valid ? Colors.green.shade700 : Colors.red.shade700,
@@ -1375,11 +1614,13 @@ class _StageEditorScreenState extends State<StageEditorScreen> {
                       {
                         'id': ?r.id,
                         'name': r.name.text.trim(),
-                        'weight': double.parse(r.weight.text.trim()),
+                        if (!byValue)
+                          'weight': double.tryParse(r.weight.text.trim()) ?? 0,
+                        'contract_value': r.valueNumber,
                       },
                   ])
                 : null,
-            child: const Text('Save stages'),
+            child: const Text('Save'),
           ),
         ],
       ),

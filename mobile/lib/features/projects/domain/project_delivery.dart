@@ -14,6 +14,17 @@ List<T> listOf<T>(Object? value, T Function(Map<String, dynamic>) parse) => [
       if (row is Map<String, dynamic>) parse(row),
 ];
 
+/// `1250000` → `AED 1,250,000`.
+String money(num? value) {
+  if (value == null) return '—';
+  final whole = value.round().toString();
+  final grouped = whole.replaceAllMapped(
+    RegExp(r'(\d)(?=(\d{3})+$)'),
+    (m) => '${m[1]},',
+  );
+  return 'AED $grouped';
+}
+
 /// `12.5` → `12.5%`, `40.0` → `40%`.
 String pct(num? value) {
   if (value == null) return '—';
@@ -27,6 +38,8 @@ class ProjectStage {
     required this.name,
     required this.weight,
     required this.percentComplete,
+    this.contractValue,
+    this.billedAmount,
   });
 
   final int id;
@@ -34,11 +47,22 @@ class ProjectStage {
   final double weight;
   final double percentComplete;
 
+  /// The system's value and what has been billed — only for those who may
+  /// see money (Project Manager and above, Sales).
+  final double? contractValue;
+  final double? billedAmount;
+
+  double? get billedPercent => contractValue != null && contractValue! > 0
+      ? (billedAmount ?? 0) / contractValue! * 100
+      : null;
+
   factory ProjectStage.fromJson(Map<String, dynamic> j) => ProjectStage(
     id: _int(j['id']),
     name: j['name'] as String? ?? '',
     weight: _num(j['weight']),
     percentComplete: _num(j['percent_complete']),
+    contractValue: _numOrNull(j['contract_value']),
+    billedAmount: _numOrNull(j['billed_amount']),
   );
 }
 
@@ -60,6 +84,8 @@ class Subcontractor {
     this.contactName,
     this.contactPhone,
     this.contractValue,
+    this.billedAmount,
+    this.projectStageId,
     this.startDate,
     this.endDate,
     this.hasDocument = false,
@@ -75,6 +101,10 @@ class Subcontractor {
   final String? contactName;
   final String? contactPhone;
   final double? contractValue;
+  final double? billedAmount;
+
+  /// The system this subcontractor installs.
+  final int? projectStageId;
   final String? startDate;
   final String? endDate;
   final bool hasDocument;
@@ -92,6 +122,10 @@ class Subcontractor {
     contactName: _str(j['contact_name']),
     contactPhone: _str(j['contact_phone']),
     contractValue: _numOrNull(j['contract_value']),
+    billedAmount: _numOrNull(j['billed_amount']),
+    projectStageId: j['project_stage_id'] is num
+        ? (j['project_stage_id'] as num).toInt()
+        : null,
     startDate: _str(j['start_date']),
     endDate: _str(j['end_date']),
     hasDocument: j['has_document'] == true,
@@ -115,8 +149,11 @@ class TeamMember {
   /// `site_engineer` or `site_supervisor`.
   final String role;
 
-  String get roleLabel =>
-      role == 'site_supervisor' ? 'Site supervisor' : 'Site engineer';
+  String get roleLabel => switch (role) {
+    'site_supervisor' => 'Site supervisor',
+    'coordinator' => 'Project coordinator',
+    _ => 'Site engineer',
+  };
 
   factory TeamMember.fromJson(Map<String, dynamic> j) => TeamMember(
     employeeId: _int(j['employee_id']),

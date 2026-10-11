@@ -7,6 +7,8 @@ use App\Http\Resources\ProjectEventResource;
 use App\Http\Responses\ApiResponse;
 use App\Models\Project;
 use App\Models\ProjectEvent;
+use App\Services\Projects\ProjectService;
+use App\Support\Visibility;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -22,7 +24,7 @@ class ProjectEventController extends Controller
 {
     public function store(Request $request, Project $project): JsonResponse
     {
-        $this->authorize('update', $project);
+        $this->authorizeCoordinate($project);
 
         $event = $project->events()->create($this->validated($request) + [
             'created_by' => $request->user()->id,
@@ -33,7 +35,7 @@ class ProjectEventController extends Controller
 
     public function update(Request $request, Project $project, ProjectEvent $projectEvent): JsonResponse
     {
-        $this->authorize('update', $project);
+        $this->authorizeCoordinate($project);
         $this->belongs($project, $projectEvent);
 
         $projectEvent->update($this->validated($request));
@@ -43,7 +45,7 @@ class ProjectEventController extends Controller
 
     public function destroy(Project $project, ProjectEvent $projectEvent): JsonResponse
     {
-        $this->authorize('update', $project);
+        $this->authorizeCoordinate($project);
         $this->belongs($project, $projectEvent);
 
         $projectEvent->delete();
@@ -62,6 +64,16 @@ class ProjectEventController extends Controller
             'event_date' => ['required', 'date_format:Y-m-d'],
             'notes' => ['nullable', 'string', 'max:500'],
         ]);
+    }
+
+    /** The project's editor, or a Project Coordinator assigned to it. */
+    private function authorizeCoordinate(Project $project): void
+    {
+        $user = request()->user();
+
+        if (! Visibility::projectIsVisible($user, $project) || ! ProjectService::canCoordinate($user, $project)) {
+            abort(403, 'You cannot change this project.');
+        }
     }
 
     private function belongs(Project $project, ProjectEvent $event): void

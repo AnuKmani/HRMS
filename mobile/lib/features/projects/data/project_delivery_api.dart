@@ -93,10 +93,38 @@ class ProjectDeliveryApi {
   Future<void> updateTeam(
     int projectId,
     List<int> engineers,
-    List<int> supervisors,
-  ) => _client.put(
+    List<int> supervisors, [
+    List<int> coordinators = const [],
+  ]) => _client.put(
     '${_p(projectId)}/team',
-    body: {'site_engineer_ids': engineers, 'site_supervisor_ids': supervisors},
+    body: {
+      'site_engineer_ids': engineers,
+      'site_supervisor_ids': supervisors,
+      'coordinator_ids': coordinators,
+    },
+  );
+
+  /// Own-company billing for one system.
+  Future<void> billStage(int projectId, int stageId, double amount) =>
+      _client.put(
+        '${_p(projectId)}/stages/$stageId/billing',
+        body: {'billed_amount': amount},
+      );
+
+  /// Project Managers a project can be moved to.
+  Future<List<TeamCandidate>> managerCandidates() async => listOf(
+    _map((await _client.get('/project-manager-candidates')).data)['items'],
+    TeamCandidate.fromJson,
+  );
+
+  Future<void> reassign(int projectId, int employeeId) => _client.put(
+    '${_p(projectId)}/manager',
+    body: {'project_manager_id': employeeId},
+  );
+
+  /// The money-and-progress dashboard of every project.
+  Future<Map<String, dynamic>> dashboard({String? search}) async => _map(
+    (await _client.get('/project-dashboard', query: {'search': ?search})).data,
   );
 
   // Stages and progress

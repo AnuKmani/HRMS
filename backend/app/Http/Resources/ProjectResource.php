@@ -25,6 +25,8 @@ class ProjectResource extends JsonResource
         /** @var Project $resource */
         $resource = $this->resource;
 
+        $money = $request->user() !== null && ProjectService::canSeeMoney($request->user(), $resource);
+
         return [
             'id' => $resource->id,
             'name' => $resource->name,
@@ -52,12 +54,17 @@ class ProjectResource extends JsonResource
             // Who added it — the only Project Manager who may edit it.
             'created_by_name' => $this->whenLoaded('creator', fn () => $resource->creator?->name),
             'can_edit' => $request->user() !== null && ProjectService::canEdit($request->user(), $resource),
+            'can_coordinate' => $request->user() !== null && ProjectService::canCoordinate($request->user(), $resource),
+            'can_reassign' => $request->user() !== null && ProjectService::canReassign($request->user(), $resource),
 
+            'can_see_money' => $money,
             'stages' => $this->whenLoaded('stages', fn () => $resource->stages->map(fn ($s) => [
                 'id' => $s->id,
                 'name' => $s->name,
                 'weight' => (float) $s->weight,
                 'percent_complete' => (float) $s->percent_complete,
+                'contract_value' => $money && $s->contract_value !== null ? (float) $s->contract_value : null,
+                'billed_amount' => $money ? (float) $s->billed_amount : null,
             ])->values()),
             'subcontractors' => $this->whenLoaded('subcontractors', fn () => $resource->subcontractors->map(fn ($c) => [
                 'id' => $c->id,
@@ -65,7 +72,9 @@ class ProjectResource extends JsonResource
                 'trade' => $c->trade,
                 'contact_name' => $c->contact_name,
                 'contact_phone' => $c->contact_phone,
-                'contract_value' => $c->contract_value !== null ? (float) $c->contract_value : null,
+                'contract_value' => $money && $c->contract_value !== null ? (float) $c->contract_value : null,
+                'billed_amount' => $money ? (float) $c->billed_amount : null,
+                'project_stage_id' => $c->project_stage_id,
                 'start_date' => $c->start_date?->toDateString(),
                 'end_date' => $c->end_date?->toDateString(),
                 'has_document' => $c->document_path !== null,

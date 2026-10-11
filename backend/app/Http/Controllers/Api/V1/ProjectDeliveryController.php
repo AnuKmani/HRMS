@@ -59,10 +59,17 @@ class ProjectDeliveryController extends Controller
 
     public function updateSubcontractor(Request $request, Project $project, ProjectSubcontractor $subcontractor): JsonResponse
     {
-        $this->authorize('update', $project);
+        $this->authorizeCoordinate($request->user(), $project);
         $this->belongs($project, $subcontractor);
 
-        $subcontractor->update($this->projects->subcontractorFields($this->subcontractorRules($request)));
+        $fields = $this->projects->subcontractorFields($this->subcontractorRules($request));
+
+        // A coordinator keeps contact details; money stays with the PM.
+        if (! ProjectService::canEdit($request->user(), $project)) {
+            $fields = array_intersect_key($fields, array_flip(['name', 'trade', 'contact_name', 'contact_phone']));
+        }
+
+        $subcontractor->update($fields);
 
         return ApiResponse::success('Subcontractor updated.', $this->subcontractor($subcontractor->refresh()));
     }
@@ -153,9 +160,11 @@ class ProjectDeliveryController extends Controller
             'site_engineer_ids.*' => ['integer', Rule::exists('employees', 'id')->whereNull('deleted_at')],
             'site_supervisor_ids' => ['present', 'array', 'max:100'],
             'site_supervisor_ids.*' => ['integer', Rule::exists('employees', 'id')->whereNull('deleted_at')],
+            'coordinator_ids' => ['sometimes', 'array', 'max:20'],
+            'coordinator_ids.*' => ['integer', Rule::exists('employees', 'id')->whereNull('deleted_at')],
         ]);
 
-        $this->projects->replaceTeam($project, $data['site_engineer_ids'], $data['site_supervisor_ids']);
+        $this->projects->replaceTeam($project, $data['site_engineer_ids'], $data['site_supervisor_ids'], $data['coordinator_ids'] ?? []);
 
         return ApiResponse::success('Team updated.', $this->team($project));
     }
@@ -163,7 +172,7 @@ class ProjectDeliveryController extends Controller
     /** Who can be put on a project team: everyone who writes daily reports. */
     public function teamCandidates(): JsonResponse
     {
-        $userIds = User::permission('daily_site_reports.create')->where('status', User::STATUS_ACTIVE)->pluck('id');
+        $userIds = User::permission(['daily_site_reports.create', 'projects.coordinate'])->where('status', User::STATUS_ACTIVE)->pluck('id');
 
         $items = Employee::query()
             ->whereIn('user_id', $userIds)
@@ -208,11 +217,12 @@ class ProjectDeliveryController extends Controller
             'stages' => ['required', 'array', 'min:1', 'max:30'],
             'stages.*.id' => ['nullable', 'integer'],
             'stages.*.name' => ['required', 'string', 'max:100'],
-            'stages.*.weight' => ['required', 'numeric', 'min:0.5', 'max:100'],
+            'stages.*.weight' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'stages.*.contract_value' => ['nullable', 'numeric', 'min:0', 'max:999999999999'],
         ]);
 
-        $total = round(array_sum(array_map(fn ($s) => (float) $s['weight'], $data['stages'])), 2);
-        if (abs($total - 100) > 0.01) {
+        $total = round(array_sum(array_map(fn ($s) => (float) ($s['weight'] ?? 0), $data['stages'])), 2);
+        if (! ProjectService::weightsFromValues($data['stages']) && abs($total - 100) > 0.01) {
             throw ValidationException::withMessages(['stages' => "Stage weights must add up to 100 (now {$total})."]);
         }
 
@@ -220,6 +230,26 @@ class ProjectDeliveryController extends Controller
         $this->progress->recompute($project);
 
         return ApiResponse::success('Stages saved.', $this->stageList($project));
+    }
+
+    /** What the company has billed the client for one system. */
+    public function billStage(Request $request, Project $project, ProjectStage $stage): JsonResponse
+    {
+        $this->belongs($project, $stage);
+
+        $user = $request->user();
+        if (! Visibility::projectIsVisible($user, $project)
+            || ! (ProjectService::canEdit($user, $project) || $user->can('projects.billing.manage'))) {
+            abort(403, 'You cannot record billing for this project.');
+        }
+
+        $data = $request->validate([
+            'billed_amount' => ['required', 'numeric', 'min:0', 'max:999999999999'],
+        ]);
+
+        $stage->forceFill(['billed_amount' => $data['billed_amount']])->save();
+
+        return ApiResponse::success('Billing saved.', $this->stageList($project));
     }
 
     /** The Project Manager corrects a stage by hand. */
@@ -392,7 +422,7 @@ class ProjectDeliveryController extends Controller
 
     public function storeDocument(Request $request, Project $project): JsonResponse
     {
-        $this->authorize('update', $project);
+        $this->authorizeCoordinate(request()->user(), $project);
 
         $data = $request->validate([
             'title' => ['required', 'string', 'max:150'],
@@ -429,13 +459,53 @@ class ProjectDeliveryController extends Controller
 
     public function destroyDocument(Project $project, ProjectDocument $document): JsonResponse
     {
-        $this->authorize('update', $project);
+        $this->authorizeCoordinate(request()->user(), $project);
         $this->belongs($project, $document);
 
         Storage::disk(self::DISK)->delete($document->path);
         $document->delete();
 
         return ApiResponse::success('Document removed.');
+    }
+
+    /** Move the project to another Project Manager. */
+    public function reassign(Request $request, Project $project): JsonResponse
+    {
+        if (! Visibility::projectIsVisible($request->user(), $project) || ! ProjectService::canReassign($request->user(), $project)) {
+            abort(403, 'You cannot move this project to another Project Manager.');
+        }
+
+        $data = $request->validate([
+            'project_manager_id' => ['required', 'integer', Rule::exists('employees', 'id')->whereNull('deleted_at')],
+        ]);
+
+        $project->update(['project_manager_id' => $data['project_manager_id']]);
+
+        return ApiResponse::success('Project Manager changed.', [
+            'project_manager_id' => $project->project_manager_id,
+            'project_manager_name' => $project->refresh()->projectManager?->full_name,
+        ]);
+    }
+
+    /** Project Managers a project can be moved to. */
+    public function managerCandidates(): JsonResponse
+    {
+        $userIds = User::permission('projects.manage')->where('status', User::STATUS_ACTIVE)->pluck('id');
+
+        $items = Employee::query()->whereIn('user_id', $userIds)
+            ->where('employment_status', Employee::STATUS_ACTIVE)
+            ->with('user.roles')->get()
+            ->sortBy(fn (Employee $e) => $e->full_name)->values()
+            ->map(fn (Employee $e) => ['id' => $e->id, 'name' => $e->full_name, 'role' => $e->user?->roles->pluck('name')->first()]);
+
+        return ApiResponse::success('Project Managers.', ['items' => $items]);
+    }
+
+    private function authorizeCoordinate(User $user, Project $project): void
+    {
+        if (! Visibility::projectIsVisible($user, $project) || ! ProjectService::canCoordinate($user, $project)) {
+            abort(403, 'You cannot change this project.');
+        }
     }
 
     // ---- Helpers ------------------------------------------------------
@@ -482,11 +552,18 @@ class ProjectDeliveryController extends Controller
      */
     private function stageList(Project $project): array
     {
+        $user = request()->user();
+        $money = $user !== null && ProjectService::canSeeMoney($user, $project);
+
         return $project->stages()->get()->map(fn (ProjectStage $s) => [
             'id' => $s->id,
             'name' => $s->name,
             'weight' => (float) $s->weight,
             'percent_complete' => (float) $s->percent_complete,
+            ...($money ? [
+                'contract_value' => $s->contract_value !== null ? (float) $s->contract_value : null,
+                'billed_amount' => (float) $s->billed_amount,
+            ] : []),
         ])->values()->all();
     }
 
@@ -512,6 +589,8 @@ class ProjectDeliveryController extends Controller
             'contact_name' => $c->contact_name,
             'contact_phone' => $c->contact_phone,
             'contract_value' => $c->contract_value !== null ? (float) $c->contract_value : null,
+            'billed_amount' => (float) $c->billed_amount,
+            'project_stage_id' => $c->project_stage_id,
             'start_date' => $c->start_date?->toDateString(),
             'end_date' => $c->end_date?->toDateString(),
             'has_document' => $c->document_path !== null,
@@ -548,6 +627,8 @@ class ProjectDeliveryController extends Controller
             'contact_name' => ['nullable', 'string', 'max:100'],
             'contact_phone' => ['nullable', 'string', 'max:30'],
             'contract_value' => ['nullable', 'numeric', 'min:0', 'max:9999999999'],
+            'billed_amount' => ['nullable', 'numeric', 'min:0', 'max:9999999999'],
+            'project_stage_id' => ['nullable', 'integer', Rule::exists('project_stages', 'id')->where('project_id', $request->route('project')?->id)],
             'start_date' => ['nullable', 'date_format:Y-m-d'],
             'end_date' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:start_date'],
         ]);

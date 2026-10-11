@@ -65,7 +65,7 @@ class ApprovalWorkflowSeeder extends Seeder
             // no one above them on a project, so it goes straight to HR.
             'description' => 'Their Project Manager, then HR.',
             'steps' => [
-                ['sequence' => 1, 'name' => 'Project Manager', 'approver_type' => ApprovalWorkflowStep::TYPE_PROJECT_MANAGER],
+                ['sequence' => 1, 'name' => 'Manager', 'approver_type' => ApprovalWorkflowStep::TYPE_PROJECT_MANAGER],
                 ['sequence' => 2, 'name' => 'HR', 'approver_type' => ApprovalWorkflowStep::TYPE_ROLE, 'approver_role' => 'HR Admin'],
             ],
         ],

@@ -38,6 +38,7 @@ use App\Http\Controllers\Api\V1\PasswordResetController;
 use App\Http\Controllers\Api\V1\PayrollAdjustmentController;
 use App\Http\Controllers\Api\V1\PayrollController;
 use App\Http\Controllers\Api\V1\ProjectController;
+use App\Http\Controllers\Api\V1\ProjectDashboardController;
 use App\Http\Controllers\Api\V1\ProjectDeliveryController;
 use App\Http\Controllers\Api\V1\ProjectEventController;
 use App\Http\Controllers\Api\V1\ReportController;
@@ -242,20 +243,24 @@ Route::prefix('v1')->group(function () {
         // DCD / Civil Defence / handover dates. Read with the project
         // (projects.view); written by whoever runs the project.
         Route::post('projects/{project}/events', [ProjectEventController::class, 'store'])
-            ->middleware('permission:projects.manage');
+            ->middleware('permission:projects.manage|projects.coordinate');
         Route::put('projects/{project}/events/{projectEvent}', [ProjectEventController::class, 'update'])
             ->whereNumber('projectEvent')
-            ->middleware('permission:projects.manage');
+            ->middleware('permission:projects.manage|projects.coordinate');
         Route::delete('projects/{project}/events/{projectEvent}', [ProjectEventController::class, 'destroy'])
             ->whereNumber('projectEvent')
-            ->middleware('permission:projects.manage');
+            ->middleware('permission:projects.manage|projects.coordinate');
+
+        // Money-and-progress dashboard of every project (PM and above).
+        Route::get('project-dashboard', ProjectDashboardController::class)
+            ->middleware('permission:projects.dashboard.view');
 
         // Running a project: subcontractors, team, stages, milestones,
         // documents. Changes are for the project's creator (policy).
         Route::controller(ProjectDeliveryController::class)->group(function () {
             Route::middleware('permission:projects.manage')->group(function () {
                 Route::post('projects/{project}/subcontractors', 'storeSubcontractor');
-                Route::put('projects/{project}/subcontractors/{subcontractor}', 'updateSubcontractor')->whereNumber('subcontractor');
+
                 Route::post('projects/{project}/subcontractors/{subcontractor}/remove', 'removeSubcontractor')->whereNumber('subcontractor');
                 Route::post('projects/{project}/subcontractors/{subcontractor}/restore', 'restoreSubcontractor')->whereNumber('subcontractor');
                 Route::post('projects/{project}/subcontractors/{subcontractor}/document', 'uploadSubcontractorDocument')->whereNumber('subcontractor');
@@ -267,8 +272,20 @@ Route::prefix('v1')->group(function () {
                 Route::post('projects/{project}/milestones', 'storeMilestone');
                 Route::put('projects/{project}/milestones/{milestone}', 'updateMilestone')->whereNumber('milestone');
                 Route::delete('projects/{project}/milestones/{milestone}', 'destroyMilestone')->whereNumber('milestone');
+
+            });
+
+            // Paperwork: the editor, or a Project Coordinator on the project.
+            Route::middleware('permission:projects.manage|projects.coordinate')->group(function () {
+                Route::put('projects/{project}/subcontractors/{subcontractor}', 'updateSubcontractor')->whereNumber('subcontractor');
                 Route::post('projects/{project}/documents', 'storeDocument');
                 Route::delete('projects/{project}/documents/{document}', 'destroyDocument')->whereNumber('document');
+            });
+
+            // Moving a project to another Project Manager.
+            Route::middleware('permission:projects.reassign|projects.manage_all')->group(function () {
+                Route::put('projects/{project}/manager', 'reassign');
+                Route::get('project-manager-candidates', 'managerCandidates');
             });
 
             Route::middleware('permission:projects.view')->group(function () {
@@ -283,6 +300,10 @@ Route::prefix('v1')->group(function () {
             Route::post('projects/{project}/milestones/{milestone}/status', 'milestoneStatus')
                 ->whereNumber('milestone')
                 ->middleware('permission:projects.billing.manage');
+            // Own-company billing per system: the project's editor or Sales.
+            Route::put('projects/{project}/stages/{stage}/billing', 'billStage')
+                ->whereNumber('stage')
+                ->middleware('permission:projects.manage|projects.billing.manage');
             Route::get('project-progress', 'progressIndex');
             Route::get('project-progress/{project}', 'progressShow');
             Route::get('project-progress/{project}/pdf', 'progressPdf');

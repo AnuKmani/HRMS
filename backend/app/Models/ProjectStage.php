@@ -18,10 +18,12 @@ class ProjectStage extends Model
         ['name' => 'Testing & handover', 'weight' => 5],
     ];
 
-    protected $fillable = ['project_id', 'name', 'weight', 'percent_complete', 'sort_order'];
+    protected $fillable = ['project_id', 'name', 'weight', 'contract_value', 'billed_amount', 'percent_complete', 'sort_order'];
 
     protected $casts = [
         'weight' => 'decimal:2',
+        'contract_value' => 'decimal:2',
+        'billed_amount' => 'decimal:2',
         'percent_complete' => 'decimal:2',
     ];
 

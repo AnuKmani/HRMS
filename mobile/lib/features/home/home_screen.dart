@@ -116,6 +116,13 @@ class HomeScreen extends ConsumerWidget {
           '/designations',
           'Job titles and grades',
         ),
+      if (scope.canViewProjectDashboard)
+        _Module(
+          'Project dashboard',
+          Icons.dashboard_outlined,
+          '/project-dashboard',
+          'Progress, value and billing',
+        ),
       if (scope.canViewProjects)
         _Module(
           'Projects',
@@ -564,6 +571,7 @@ String _sectionOf(String label) => switch (label) {
   'Leave types' ||
   'Training' => 'People',
   'Projects' ||
+  'Project dashboard' ||
   'Project progress' ||
   'Sites' ||
   'Site assignments' ||
@@ -588,7 +596,7 @@ Color _colorOf(String label) => switch (label) {
   'Departments' || 'Designations' => ModuleColors.org,
   'Documents' => ModuleColors.compliance,
   'Training' => ModuleColors.learning,
-  'Projects' => ModuleColors.projects,
+  'Projects' || 'Project dashboard' => ModuleColors.projects,
   'Sites' || 'Site assignments' || 'Quick site setup' => ModuleColors.sites,
   'Site reports' || 'Daily site reports' => ModuleColors.reports,
   'Payroll' || 'Salary slips' || 'Salary certificates' => ModuleColors.pay,

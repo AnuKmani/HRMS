@@ -1109,7 +1109,13 @@ final class Visibility
     public static function dailySiteReportsFor(Builder $query, User $user)
     {
         if (! self::mayViewOthersDailySiteReports($user)) {
-            return $query->where('daily_site_reports.created_by', $user->id);
+            // Their own — and, for someone on a project's team (a
+            // coordinator), that project's reports.
+            $teamProjects = self::teamProjectIds($user);
+
+            return $query->where(fn ($q) => $q->where('daily_site_reports.created_by', $user->id)
+                ->when($teamProjects->isNotEmpty() && $user->can('projects.coordinate'),
+                    fn ($w) => $w->orWhereIn('daily_site_reports.project_id', $teamProjects)));
         }
 
         if (! self::attendanceIsScopedFor($user)) {
@@ -1151,7 +1157,8 @@ final class Visibility
         }
 
         if (! self::mayViewOthersDailySiteReports($user)) {
-            return false;
+            return $user->can('projects.coordinate')
+                && self::teamProjectIds($user)->contains($report->project_id);
         }
 
         if (! self::attendanceIsScopedFor($user)) {
@@ -1868,6 +1875,22 @@ final class Visibility
         return Employee::query()
             ->where('reporting_manager_id', $employeeId)
             ->pluck('id');
+    }
+
+    /**
+     * Projects whose team this user is on (engineer, supervisor, coordinator).
+     *
+     * @return Collection<int, int>
+     */
+    public static function teamProjectIds(User $user)
+    {
+        $employeeId = $user->employee?->id;
+
+        if ($employeeId === null) {
+            return collect();
+        }
+
+        return ProjectMember::query()->where('employee_id', $employeeId)->pluck('project_id');
     }
 
     /**

@@ -7,6 +7,8 @@ import '../../../core/network/api_exception.dart';
 import '../../../core/permissions/permission_scope.dart';
 import '../data/api_projects_repository.dart';
 import '../domain/project.dart';
+import '../data/project_delivery_api.dart';
+import '../domain/project_delivery.dart';
 import 'project_delivery_sections.dart';
 
 /// One project, in full.
@@ -217,12 +219,28 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
                 key: const ValueKey('detail-employees-count'),
               ),
             ]),
+            if (project.canReassign)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: OutlinedButton.icon(
+                  key: const ValueKey('reassign-pm'),
+                  icon: const Icon(Icons.swap_horiz),
+                  label: const Text('Change Project Manager'),
+                  onPressed: () => _reassign(project),
+                ),
+              ),
             ProjectDeliverySections(
               project: project,
               canEdit: canEdit,
+              canCoordinate: canEdit || project.canCoordinate,
+              canSeeMoney: project.canSeeMoney,
+              canBill: canEdit || scope.canManageBilling,
               onChanged: _load,
             ),
-            _eventsSection(project, canManage: canEdit),
+            _eventsSection(
+              project,
+              canManage: canEdit || project.canCoordinate,
+            ),
             if (project.description != null &&
                 project.description!.trim().isNotEmpty)
               _section('Description', [
@@ -248,6 +266,49 @@ class _ProjectDetailScreenState extends ConsumerState<ProjectDetailScreen> {
         ),
       ),
     );
+  }
+
+  /// Move the project to another Project Manager.
+  Future<void> _reassign(Project project) async {
+    final api = ref.read(projectDeliveryApiProvider);
+    final candidates = await api.managerCandidates().catchError(
+      (_) => <TeamCandidate>[],
+    );
+    if (!mounted) return;
+    final chosen = await showDialog<TeamCandidate>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('New Project Manager'),
+        children: [
+          if (candidates.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('No Project Managers found.'),
+            ),
+          for (final c in candidates)
+            SimpleDialogOption(
+              key: ValueKey('pm-${c.id}'),
+              onPressed: () => Navigator.pop(context, c),
+              child: Text(
+                [c.name, ?c.role].join(' · '),
+                style: TextStyle(
+                  fontWeight: c.id == project.projectManagerId
+                      ? FontWeight.bold
+                      : null,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+    if (chosen == null || !mounted) return;
+    if (await runAction(
+      context,
+      () => api.reassign(project.id, chosen.id),
+      done: '${project.name} now runs under ${chosen.name}.',
+    )) {
+      await _load();
+    }
   }
 
   /// DCD / Civil Defence / handover dates. Everyone who may see the
