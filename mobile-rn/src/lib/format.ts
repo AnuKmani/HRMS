@@ -34,3 +34,11 @@ export function uuid(): string {
     return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
   });
 }
+
+/** 12500.5 → "AED 12,500.50" */
+export function money(value: number | string | null | undefined, currency = 'AED'): string {
+  if (value === null || value === undefined || value === '') return '—';
+  return `${currency} ${Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+export const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];

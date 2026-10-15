@@ -82,6 +82,25 @@ function Gate() {
       <Stack.Screen name="expenses/index" options={{ title: 'Expenses' }} />
       <Stack.Screen name="expenses/new" options={{ title: 'New expense claim' }} />
       <Stack.Screen name="expenses/[id]" options={{ title: 'Expense claim' }} />
+      <Stack.Screen name="payroll/index" options={{ title: 'Payroll' }} />
+      <Stack.Screen name="payroll/[id]" options={{ title: 'Payroll' }} />
+      <Stack.Screen name="salary-slips" options={{ title: 'Payslips' }} />
+      <Stack.Screen name="loans/index" options={{ title: 'Loans & advances' }} />
+      <Stack.Screen name="loans/new" options={{ title: 'Request a loan' }} />
+      <Stack.Screen name="loans/[id]" options={{ title: 'Loan' }} />
+      <Stack.Screen name="salary-certificates" options={{ title: 'Salary certificates' }} />
+      <Stack.Screen name="documents/index" options={{ title: 'Documents' }} />
+      <Stack.Screen name="documents/new" options={{ title: 'Upload document' }} />
+      <Stack.Screen name="documents/[id]" options={{ title: 'Document' }} />
+      <Stack.Screen name="training/index" options={{ title: 'Training' }} />
+      <Stack.Screen name="training/[id]" options={{ title: 'Training' }} />
+      <Stack.Screen name="assets/index" options={{ title: 'Assets' }} />
+      <Stack.Screen name="assets/form" options={{ title: 'Asset' }} />
+      <Stack.Screen name="assets/[id]" options={{ title: 'Asset' }} />
+      <Stack.Screen name="onboarding/index" options={{ title: 'Onboarding' }} />
+      <Stack.Screen name="onboarding/[employeeId]" options={{ title: 'Onboarding' }} />
+      <Stack.Screen name="reports/index" options={{ title: 'Reports' }} />
+      <Stack.Screen name="reports/[key]" options={{ title: 'Report' }} />
     </Stack>
   );
 }

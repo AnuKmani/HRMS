@@ -139,9 +139,6 @@ export default function HomeScreen() {
             </View>
           ))}
 
-          <Text style={[styles.muted, { textAlign: 'center', marginTop: 8 }]}>
-            More modules are being moved to this app. Until then, use the current HRMS app for them.
-          </Text>
         </View>
       </ScrollView>
     </SafeAreaView>

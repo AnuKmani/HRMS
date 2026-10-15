@@ -103,6 +103,7 @@ export const api = {
   get: <T>(path: string, query?: Query) => send<T>('GET', path, undefined, query),
   post: <T>(path: string, body?: unknown) => send<T>('POST', path, body ?? {}),
   put: <T>(path: string, body?: unknown) => send<T>('PUT', path, body ?? {}),
+  patch: <T>(path: string, body?: unknown) => send<T>('PATCH', path, body ?? {}),
   del: <T>(path: string) => send<T>('DELETE', path),
 };
 

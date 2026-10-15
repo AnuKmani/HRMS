@@ -13,6 +13,7 @@ export const MODULES: ModuleTile[] = [
   { label: 'Site visits', hint: 'Start / site out', path: '/site-visits', icon: '📍', section: 'My day', visible: (c, e) => e && c('site_visits.create') },
   { label: 'Leave', hint: 'Apply, approve, track', path: '/leave', icon: '🏖', section: 'My day', visible: (c) => c('leave.view') },
   { label: 'Leave balances', hint: 'What is left this year', path: '/leave-balances', icon: '📊', section: 'My day', visible: (c) => c('leave.balance.view') },
+  { label: 'My payslips', hint: 'Download or request', path: '/salary-slips', icon: '💵', section: 'Pay & money', visible: (c, e) => c('salary_slips.view') && (e || c('salary_slips.manage')) },
   { label: 'Holidays', hint: 'The holiday calendar', path: '/holidays', icon: '🎉', section: 'My day', visible: () => true },
   { label: 'Timesheets', hint: 'Hours worked per day', path: '/timesheets', icon: '🕒', section: 'My day', visible: (c) => c('timesheets.view') },
   { label: 'Overtime', hint: 'Claim and approve extra hours', path: '/overtime', icon: '⏳', section: 'My day', visible: (c) => c('overtime.view') },
@@ -28,9 +29,17 @@ export const MODULES: ModuleTile[] = [
   { label: 'Employees', hint: 'Everyone in the directory', path: '/employees', icon: '👥', section: 'People', visible: (c) => c('employees.view') },
   { label: 'Leave overview', hint: "Everyone's leave left", path: '/leave-overview', icon: '🗂', section: 'People', visible: (c) => c('leave.balance.manage') },
   { label: 'Leave types', hint: 'Days per year, unlimited', path: '/leave-types', icon: '⚙️', section: 'People', visible: (c) => c('leave.manage') },
+  { label: 'Documents', hint: 'IDs, visas, expiry', path: '/documents', icon: '🪪', section: 'People', visible: (c) => c('documents.view') },
+  { label: 'Training', hint: 'Courses and certificates', path: '/training', icon: '🎓', section: 'People', visible: (c) => c('training.view') },
+  { label: 'Onboarding', hint: 'New joiners checklist', path: '/onboarding', icon: '🧩', section: 'People', visible: (c) => c('onboarding.view') },
+  { label: 'Assets', hint: 'Who holds what', path: '/assets', icon: '💻', section: 'Company', visible: (c) => c('assets.view') },
+  { label: 'Reports', hint: 'Run and export', path: '/reports', icon: '📑', section: 'Company', visible: (c) => c('reports.view') },
   { label: 'Departments', hint: 'Company departments', path: '/departments', icon: '🏢', section: 'Company', visible: (c) => c('departments.view') },
   { label: 'Designations', hint: 'Job titles', path: '/designations', icon: '🏷', section: 'Company', visible: (c) => c('designations.view') },
 
+  { label: 'Payroll', hint: 'Run, review, lock', path: '/payroll', icon: '🏦', section: 'Pay & money', visible: (c) => c('payroll.view') && (c('payroll.process') || c('payroll.manage')) },
+  { label: 'Loans & advances', hint: 'Request and repay', path: '/loans', icon: '🤝', section: 'Pay & money', visible: (c) => c('loans.view') },
+  { label: 'Salary certificates', hint: 'For banks, visas', path: '/salary-certificates', icon: '📄', section: 'Pay & money', visible: (c) => c('salary_certificates.view') },
   { label: 'Expenses', hint: 'Claims with receipts', path: '/expenses', icon: '🧾', section: 'Pay & money', visible: (c) => c('expenses.view') },
 ];
 
