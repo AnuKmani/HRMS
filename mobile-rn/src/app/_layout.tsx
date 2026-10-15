@@ -70,6 +70,18 @@ function Gate() {
       <Stack.Screen name="leave-overview/[employeeId]" options={{ title: 'Employee leave' }} />
       <Stack.Screen name="leave-types" options={{ title: 'Leave types' }} />
       <Stack.Screen name="holidays" options={{ title: 'Holidays' }} />
+      <Stack.Screen name="departments" options={{ title: 'Departments' }} />
+      <Stack.Screen name="designations" options={{ title: 'Designations' }} />
+      <Stack.Screen name="sites/index" options={{ title: 'Sites' }} />
+      <Stack.Screen name="sites/form" options={{ title: 'Site' }} />
+      <Stack.Screen name="site-assignments" options={{ title: 'Site assignments' }} />
+      <Stack.Screen name="timesheets" options={{ title: 'Timesheets' }} />
+      <Stack.Screen name="overtime/index" options={{ title: 'Overtime' }} />
+      <Stack.Screen name="overtime/new" options={{ title: 'Claim overtime' }} />
+      <Stack.Screen name="overtime/[id]" options={{ title: 'Overtime claim' }} />
+      <Stack.Screen name="expenses/index" options={{ title: 'Expenses' }} />
+      <Stack.Screen name="expenses/new" options={{ title: 'New expense claim' }} />
+      <Stack.Screen name="expenses/[id]" options={{ title: 'Expense claim' }} />
     </Stack>
   );
 }
