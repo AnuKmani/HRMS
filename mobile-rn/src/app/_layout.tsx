@@ -63,6 +63,13 @@ function Gate() {
       <Stack.Screen name="site-reports/[id]" options={{ title: 'Daily report' }} />
       <Stack.Screen name="site-visits" options={{ title: 'Site visits' }} />
       <Stack.Screen name="visit-plans" options={{ title: 'Planned site visits' }} />
+      <Stack.Screen name="employees/index" options={{ title: 'Employees' }} />
+      <Stack.Screen name="employees/[id]" options={{ title: 'Employee' }} />
+      <Stack.Screen name="employees/form" options={{ title: 'Employee' }} />
+      <Stack.Screen name="leave-overview/index" options={{ title: 'Leave overview' }} />
+      <Stack.Screen name="leave-overview/[employeeId]" options={{ title: 'Employee leave' }} />
+      <Stack.Screen name="leave-types" options={{ title: 'Leave types' }} />
+      <Stack.Screen name="holidays" options={{ title: 'Holidays' }} />
     </Stack>
   );
 }

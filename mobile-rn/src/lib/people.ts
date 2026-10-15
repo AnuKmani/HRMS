@@ -25,3 +25,26 @@ export async function projectOptions(): Promise<Option[]> {
   const page = await api.get<Page<{ id: number; name: string; code: string }>>('/projects', { per_page: 200, sort: 'name' });
   return page.items.map((p) => ({ value: p.id, label: p.name, hint: p.code }));
 }
+
+export async function lookupOptions(path: '/departments' | '/designations'): Promise<Option[]> {
+  const page = await api.get<Page<{ id: number; name: string }>>(path, { per_page: 200 });
+  return page.items.map((d) => ({ value: d.id, label: d.name }));
+}
+
+export const EMPLOYMENT_TYPES: [string, string][] = [
+  ['permanent', 'Permanent'],
+  ['contract', 'Contract'],
+  ['probation', 'Probation'],
+  ['internship', 'Internship'],
+  ['part_time', 'Part time'],
+];
+
+export const EMPLOYMENT_STATUSES: [string, string][] = [
+  ['active', 'Active'],
+  ['on_leave', 'On leave'],
+  ['inactive', 'Inactive'],
+  ['resigned', 'Resigned'],
+  ['terminated', 'Terminated'],
+];
+
+export const label = (pairs: [string, string][], v?: string | null) => pairs.find(([k]) => k === v)?.[1] ?? v ?? '—';
