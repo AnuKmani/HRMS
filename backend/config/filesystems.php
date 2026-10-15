@@ -30,7 +30,25 @@ return [
 
     'disks' => [
 
-        'local' => [
+        // Private files: selfies, documents, certificates, receipts, site
+        // photos, project files. On the server's own disk by default; on a
+        // host whose disk is wiped on each deploy (Laravel Cloud, Vercel,
+        // containers) set PRIVATE_FILES_DRIVER=s3 and the AWS_* values of an
+        // S3-compatible bucket, and the same code keeps them there instead.
+        'local' => env('PRIVATE_FILES_DRIVER', 'local') === 's3' ? [
+            'driver' => 's3',
+            'key' => env('AWS_ACCESS_KEY_ID'),
+            'secret' => env('AWS_SECRET_ACCESS_KEY'),
+            'region' => env('AWS_DEFAULT_REGION', 'auto'),
+            'bucket' => env('AWS_BUCKET'),
+            'url' => env('AWS_URL'),
+            'endpoint' => env('AWS_ENDPOINT'),
+            'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+            'root' => 'private',
+            'visibility' => 'private',
+            'throw' => false,
+            'report' => false,
+        ] : [
             'driver' => 'local',
             'root' => storage_path('app/private'),
             'serve' => true,

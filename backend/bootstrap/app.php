@@ -30,6 +30,10 @@ return Application::configure(basePath: dirname(__DIR__))
         // harmless path instead; API callers still receive a JSON 401 below.
         $middleware->redirectGuestsTo(fn () => '/');
 
+        // Hosted behind a load balancer (Laravel Cloud, Vercel, Nginx): trust
+        // its forwarded headers so URLs and HTTPS are seen correctly.
+        $middleware->trustProxies(at: env('TRUSTED_PROXIES', '*'));
+
         // Force JSON responses for every /api/* route regardless of the
         // Accept header, so clients always get {success, message, errors}
         // instead of an HTML redirect.

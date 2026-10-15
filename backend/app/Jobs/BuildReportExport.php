@@ -91,17 +91,28 @@ class BuildReportExport implements ShouldQueue
         try {
             $filters = ReportFilters::narrow($definition, (array) ($export->filters ?? []));
 
-            $absolute = Storage::disk('local')->path($export->path);
-            Storage::disk('local')->makeDirectory(dirname($export->path));
+            // Built in a temporary file, then stored on the private disk —
+            // which may be a bucket rather than this server's disk.
+            $absolute = tempnam(sys_get_temp_dir(), 'export').'.'.$export->format;
 
-            $rows = $exporter->exportToFile(
-                $definition,
-                $filters,
-                $export->format,
-                $absolute,
-                $user,
-                $this->maxRows($export->format),
-            );
+            try {
+                $rows = $exporter->exportToFile(
+                    $definition,
+                    $filters,
+                    $export->format,
+                    $absolute,
+                    $user,
+                    $this->maxRows($export->format),
+                );
+
+                $stream = fopen($absolute, 'rb');
+                Storage::disk('local')->put($export->path, $stream);
+                if (is_resource($stream)) {
+                    fclose($stream);
+                }
+            } finally {
+                @unlink($absolute);
+            }
         } catch (ValidationException $exception) {
             $this->fail_export($export, trim(implode(' ', $exception->errors()['format'] ?? ['Export failed.'])));
 
