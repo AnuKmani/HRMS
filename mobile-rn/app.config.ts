@@ -17,7 +17,16 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ...(config.plugins ?? []),
       [
         'expo-build-properties',
-        { android: { usesCleartextTraffic: allowHttp } },
+        {
+          android: {
+            usesCleartextTraffic: allowHttp,
+            // Smaller APK: remove unused code and resources, compress
+            // native libraries.
+            enableMinifyInReleaseBuilds: true,
+            enableShrinkResourcesInReleaseBuilds: true,
+            useLegacyPackaging: true,
+          },
+        },
       ],
     ],
   };
