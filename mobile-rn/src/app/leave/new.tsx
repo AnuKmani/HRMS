@@ -103,8 +103,8 @@ export default function NewLeaveScreen() {
           </Muted>
         </View>
       ) : null}
-      <DateField testID="start-date" label="First day" value={start} onChange={(v) => { setStart(v); if (!end || end < v) setEnd(v); }} error={errors.start_date} />
-      <DateField testID="end-date" label="Last day" value={end} onChange={setEnd} error={errors.end_date} />
+      <DateField required testID="start-date" label="First day" value={start} onChange={(v) => { setStart(v); if (!end || end < v) setEnd(v); }} error={errors.start_date} />
+      <DateField required testID="end-date" label="Last day" value={end} onChange={setEnd} error={errors.end_date} />
       <Field label="Reason" value={reason} onChangeText={setReason} multiline error={errors.reason} placeholder="Optional" />
       <Button testID="send-leave" label="Send for approval" onPress={send} busy={busy} />
       <Muted>If you ask for more days than you have left, it still goes through — HR decides whether the extra days are given or become loss of pay.</Muted>

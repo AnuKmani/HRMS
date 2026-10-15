@@ -51,6 +51,18 @@ function Gate() {
       <Stack.Screen name="leave/new" options={{ title: 'Apply for leave' }} />
       <Stack.Screen name="leave/[id]" options={{ title: 'Leave request' }} />
       <Stack.Screen name="leave-balances" options={{ title: 'My leave balances' }} />
+      <Stack.Screen name="projects/index" options={{ title: 'Projects' }} />
+      <Stack.Screen name="projects/[id]" options={{ title: 'Project' }} />
+      <Stack.Screen name="projects/form" options={{ title: 'Project' }} />
+      <Stack.Screen name="projects/stages" options={{ title: 'Systems / stages' }} />
+      <Stack.Screen name="project-dashboard" options={{ title: 'Project dashboard' }} />
+      <Stack.Screen name="project-progress/index" options={{ title: 'Project progress' }} />
+      <Stack.Screen name="project-progress/[id]" options={{ title: 'Project progress' }} />
+      <Stack.Screen name="site-reports/index" options={{ title: 'Daily site reports' }} />
+      <Stack.Screen name="site-reports/form" options={{ title: 'Daily report' }} />
+      <Stack.Screen name="site-reports/[id]" options={{ title: 'Daily report' }} />
+      <Stack.Screen name="site-visits" options={{ title: 'Site visits' }} />
+      <Stack.Screen name="visit-plans" options={{ title: 'Planned site visits' }} />
     </Stack>
   );
 }

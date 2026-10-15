@@ -18,8 +18,11 @@ type Notification = {
 /** Routes this app can open from a notification. */
 function appRoute(route?: string): string | null {
   if (!route) return null;
-  if (/^\/leave\/\d+$/.test(route) || route === '/leave' || route === '/attendance') return route;
-  return null;
+  const known = [/^\/leave(\/\d+)?$/, /^\/attendance$/, /^\/projects(\/\d+)?$/, /^\/project-progress(\/\d+)?$/, /^\/site-visit-plans$/, /^\/daily-reports\/\d+$/];
+  if (route.startsWith('/site-visit-plans')) return '/visit-plans';
+  const report = route.match(/^\/daily-reports\/(\d+)$/);
+  if (report) return `/site-reports/${report[1]}`;
+  return known.some((r) => r.test(route)) ? route : null;
 }
 
 export default function NotificationsScreen() {

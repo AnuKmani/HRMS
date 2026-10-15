@@ -8,6 +8,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { timeOf } from '../lib/format';
 import { myBalances, type LeaveBalance } from '../lib/leave';
+import { MODULES, SECTION_ORDER } from '../lib/modules';
 
 type Today = {
   checked_in: boolean;
@@ -16,7 +17,6 @@ type Today = {
   site: { name: string } | null;
 };
 
-type Tile = { label: string; hint: string; path: string; icon: string };
 
 export default function HomeScreen() {
   const { user, can, logout } = useAuth();
@@ -55,12 +55,8 @@ export default function HomeScreen() {
 
   if (!user) return null;
 
-  const tiles: Tile[] = [
-    ...(employeeId ? [{ label: 'Attendance', hint: 'Check in and out', path: '/attendance', icon: '⏱' }] : []),
-    ...(can('leave.view') ? [{ label: 'Leave', hint: 'Apply, approve, track', path: '/leave', icon: '🏖' }] : []),
-    ...(can('leave.balance.view') ? [{ label: 'Leave balances', hint: 'What is left this year', path: '/leave-balances', icon: '📊' }] : []),
-    { label: 'Notifications', hint: 'Approvals and answers', path: '/notifications', icon: '🔔' },
-  ];
+  const tiles = MODULES.filter((m) => m.visible(can, !!employeeId));
+  const sections = SECTION_ORDER.map((name) => [name, tiles.filter((t) => t.section === name)] as const).filter(([, t]) => t.length);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['bottom', 'left', 'right']}>
@@ -128,15 +124,20 @@ export default function HomeScreen() {
             </Card>
           ) : null}
 
-          <View style={styles.grid}>
-            {tiles.map((t) => (
-              <Pressable key={t.path} testID={`tile-${t.path}`} onPress={() => router.push(t.path as never)} style={styles.tile}>
-                <Text style={{ fontSize: 26 }}>{t.icon}</Text>
-                <Text style={styles.tileLabel}>{t.label}</Text>
-                <Text style={styles.muted}>{t.hint}</Text>
-              </Pressable>
-            ))}
-          </View>
+          {sections.map(([name, list]) => (
+            <View key={name} style={{ marginBottom: 8 }}>
+              <Text style={styles.section}>{name}</Text>
+              <View style={styles.grid}>
+                {list.map((t) => (
+                  <Pressable key={t.path} testID={`tile-${t.path}`} onPress={() => router.push(t.path as never)} style={styles.tile}>
+                    <Text style={{ fontSize: 26 }}>{t.icon}</Text>
+                    <Text style={styles.tileLabel}>{t.label}</Text>
+                    <Text style={styles.muted}>{t.hint}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          ))}
 
           <Text style={[styles.muted, { textAlign: 'center', marginTop: 8 }]}>
             More modules are being moved to this app. Until then, use the current HRMS app for them.
@@ -158,6 +159,7 @@ const styles = StyleSheet.create({
   muted: { color: colors.muted, marginTop: 6 },
   link: { color: colors.primary, fontWeight: '700', marginTop: 8 },
   balanceRow: { flexDirection: 'row', paddingVertical: 6 },
+  section: { fontSize: 15, fontWeight: '800', color: colors.muted, marginVertical: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   tile: { width: '47%', backgroundColor: '#fff', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: colors.border },
   tileLabel: { fontSize: 16, fontWeight: '700', color: colors.text, marginTop: 6 },

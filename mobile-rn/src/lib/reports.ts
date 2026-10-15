@@ -1,0 +1,25 @@
+export type DailyReport = {
+  id: number;
+  created_by: number;
+  creator?: { name?: string } | null;
+  project_id: number;
+  project?: { id: number; name: string; code: string } | null;
+  site_id: number;
+  site?: { id: number; name: string; code: string } | null;
+  report_date: string;
+  stage_progress: { stage_id: number; name: string; percent: number }[];
+  total_manpower: number;
+  work_planned: string;
+  work_completed: string;
+  safety_observations?: string | null;
+  delays?: string | null;
+  issues?: string | null;
+  remarks?: string | null;
+  status: string;
+  is_draft: boolean;
+  is_editable: boolean;
+  manpower: { category: string; count: number }[];
+  materials: { material_name: string; quantity: number | string; unit?: string | null; remarks?: string | null }[];
+  equipment: { equipment_name: string; quantity: number; operating_hours?: number | null; condition?: string | null; remarks?: string | null }[];
+  photos: { id: number; caption?: string | null }[];
+};

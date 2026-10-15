@@ -12,12 +12,14 @@ export function DateField({
   onChange,
   error,
   testID,
+  required,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   error?: string;
   testID?: string;
+  required?: boolean;
 }) {
   const [showIos, setShowIos] = useState(false);
   const current = value ? new Date(`${value}T00:00:00`) : new Date();
@@ -38,7 +40,10 @@ export function DateField({
 
   return (
     <View style={{ marginBottom: 14 }}>
-      <Text style={styles.label}>{label} *</Text>
+      <Text style={styles.label}>
+        {label}
+        {required ? ' *' : ''}
+      </Text>
       <Pressable testID={testID} onPress={open} style={[styles.box, error ? { borderColor: colors.danger } : null]}>
         <Text style={{ fontSize: 16, color: value ? colors.text : '#9CA3AF' }}>{value ? prettyDate(value) : 'Choose a date'}</Text>
       </Pressable>
