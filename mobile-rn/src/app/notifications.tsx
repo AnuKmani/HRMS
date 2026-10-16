@@ -15,29 +15,52 @@ type Notification = {
   created_at: string;
 };
 
-/** Routes this app can open from a notification. */
+/** Turns the server's link on a notification into a screen of this app. */
 function appRoute(route?: string): string | null {
   if (!route) return null;
-  const known = [/^\/leave(\/\d+)?$/, /^\/attendance$/, /^\/projects(\/\d+)?$/, /^\/project-progress(\/\d+)?$/, /^\/site-visit-plans$/, /^\/daily-reports\/\d+$/];
-  if (route.startsWith('/site-visit-plans')) return '/visit-plans';
-  const report = route.match(/^\/daily-reports\/(\d+)$/);
-  if (report) return `/site-reports/${report[1]}`;
-  return known.some((r) => r.test(route)) ? route : null;
+  const rewrites: [RegExp, (m: RegExpMatchArray) => string][] = [
+    [/^\/site-visit-plans/, () => '/visit-plans'],
+    [/^\/daily-reports\/(\d+)$/, (m) => `/site-reports/${m[1]}`],
+    [/^\/salary-certificates(\/\d+)?$/, () => '/salary-certificates'],
+    [/^\/home$/, () => '/'],
+  ];
+  for (const [pattern, to] of rewrites) {
+    const m = route.match(pattern);
+    if (m) return to(m);
+  }
+  const direct = [
+    /^\/leave(\/\d+)?$/,
+    /^\/attendance$/,
+    /^\/projects(\/\d+)?$/,
+    /^\/project-progress(\/\d+)?$/,
+    /^\/employees\/\d+$/,
+    /^\/overtime\/\d+$/,
+    /^\/expenses\/\d+$/,
+    /^\/loans\/\d+$/,
+    /^\/documents\/\d+$/,
+    /^\/training\/\d+$/,
+    /^\/assets\/\d+$/,
+    /^\/payroll\/\d+$/,
+    /^\/salary-slips$/,
+  ];
+  return direct.some((r) => r.test(route)) ? route : null;
 }
 
 export default function NotificationsScreen() {
   const router = useRouter();
   const [rows, setRows] = useState<Notification[] | null>(null);
+  const [earlier, setEarlier] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      setRows((await api.get<Page<Notification>>('/notifications', { per_page: 50 })).items);
+      setError(null);
+      setRows((await api.get<Page<Notification>>('/notifications', { per_page: 50, unread: earlier ? undefined : 1 })).items);
     } catch (e) {
       setError((e as ApiError).message);
       setRows([]);
     }
-  }, []);
+  }, [earlier]);
 
   useFocusEffect(
     useCallback(() => {
@@ -48,7 +71,8 @@ export default function NotificationsScreen() {
   async function open(n: Notification) {
     if (!n.read) {
       api.post(`/notifications/${n.id}/read`).catch(() => {});
-      setRows((r) => r?.map((x) => (x.id === n.id ? { ...x, read: true } : x)) ?? r);
+      // Read means done: it leaves the list (still under "Show earlier").
+      setRows((r) => (earlier ? r?.map((x) => (x.id === n.id ? { ...x, read: true } : x)) : r?.filter((x) => x.id !== n.id)) ?? r);
     }
     const route = appRoute(n.data?.route);
     if (route) router.push(route as never);
@@ -56,7 +80,7 @@ export default function NotificationsScreen() {
 
   async function readAll() {
     await api.post('/notifications/read-all').catch(() => {});
-    setRows((r) => r?.map((x) => ({ ...x, read: true })) ?? r);
+    setRows((r) => (earlier ? r?.map((x) => ({ ...x, read: true })) : []) ?? r);
   }
 
   if (rows === null) return <Loading />;
@@ -65,7 +89,7 @@ export default function NotificationsScreen() {
     <Screen onRefresh={load}>
       {error ? <Banner message={error} /> : null}
       {rows.some((r) => !r.read) ? <Button label="Mark all as read" kind="outline" onPress={readAll} /> : null}
-      {rows.length === 0 ? <Empty message="No notifications yet." /> : null}
+      {rows.length === 0 ? <Empty message={earlier ? 'No notifications yet.' : 'You are all caught up.'} /> : null}
       {rows.map((n) => (
         <Pressable
           key={n.id}
@@ -88,6 +112,9 @@ export default function NotificationsScreen() {
           <Muted>{new Date(n.created_at).toLocaleString()}</Muted>
         </Pressable>
       ))}
+      <Pressable onPress={() => setEarlier((v) => !v)} style={{ paddingVertical: 14, alignItems: 'center' }}>
+        <Text style={{ color: colors.primary, fontWeight: '600' }}>{earlier ? 'Show new only' : 'Show earlier notifications'}</Text>
+      </Pressable>
     </Screen>
   );
 }

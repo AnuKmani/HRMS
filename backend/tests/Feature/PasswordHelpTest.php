@@ -54,6 +54,27 @@ class PasswordHelpTest extends TestCase
         $this->assertSame(1, InAppNotification::query()->where('user_id', $hr->id)->count());
     }
 
+    public function test_resetting_the_password_clears_the_alert_for_every_hr_user(): void
+    {
+        $hr = User::factory()->create();
+        $hr->assignRole('HR Admin');
+        $otherHr = User::factory()->create();
+        $otherHr->assignRole('HR Admin');
+        $engineer = User::factory()->create(['email' => 'arun@example.test']);
+        $engineer->assignRole('Site Engineer');
+        $employee = Employee::factory()->create(['user_id' => $engineer->id, 'email' => 'arun@example.test']);
+
+        $this->postJson('/api/v1/auth/forgot-password', ['email' => 'arun@example.test'])->assertStatus(202);
+        $this->assertSame(2, InAppNotification::query()->whereNull('read_at')->count());
+
+        $this->actingAs($hr)
+            ->postJson("/api/v1/employees/{$employee->id}/account/reset-password", ['password' => '12345'])
+            ->assertOk();
+
+        $this->assertSame(0, InAppNotification::query()->whereNull('read_at')->count());
+        $this->actingAs($otherHr)->getJson('/api/v1/notifications/unread-count')->assertJsonPath('data.unread', 0);
+    }
+
     public function test_an_unknown_email_gets_the_same_answer_and_alerts_nobody(): void
     {
         $hr = User::factory()->create();

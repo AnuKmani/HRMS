@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Responses\ApiResponse;
 use App\Models\AuditLog;
 use App\Models\Employee;
+use App\Models\InAppNotification;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -179,6 +180,14 @@ class EmployeeAccountController extends Controller
             ])->save();
             $user->tokens()->delete();
             $this->audit($user, 'user.password_reset_by_hr', [], []);
+
+            // Their "forgot my password" alert is answered now: clear it from
+            // every HR bell, not only the bell of whoever did the reset.
+            InAppNotification::query()
+                ->where('type', 'security.password_help')
+                ->where('dedupe_key', 'like', 'password-help:'.$user->id.':%')
+                ->whereNull('read_at')
+                ->update(['read_at' => now()]);
         });
 
         return ApiResponse::success('Password reset.', $this->describe($user->refresh()) + [
