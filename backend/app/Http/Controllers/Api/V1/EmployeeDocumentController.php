@@ -317,14 +317,21 @@ class EmployeeDocumentController extends Controller
             // months and a passport that lapses in years are not the same
             // question, and one number could not answer both.
             $warning = max(0, (int) config('hrms.expiry.default_warning_days', 30));
+            $days = sprintf('COALESCE(NULLIF(document_types.expiry_warning_days, 0), %d)', $warning);
+
+            // Date arithmetic is the one thing each database spells
+            // differently; today's date is bound from PHP so all three agree
+            // with the app's clock and timezone.
+            $limit = match ($query->getConnection()->getDriverName()) {
+                'pgsql' => "(CAST(? AS date) + {$days})",
+                'sqlite' => "date(?, '+' || {$days} || ' days')",
+                default => "DATE_ADD(?, INTERVAL {$days} DAY)",
+            };
 
             $query->whereNotNull('employee_documents.expiry_date')
                 ->where('employee_documents.expiry_date', '>=', now()->toDateString())
                 ->where('employee_documents.status', '!=', EmployeeDocument::STATUS_ARCHIVED)
-                ->whereRaw(sprintf(
-                    'employee_documents.expiry_date <= DATE_ADD(CURDATE(), INTERVAL COALESCE(NULLIF(document_types.expiry_warning_days, 0), %d) DAY)',
-                    $warning,
-                ));
+                ->whereRaw("employee_documents.expiry_date <= {$limit}", [now()->toDateString()]);
         }
 
         if ($from = $this->param($request, 'expiry_from')) {
