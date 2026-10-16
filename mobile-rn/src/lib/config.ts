@@ -6,18 +6,26 @@ export const DEFAULT_API_URL = (process.env.EXPO_PUBLIC_API_URL ?? '').replace(/
 /** Test builds let a tester point the app at another server from the login screen. */
 export const ALLOW_SERVER_SETTING = process.env.EXPO_PUBLIC_ALLOW_SERVER_SETTING === 'true';
 
-const KEY = 'hrms.server_url';
+// v2: addresses saved by builds that pointed at a laptop are ignored, so the
+// hosted server built into this version is what the app starts with.
+const KEY = 'hrms.server_url.v2';
 let current = DEFAULT_API_URL;
 
 export function apiUrl(): string {
   return current;
 }
 
-/** `192.168.1.164:8000` → `http://192.168.1.164:8000/api/v1`. */
+/**
+ * `192.168.1.164:8000` → `http://192.168.1.164:8000/api/v1`;
+ * `hrms.example.com` → `https://hrms.example.com/api/v1`.
+ */
 export function normaliseServerAddress(input: string): string {
   let url = input.trim().replace(/\/+$/, '');
   if (url === '') return DEFAULT_API_URL;
-  if (!/^https?:\/\//i.test(url)) url = `http://${url}`;
+  if (!/^https?:\/\//i.test(url)) {
+    const local = /^(localhost|\d{1,3}(\.\d{1,3}){3})(:\d+)?(\/|$)/i.test(url);
+    url = `${local ? 'http' : 'https'}://${url}`;
+  }
   if (!/\/api\/v\d+$/.test(url)) url = `${url}/api/v1`;
   return url;
 }

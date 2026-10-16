@@ -128,7 +128,7 @@ export default function LoginScreen() {
                   value={serverInput}
                   onChangeText={setServerInput}
                   autoCapitalize="none"
-                  placeholder="192.168.1.164:8000"
+                  placeholder="hrms-backend.vercel.app"
                 />
                 <Button label="Test and save" kind="outline" onPress={testAndSave} />
               </View>
