@@ -3,7 +3,7 @@ import { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Card, Chip, colors } from '../components/ui';
+import { Button, Card, Chip, colors } from '../components/ui';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { money, timeOf } from '../lib/format';
@@ -116,10 +116,18 @@ export default function HomeScreen() {
                   <Chip label="Not checked in yet" tone="warning" />
                 )}
                 {today?.site ? <Text style={styles.muted}>Site: {today.site.name}</Text> : null}
-                <Text style={styles.link}>
-                  {today?.checked_in && !today?.checked_out ? 'Check out →' : today?.checked_out ? 'View →' : 'Check in →'}
-                </Text>
+                {today?.checked_out ? <Text style={styles.link}>View →</Text> : null}
               </Pressable>
+              {today?.checked_in && !today?.checked_out ? (
+                <View style={{ marginTop: 10 }}>
+                  <Button testID="home-check-out" kind="stop" label="Check out" onPress={() => router.push('/attendance')} />
+                  <Text style={styles.muted}>Remember to check out before you leave.</Text>
+                </View>
+              ) : !today?.checked_out && !queued.some((e) => e.kind === 'check-in') ? (
+                <View style={{ marginTop: 10 }}>
+                  <Button testID="home-check-in" label="Check in" onPress={() => router.push('/attendance')} />
+                </View>
+              ) : null}
             </Card>
           ) : null}
 

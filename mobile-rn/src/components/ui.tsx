@@ -81,7 +81,8 @@ export function Button({
 }: {
   label: string;
   onPress: () => void;
-  kind?: 'primary' | 'outline' | 'danger';
+  /** `stop`: a solid red button for the action that must not be missed (check out). */
+  kind?: 'primary' | 'outline' | 'danger' | 'stop';
   busy?: boolean;
   disabled?: boolean;
   testID?: string;
@@ -97,16 +98,17 @@ export function Button({
         kind === 'primary' && styles.buttonPrimary,
         kind === 'outline' && styles.buttonOutline,
         kind === 'danger' && styles.buttonDanger,
+        kind === 'stop' && styles.buttonStop,
         (pressed || off) && { opacity: 0.6 },
       ]}
     >
       {busy ? (
-        <ActivityIndicator color={kind === 'primary' ? '#fff' : colors.primary} />
+        <ActivityIndicator color={kind === 'primary' || kind === 'stop' ? '#fff' : colors.primary} />
       ) : (
         <Text
           style={[
             styles.buttonText,
-            kind === 'primary' && { color: '#fff' },
+            (kind === 'primary' || kind === 'stop') && { color: '#fff' },
             kind === 'outline' && { color: colors.primary },
             kind === 'danger' && { color: colors.danger },
           ]}
@@ -277,6 +279,7 @@ const styles = StyleSheet.create({
   buttonPrimary: { backgroundColor: colors.primary },
   buttonOutline: { borderWidth: 1, borderColor: colors.primary, backgroundColor: '#fff' },
   buttonDanger: { borderWidth: 1, borderColor: colors.danger, backgroundColor: '#fff' },
+  buttonStop: { backgroundColor: colors.danger },
   buttonText: { fontSize: 16, fontWeight: '700' },
   banner: { borderRadius: 12, padding: 14, marginBottom: 14 },
   chip: { borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4, alignSelf: 'flex-start' },

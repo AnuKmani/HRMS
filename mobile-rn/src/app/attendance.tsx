@@ -311,7 +311,7 @@ export default function AttendanceScreen() {
       ) : null}
 
       {canIn && !needsSite ? <Button testID="check-in" label="Check in (selfie)" onPress={() => setAsking(true)} busy={busy === 'in'} /> : null}
-      {canOut ? <Button testID="check-out" label="Check out" onPress={checkOut} busy={busy === 'out'} /> : null}
+      {canOut ? <Button testID="check-out" kind="stop" label="Check out" onPress={checkOut} busy={busy === 'out'} /> : null}
 
       <Button label="My attendance history & earnings" kind="outline" onPress={() => router.push('/attendance-records')} />
       <Muted>Your location is recorded when you check in and out, and a selfie at check-in. With no signal it is saved on the phone and sent later.</Muted>
