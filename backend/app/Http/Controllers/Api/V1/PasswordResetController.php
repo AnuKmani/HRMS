@@ -74,29 +74,43 @@ class PasswordResetController extends Controller
      */
     public function forgotPassword(ForgotPasswordRequest $request): JsonResponse
     {
-        // Broker status is intentionally discarded: RESET_LINK_SENT and
-        // INVALID_USER produce byte-identical responses. The log below is
-        // where the difference is recorded, and a log line is read by
-        // operators rather than probed by scripts.
-        $status = Password::broker()->sendResetLink($request->safe()->only('email'));
+        $email = strtolower(trim((string) $request->validated('email')));
+
+        // HR first. The person cannot sign in to say they are locked out, and
+        // on this deployment HR is the one who actually resets the password —
+        // so the alert must not wait on, or be lost to, a mail transport that
+        // may not be set up. Whatever goes wrong here must never break this
+        // answer either.
+        $alerted = 0;
+
+        try {
+            $alerted = $this->askHrToHelp($email);
+        } catch (\Throwable $exception) {
+            Log::warning('auth.password_help_failed', ['error' => $exception->getMessage()]);
+        }
+
+        // The emailed link is a bonus on top. Broker status is intentionally
+        // discarded: RESET_LINK_SENT and INVALID_USER produce byte-identical
+        // responses. The log below is where the difference is recorded, and a
+        // log line is read by operators rather than probed by scripts.
+        $status = null;
+
+        try {
+            $status = Password::broker()->sendResetLink(['email' => $email]);
+        } catch (\Throwable $exception) {
+            Log::warning('auth.password_reset_mail_failed', ['error' => $exception->getMessage()]);
+        }
 
         Log::info('auth.password_reset_requested', [
             // Only which *outcome* — never the address itself. An
             // auth log that lists every address anybody has ever typed
             // into a form is a mailing list, and a mailing list on disk
             // is a target.
-            'found' => $status !== Password::INVALID_USER,
+            'found' => $status !== null ? $status !== Password::INVALID_USER : null,
             'throttled' => $status === Password::RESET_THROTTLED,
+            'hr_alerted' => $alerted,
             'ip' => $request->ip(),
         ]);
-
-        // Telling HR is a courtesy: whatever goes wrong there (no roles
-        // seeded, a notification failing) must never break this answer.
-        try {
-            $this->askHrToHelp((string) $request->validated('email'));
-        } catch (\Throwable $exception) {
-            Log::warning('auth.password_help_failed', ['error' => $exception->getMessage()]);
-        }
 
         // Identical whether or not the address exists: the answer must not
         // tell a stranger which emails have accounts.
@@ -113,16 +127,16 @@ class PasswordResetController extends Controller
      * link to that person's profile, where Reset password is. Once per
      * person per day, so a worried tapper does not flood the bell.
      */
-    private function askHrToHelp(string $email): void
+    private function askHrToHelp(string $email): int
     {
         $user = User::query()
             ->with('employee')
-            ->where('email', strtolower(trim($email)))
+            ->whereRaw('lower(email) = ?', [$email])
             ->where('status', User::STATUS_ACTIVE)
             ->first();
 
         if ($user === null) {
-            return;
+            return 0;
         }
 
         $helpers = User::permission('users.manage')
@@ -133,12 +147,12 @@ class PasswordResetController extends Controller
             ->all();
 
         if ($helpers === []) {
-            return;
+            return 0;
         }
 
         $name = $user->employee?->full_name ?: $user->name;
 
-        app(NotificationService::class)->send(new NotificationMessage(
+        return count(app(NotificationService::class)->send(new NotificationMessage(
             type: 'security.password_help',
             title: 'Password reset requested',
             body: sprintf(
@@ -150,7 +164,7 @@ class PasswordResetController extends Controller
             data: $user->employee !== null ? ['route' => '/employees/'.$user->employee->id] : [],
             mandatory: true,
             dedupeKey: 'password-help:'.$user->id.':'.now()->toDateString(),
-        ));
+        )));
     }
 
     /**

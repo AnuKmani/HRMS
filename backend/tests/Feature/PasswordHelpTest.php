@@ -10,6 +10,7 @@ use Database\Seeders\RolePermissionSeeder;
 use Database\Seeders\RoleSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password;
 use Tests\TestCase;
 
 /**
@@ -73,6 +74,22 @@ class PasswordHelpTest extends TestCase
 
         $this->assertSame(0, InAppNotification::query()->whereNull('read_at')->count());
         $this->actingAs($otherHr)->getJson('/api/v1/notifications/unread-count')->assertJsonPath('data.unread', 0);
+    }
+
+    public function test_hr_is_alerted_even_when_the_reset_email_cannot_be_sent(): void
+    {
+        $hr = User::factory()->create();
+        $hr->assignRole('HR Admin');
+        $engineer = User::factory()->create(['email' => 'arun@example.test']);
+        $engineer->assignRole('Site Engineer');
+        Employee::factory()->create(['user_id' => $engineer->id, 'email' => 'arun@example.test']);
+
+        // A host with no working mail transport.
+        Password::shouldReceive('broker->sendResetLink')->andThrow(new \RuntimeException('Mailer not configured'));
+
+        $this->postJson('/api/v1/auth/forgot-password', ['email' => ' Arun@Example.TEST '])->assertStatus(202);
+
+        $this->assertSame(1, InAppNotification::query()->where('user_id', $hr->id)->where('type', 'security.password_help')->count());
     }
 
     public function test_an_unknown_email_gets_the_same_answer_and_alerts_nobody(): void
