@@ -69,7 +69,8 @@ async function send<T>(method: string, path: string, body?: unknown, query?: Que
   }
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30000);
+  // Photo uploads on a weak signal take longer than a plain request.
+  const timer = setTimeout(() => controller.abort(), body instanceof FormData ? 90000 : 30000);
 
   let response: Response;
   try {

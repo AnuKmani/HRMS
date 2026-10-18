@@ -4,7 +4,8 @@ import { Image, Pressable, Text, View } from 'react-native';
 
 import { KeyValues, SectionHeader, confirm } from '../../components/kit';
 import { Banner, Button, Card, Chip, Loading, Muted, Screen, colors } from '../../components/ui';
-import { api, fileField, getToken } from '../../lib/api';
+import { api, getToken } from '../../lib/api';
+import { uploadField } from '../../lib/photos';
 import { useAuth } from '../../lib/auth';
 import { apiUrl } from '../../lib/config';
 import { prettyDate } from '../../lib/format';
@@ -33,7 +34,7 @@ export default function SiteActivityDetail() {
       : await ImagePicker.launchImageLibraryAsync({ quality: 0.6, allowsMultipleSelection: true, selectionLimit: 6, mediaTypes: ['images'] });
     if (result.canceled || !result.assets?.length) return;
     const form = new FormData();
-    result.assets.slice(0, 6).forEach((a, i) => form.append('photos[]', fileField(a.uri, `activity-photo-${i + 1}.jpg`, 'image/jpeg')));
+    for (const [i, a] of result.assets.slice(0, 6).entries()) form.append('photos[]', await uploadField(a.uri, `activity-photo-${i + 1}.jpg`, 'image/jpeg'));
     if (await run('photos', () => api.post(`/site-activity-reports/${r!.id}/photos`, form), 'Photographs added.')) await reload();
   }
 

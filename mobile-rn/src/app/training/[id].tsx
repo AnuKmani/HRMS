@@ -6,12 +6,13 @@ import { Text, View } from 'react-native';
 import { DateField } from '../../components/DateField';
 import { FormModal, KeyValues, confirm } from '../../components/kit';
 import { Banner, Button, Card, Chip, Field, Loading, Screen, colors } from '../../components/ui';
-import { api, fileField } from '../../lib/api';
+import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { openRemoteFile } from '../../lib/files';
 import { prettyDate, ymd } from '../../lib/format';
 import { useAction, useLoad } from '../../lib/hooks';
 import { TRAINING_STATUS, trainingTone, type Enrolment } from '../../lib/training';
+import { uploadField } from '../../lib/photos';
 
 export default function TrainingDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -33,7 +34,7 @@ export default function TrainingDetail() {
     if (!f || !e) return;
     const body = new FormData();
     for (const [k, v] of Object.entries(f)) if (v) body.append(k, v);
-    if (file) body.append('file', fileField(file.uri, file.name, file.type));
+    if (file) body.append('file', await uploadField(file.uri, file.name, file.type));
     if (await run('complete', () => api.post(`/employee-training/${e.id}/complete`, body), 'Marked as completed.')) {
       setF(null);
       await reload();

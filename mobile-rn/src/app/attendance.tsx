@@ -7,6 +7,7 @@ import { Alert, Pressable, Text, View } from 'react-native';
 import { FormModal, PickerField } from '../components/kit';
 import { Banner, Button, Card, Chip, Field, Loading, Muted, Screen, Title, colors } from '../components/ui';
 import { api, ApiError } from '../lib/api';
+import { shrinkPhoto } from '../lib/photos';
 import { prettyDate, timeOf, uuid } from '../lib/format';
 import { dismiss, enqueue, isOffline, pending, syncPending, type QueuedEvent } from '../lib/offline';
 
@@ -134,6 +135,7 @@ export default function AttendanceScreen() {
       if (camera.status !== 'granted') throw new ApiError('Camera permission is needed for the check-in selfie.', 400);
       const shot = await ImagePicker.launchCameraAsync({ cameraType: ImagePicker.CameraType.front, quality: 0.5, allowsEditing: false });
       if (shot.canceled || !shot.assets?.length) return;
+      const selfie = await shrinkPhoto(shot.assets[0].uri);
       const fields: Record<string, string> = {
         latitude: String(f.latitude),
         longitude: String(f.longitude),
@@ -145,7 +147,7 @@ export default function AttendanceScreen() {
       if (f.accuracy !== null) fields.accuracy = String(f.accuracy);
       const form = new FormData();
       for (const [k, v] of Object.entries({ ...fields, source: 'online' })) form.append(k, v);
-      form.append('selfie', { uri: shot.assets[0].uri, name: 'selfie.jpg', type: 'image/jpeg' } as never);
+      form.append('selfie', { uri: selfie, name: 'selfie.jpg', type: 'image/jpeg' } as never);
       try {
         await api.post('/attendance/check-in', form);
         Alert.alert('You are checked in', `${site ? `${site.name} · ` : ''}${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
@@ -153,7 +155,7 @@ export default function AttendanceScreen() {
         await load();
       } catch (e) {
         if (!isOffline(e)) throw e;
-        enqueue({ id, kind: 'check-in', at: new Date().toISOString(), fields: { ...fields, source: 'offline' }, selfieUri: shot.assets[0].uri });
+        enqueue({ id, kind: 'check-in', at: new Date().toISOString(), fields: { ...fields, source: 'offline' }, selfieUri: selfie });
         setQueue(pending());
         setNotice('No signal — your check-in is saved on the phone and will be sent automatically. Tap “Sync now” when you are back online.');
       }

@@ -5,7 +5,8 @@ import { Pressable, Text, View } from 'react-native';
 import { ChainCard, DecisionCard, STATUS_LABEL, statusTone, useIsApprover } from '../../components/Approvals';
 import { KeyValues, SectionHeader, confirm } from '../../components/kit';
 import { Banner, Button, Card, Chip, Loading, Muted, Row, Screen, colors } from '../../components/ui';
-import { api, fileField } from '../../lib/api';
+import { api } from '../../lib/api';
+import { uploadField } from '../../lib/photos';
 import { useAuth } from '../../lib/auth';
 import { openRemoteFile } from '../../lib/files';
 import { prettyDate } from '../../lib/format';
@@ -31,7 +32,7 @@ export default function ExpenseDetail() {
     const r = await DocumentPicker.getDocumentAsync({ type: ['image/*', 'application/pdf'], multiple: true, copyToCacheDirectory: true });
     if (r.canceled || !e) return;
     const body = new FormData();
-    r.assets.slice(0, 6).forEach((a) => body.append('receipts[]', fileField(a.uri, a.name, a.mimeType ?? 'application/octet-stream')));
+    for (const a of r.assets.slice(0, 6)) body.append('receipts[]', await uploadField(a.uri, a.name, a.mimeType ?? 'application/octet-stream'));
     await act('upload', () => api.post(`/expenses/${e.id}/receipts`, body), 'Receipts added.');
   }
 

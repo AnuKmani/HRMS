@@ -7,7 +7,8 @@ import { Pressable, Text } from 'react-native';
 import { DateField } from '../../components/DateField';
 import { PickerField, type Option } from '../../components/kit';
 import { Banner, Button, Field, Muted, Row, Screen, colors } from '../../components/ui';
-import { api, ApiError, fileField } from '../../lib/api';
+import { api, ApiError } from '../../lib/api';
+import { uploadField } from '../../lib/photos';
 import { ymd } from '../../lib/format';
 import { projectOptions, siteOptions } from '../../lib/people';
 
@@ -74,7 +75,7 @@ export default function NewExpense() {
       id = e.id;
       if (files.length) {
         const body = new FormData();
-        files.forEach((p) => body.append('receipts[]', fileField(p.uri, p.name, p.type)));
+        for (const p of files) body.append('receipts[]', await uploadField(p.uri, p.name, p.type));
         await api.post(`/expenses/${id}/receipts`, body);
       }
       if (submit) await api.post(`/expenses/${id}/submit`);

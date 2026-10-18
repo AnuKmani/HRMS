@@ -4,7 +4,8 @@ import { useCallback, useState } from 'react';
 import { Alert, Text, View } from 'react-native';
 
 import { Banner, Button, Card, Chip, Field, Loading, Muted, Screen, Title, colors } from '../../components/ui';
-import { api, ApiError, fileField } from '../../lib/api';
+import { api, ApiError } from '../../lib/api';
+import { uploadField } from '../../lib/photos';
 import { useAuth } from '../../lib/auth';
 import { days, prettyDate } from '../../lib/format';
 import { statusLabel, statusTone, stepApprover, type LeaveRequest } from '../../lib/leave';
@@ -57,7 +58,7 @@ export default function LeaveDetailScreen() {
     if (picked.canceled || !picked.assets?.length) return;
     const file = picked.assets[0];
     const form = new FormData();
-    form.append('certificate', fileField(file.uri, file.name, file.mimeType ?? 'application/octet-stream'));
+    form.append('certificate', await uploadField(file.uri, file.name, file.mimeType ?? 'application/octet-stream'));
     setBusy('certificate');
     setError(null);
     try {

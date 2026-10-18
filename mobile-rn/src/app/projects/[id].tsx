@@ -6,10 +6,11 @@ import { Pressable, Text, View } from 'react-native';
 import { DateField } from '../../components/DateField';
 import { FormModal, KeyValues, MultiPickerField, PickerField, SectionHeader, confirm, type Option } from '../../components/kit';
 import { Banner, Button, Card, Chip, Field, Loading, Muted, ProgressBar, Row, Screen, colors } from '../../components/ui';
-import { api, fileField } from '../../lib/api';
+import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { openRemoteFile } from '../../lib/files';
 import { useAction, useLoad } from '../../lib/hooks';
+import { uploadField } from '../../lib/photos';
 import {
   DOC_CATEGORIES,
   EVENT_TYPES,
@@ -514,8 +515,10 @@ export default function ProjectDetailScreen() {
           const body = new FormData();
           body.append('title', v('title'));
           body.append('category', v('category'));
-          body.append('file', fileField(v('fileUri'), v('fileName'), v('fileType')));
-          void act('upload', () => api.post(`/projects/${p.id}/documents`, body), 'Document uploaded.');
+          void act('upload', async () => {
+            body.append('file', await uploadField(v('fileUri'), v('fileName'), v('fileType')));
+            return api.post(`/projects/${p.id}/documents`, body);
+          }, 'Document uploaded.');
         }}
       >
         {error ? <Banner message={error} /> : null}

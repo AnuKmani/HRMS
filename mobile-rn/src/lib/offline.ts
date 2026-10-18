@@ -1,6 +1,7 @@
 import { Directory, File, Paths } from 'expo-file-system';
 
 import { api, ApiError, fileField } from './api';
+import { shrinkPhoto } from './photos';
 
 /**
  * Check-ins and check-outs made with no signal are kept on the phone and
@@ -72,7 +73,8 @@ export async function syncPending(): Promise<{ sent: number; left: number }> {
       if (e.kind === 'check-in') {
         const form = new FormData();
         for (const [k, v] of Object.entries(e.fields)) form.append(k, v);
-        if (e.selfie) form.append('selfie', fileField(e.selfie, 'selfie.jpg', 'image/jpeg'));
+        // Shrunk here too: check-ins saved by older builds kept the full-size photo.
+        if (e.selfie) form.append('selfie', fileField(await shrinkPhoto(e.selfie), 'selfie.jpg', 'image/jpeg'));
         await api.post('/attendance/check-in', form);
       } else {
         await api.post('/attendance/check-out', e.fields);

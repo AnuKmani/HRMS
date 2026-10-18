@@ -9,6 +9,7 @@ import { useAuth } from '../lib/auth';
 import { money, timeOf } from '../lib/format';
 import { myBalances, type LeaveBalance } from '../lib/leave';
 import { MODULES, SECTION_ORDER } from '../lib/modules';
+import { pending, syncPending, type QueuedEvent } from '../lib/offline';
 
 type Today = {
   checked_in: boolean;
@@ -30,6 +31,7 @@ export default function HomeScreen() {
   const [today, setToday] = useState<Today | null>(null);
   const [balances, setBalances] = useState<LeaveBalance[]>([]);
   const [unread, setUnread] = useState(0);
+  const [queued, setQueued] = useState<QueuedEvent[]>([]);
   const [summary, setSummary] = useState<Summary['blocks']>({});
   const [refreshing, setRefreshing] = useState(false);
 
@@ -43,6 +45,9 @@ export default function HomeScreen() {
       jobs.push(api.get<Summary>('/dashboards/employee').then((d) => setSummary(d.blocks ?? {})).catch(() => setSummary({})));
     }
     if (employeeId) {
+      // Check-ins kept on the phone go first, so today's card shows them as sent.
+      if (pending().length) await syncPending().catch(() => undefined);
+      setQueued(pending().filter((e) => !e.error));
       jobs.push(api.get<Today>('/attendance/today').then(setToday).catch(() => setToday(null)));
       if (can('leave.balance.view')) {
         jobs.push(myBalances(employeeId).then(setBalances).catch(() => setBalances([])));
@@ -101,7 +106,9 @@ export default function HomeScreen() {
             <Card>
               <Pressable onPress={() => router.push('/attendance')}>
                 <Text style={styles.cardTitle}>Today</Text>
-                {today?.checked_out ? (
+                {!today?.checked_in && queued.some((e) => e.kind === 'check-in') ? (
+                  <Chip label={`Checked in at ${timeOf(queued.find((e) => e.kind === 'check-in')?.at)} · saved on phone, sending…`} tone="warning" />
+                ) : today?.checked_out ? (
                   <Chip label={`Done · ${timeOf(today.attendance?.check_in_at)} – ${timeOf(today.attendance?.check_out_at)}`} tone="success" />
                 ) : today?.checked_in ? (
                   <Chip label={`Checked in at ${timeOf(today.attendance?.check_in_at)}`} tone="info" />

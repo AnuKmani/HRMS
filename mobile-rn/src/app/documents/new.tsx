@@ -6,7 +6,8 @@ import { useEffect, useState } from 'react';
 import { DateField } from '../../components/DateField';
 import { PickerField, type Option } from '../../components/kit';
 import { Banner, Button, Field, Muted, Screen } from '../../components/ui';
-import { api, ApiError, fileField } from '../../lib/api';
+import { api, ApiError } from '../../lib/api';
+import { uploadField } from '../../lib/photos';
 import { useAuth } from '../../lib/auth';
 import { employeeOptions } from '../../lib/people';
 
@@ -53,7 +54,7 @@ export default function NewDocument() {
     if (employeeId) body.append('employee_id', String(employeeId));
     if (typeId) body.append('document_type_id', String(typeId));
     for (const [k, v] of Object.entries(f)) if (v) body.append(k, v);
-    if (file) body.append('file', fileField(file.uri, file.name, file.type));
+    if (file) body.append('file', await uploadField(file.uri, file.name, file.type));
     try {
       const d = await api.post<{ id: number }>('/employee-documents', body);
       router.replace(`/documents/${d.id}`);
