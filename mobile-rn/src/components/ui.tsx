@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -124,17 +124,42 @@ export function Field({
   required,
   ...input
 }: TextInputProps & { label: string; error?: string; required?: boolean }) {
+  // A password box gets a Show / Hide switch, so a long password can be checked before sending.
+  const secret = !!input.secureTextEntry;
+  const [shown, setShown] = useState(false);
   return (
     <View style={{ marginBottom: 14 }}>
       <Text style={styles.label}>
         {label}
         {required ? ' *' : ''}
       </Text>
-      <TextInput
-        placeholderTextColor="#9CA3AF"
-        {...input}
-        style={[styles.input, error ? { borderColor: colors.danger } : null, input.multiline && { minHeight: 90, textAlignVertical: 'top' }]}
-      />
+      <View>
+        <TextInput
+          placeholderTextColor="#9CA3AF"
+          autoCapitalize={secret ? 'none' : undefined}
+          autoCorrect={secret ? false : undefined}
+          {...input}
+          secureTextEntry={secret && !shown}
+          style={[
+            styles.input,
+            error ? { borderColor: colors.danger } : null,
+            input.multiline && { minHeight: 90, textAlignVertical: 'top' },
+            secret && { paddingRight: 64 },
+          ]}
+        />
+        {secret ? (
+          <Pressable
+            testID={input.testID ? `${input.testID}-toggle` : undefined}
+            accessibilityRole="button"
+            accessibilityLabel={shown ? 'Hide password' : 'Show password'}
+            onPress={() => setShown((v) => !v)}
+            hitSlop={8}
+            style={styles.reveal}
+          >
+            <Text style={{ color: colors.primary, fontWeight: '600' }}>{shown ? 'Hide' : 'Show'}</Text>
+          </Pressable>
+        ) : null}
+      </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </View>
   );
@@ -217,6 +242,7 @@ export function ProgressBar({ value }: { value: number }) {
 }
 
 const styles = StyleSheet.create({
+  reveal: { position: 'absolute', right: 0, top: 0, bottom: 0, justifyContent: 'center', paddingHorizontal: 14 },
   safe: { flex: 1, backgroundColor: colors.bg },
   content: { padding: 16, paddingBottom: 32 },
   card: {
