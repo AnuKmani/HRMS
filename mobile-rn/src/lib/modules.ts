@@ -10,6 +10,7 @@ export type ModuleTile = {
 
 export const MODULES: ModuleTile[] = [
   { label: 'Attendance', hint: 'Check in and out', path: '/attendance', icon: '⏱', section: 'My day', visible: (_, e) => e },
+  { label: 'Attendance history', hint: 'Past days, photos, earnings', path: '/attendance-records', icon: '📅', section: 'My day', visible: (c, e) => e || c('attendance.manage') },
   { label: 'Site visits', hint: 'Start / site out', path: '/site-visits', icon: '📍', section: 'My day', visible: (c, e) => e && c('site_visits.create') },
   { label: 'Leave', hint: 'Apply, approve, track', path: '/leave', icon: '🏖', section: 'My day', visible: (c) => c('leave.view') },
   { label: 'Leave balances', hint: 'What is left this year', path: '/leave-balances', icon: '📊', section: 'My day', visible: (c) => c('leave.balance.view') },
@@ -25,6 +26,7 @@ export const MODULES: ModuleTile[] = [
   { label: 'Sites', hint: 'Locations and check-in radius', path: '/sites', icon: '📌', section: 'Projects & sites', visible: (c) => c('sites.view') },
   { label: 'Site assignments', hint: 'Who works where', path: '/site-assignments', icon: '🧭', section: 'Projects & sites', visible: (c) => c('assignments.view') },
   { label: 'Daily site reports', hint: 'One per site per day', path: '/site-reports', icon: '📝', section: 'Projects & sites', visible: (c) => c('daily_site_reports.view') },
+  { label: 'Site activity reports', hint: 'What you did at a site, with photos', path: '/site-activity', icon: '🦺', section: 'Projects & sites', visible: (c) => c('site_activity_reports.view') },
 
   { label: 'Employees', hint: 'Everyone in the directory', path: '/employees', icon: '👥', section: 'People', visible: (c) => c('employees.view') },
   { label: 'Leave overview', hint: "Everyone's leave left", path: '/leave-overview', icon: '🗂', section: 'People', visible: (c) => c('leave.balance.manage') },

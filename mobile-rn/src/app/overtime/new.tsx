@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 
 import { DateField } from '../../components/DateField';
@@ -8,8 +8,11 @@ import { api, ApiError } from '../../lib/api';
 import { ymd } from '../../lib/format';
 import { projectOptions, siteOptions } from '../../lib/people';
 
+type Draft = { overtime_date: string; requested_minutes: number; project_id: number | null; site_id: number | null; reason: string | null };
+
 export default function NewOvertime() {
   const router = useRouter();
+  const { id: editId } = useLocalSearchParams<{ id?: string }>();
   const [date, setDate] = useState(ymd(new Date()));
   const [hours, setHours] = useState('');
   const [minutes, setMinutes] = useState('');
@@ -23,7 +26,17 @@ export default function NewOvertime() {
 
   useEffect(() => {
     Promise.all([projectOptions().catch(() => []), siteOptions().catch(() => [])]).then(([projects, sites]) => setOpts({ projects, sites }));
-  }, []);
+    if (editId) {
+      api.get<Draft>(`/overtime/${editId}`).then((o) => {
+        setDate(o.overtime_date);
+        setHours(String(Math.floor(o.requested_minutes / 60)));
+        setMinutes(String(o.requested_minutes % 60));
+        setProjectId(o.project_id);
+        setSiteId(o.site_id);
+        setReason(o.reason ?? '');
+      }, (e) => setError((e as ApiError).message));
+    }
+  }, [editId]);
 
   async function save(submit: boolean) {
     setBusy(submit ? 'submit' : 'draft');
@@ -31,9 +44,11 @@ export default function NewOvertime() {
     setErrors({});
     try {
       const total = (Number(hours) || 0) * 60 + (Number(minutes) || 0);
-      const o = await api.post<{ id: number }>('/overtime', { overtime_date: date, requested_minutes: total, project_id: projectId, site_id: siteId, reason });
+      const payload = { overtime_date: date, requested_minutes: total, project_id: projectId, site_id: siteId, reason };
+      const o = editId ? await api.put<{ id: number }>(`/overtime/${editId}`, payload) : await api.post<{ id: number }>('/overtime', payload);
       if (submit) await api.post(`/overtime/${o.id}/submit`);
-      router.replace(`/overtime/${o.id}`);
+      if (editId) router.back();
+      else router.replace(`/overtime/${o.id}`);
     } catch (e) {
       const err = e as ApiError;
       setError(err.message);
@@ -45,6 +60,7 @@ export default function NewOvertime() {
 
   return (
     <Screen>
+      {editId ? <Stack.Screen options={{ title: 'Edit overtime' }} /> : null}
       {error ? <Banner message={error} /> : null}
       <DateField label="Date worked" required value={date} onChange={setDate} />
       <Field label="Extra hours" value={hours} onChangeText={setHours} keyboardType="number-pad" error={errors.requested_minutes} />

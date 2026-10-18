@@ -158,6 +158,7 @@ export default function LeaveDetailScreen() {
         </Card>
       ) : null}
 
+      {mine && leave.status === 'draft' ? <Button label="Edit draft" kind="outline" onPress={() => router.push(`/leave/new?id=${leave.id}`)} /> : null}
       {mine && leave.status === 'draft' ? (
         <Button testID="submit-leave" label="Send for approval" onPress={() => act('submit', {}, 'Sent for approval.')} busy={busy === 'submit'} />
       ) : null}

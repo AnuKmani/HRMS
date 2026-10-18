@@ -46,6 +46,7 @@ function Gate() {
       <Stack.Screen name="login" options={{ headerShown: false }} />
       <Stack.Screen name="change-password" options={{ title: 'Set your password', headerBackVisible: false }} />
       <Stack.Screen name="attendance" options={{ title: 'Attendance' }} />
+      <Stack.Screen name="attendance-records" options={{ title: 'Attendance history' }} />
       <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
       <Stack.Screen name="leave/index" options={{ title: 'Leave' }} />
       <Stack.Screen name="leave/new" options={{ title: 'Apply for leave' }} />
@@ -61,6 +62,11 @@ function Gate() {
       <Stack.Screen name="site-reports/index" options={{ title: 'Daily site reports' }} />
       <Stack.Screen name="site-reports/form" options={{ title: 'Daily report' }} />
       <Stack.Screen name="site-reports/[id]" options={{ title: 'Daily report' }} />
+      <Stack.Screen name="account" options={{ title: 'My account' }} />
+      <Stack.Screen name="training-compliance" options={{ title: 'Training compliance' }} />
+      <Stack.Screen name="site-activity/index" options={{ title: 'Site activity reports' }} />
+      <Stack.Screen name="site-activity/form" options={{ title: 'Activity report' }} />
+      <Stack.Screen name="site-activity/[id]" options={{ title: 'Activity report' }} />
       <Stack.Screen name="site-visits" options={{ title: 'Site visits' }} />
       <Stack.Screen name="visit-plans" options={{ title: 'Planned site visits' }} />
       <Stack.Screen name="employees/index" options={{ title: 'Employees' }} />

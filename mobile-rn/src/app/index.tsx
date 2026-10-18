@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Card, Chip, colors } from '../components/ui';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { timeOf } from '../lib/format';
+import { money, timeOf } from '../lib/format';
 import { myBalances, type LeaveBalance } from '../lib/leave';
 import { MODULES, SECTION_ORDER } from '../lib/modules';
 
@@ -16,6 +16,12 @@ type Today = {
   attendance: { check_in_at?: string | null; check_out_at?: string | null } | null;
   site: { name: string } | null;
 };
+type Summary = {
+  blocks: {
+    leave?: { pending: number; approved_upcoming: number };
+    payroll?: { period: string; net_salary: number; currency: string; status: string };
+  };
+};
 
 
 export default function HomeScreen() {
@@ -24,6 +30,7 @@ export default function HomeScreen() {
   const [today, setToday] = useState<Today | null>(null);
   const [balances, setBalances] = useState<LeaveBalance[]>([]);
   const [unread, setUnread] = useState(0);
+  const [summary, setSummary] = useState<Summary['blocks']>({});
   const [refreshing, setRefreshing] = useState(false);
 
   const employeeId = user?.employee?.id;
@@ -32,6 +39,9 @@ export default function HomeScreen() {
     const jobs: Promise<unknown>[] = [
       api.get<{ unread: number }>('/notifications/unread-count').then((d) => setUnread(d.unread)).catch(() => {}),
     ];
+    if (can('dashboard.view')) {
+      jobs.push(api.get<Summary>('/dashboards/employee').then((d) => setSummary(d.blocks ?? {})).catch(() => setSummary({})));
+    }
     if (employeeId) {
       jobs.push(api.get<Today>('/attendance/today').then(setToday).catch(() => setToday(null)));
       if (can('leave.balance.view')) {
@@ -77,6 +87,9 @@ export default function HomeScreen() {
                 </View>
               ) : null}
             </Pressable>
+            <Pressable testID="open-account" onPress={() => router.push('/account')} style={{ marginLeft: 12 }}>
+              <Text style={{ fontSize: 22 }}>👤</Text>
+            </Pressable>
             <Pressable testID="sign-out" onPress={logout} style={{ marginLeft: 12 }}>
               <Text style={{ color: '#fff', fontWeight: '600' }}>Sign out</Text>
             </Pressable>
@@ -121,6 +134,25 @@ export default function HomeScreen() {
                   </Text>
                 </View>
               ))}
+            </Card>
+          ) : null}
+
+          {summary.leave || summary.payroll ? (
+            <Card>
+              {summary.leave ? (
+                <Pressable onPress={() => router.push('/leave')} style={styles.balanceRow}>
+                  <Text style={{ flex: 1, color: colors.text }}>My leave requests</Text>
+                  <Text style={{ fontWeight: '700', color: colors.text }}>
+                    {summary.leave.pending} waiting · {summary.leave.approved_upcoming} coming up
+                  </Text>
+                </Pressable>
+              ) : null}
+              {summary.payroll ? (
+                <Pressable onPress={() => router.push('/salary-slips')} style={styles.balanceRow}>
+                  <Text style={{ flex: 1, color: colors.text }}>Latest pay · {summary.payroll.period}</Text>
+                  <Text style={{ fontWeight: '700', color: colors.text }}>{money(summary.payroll.net_salary, summary.payroll.currency)}</Text>
+                </Pressable>
+              ) : null}
             </Card>
           ) : null}
 

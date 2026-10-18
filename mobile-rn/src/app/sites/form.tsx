@@ -2,7 +2,7 @@ import * as Location from 'expo-location';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 
-import { PickerField, type Option } from '../../components/kit';
+import { PickerField, confirm, type Option } from '../../components/kit';
 import { Banner, Button, Field, Loading, Muted, Screen } from '../../components/ui';
 import { api, ApiError } from '../../lib/api';
 import { employeeOptions, projectOptions } from '../../lib/people';
@@ -91,6 +91,22 @@ export default function SiteForm() {
       <Screen.Spacer />
       <PickerField label="Status" value={f.status} options={[{ value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' }]} onChange={pick('status')} />
       <Button label={editing ? 'Save changes' : 'Create site'} onPress={save} busy={busy} />
+      {editing ? (
+        <Button
+          label="Remove site"
+          kind="danger"
+          onPress={async () => {
+            if (!(await confirm('Remove this site?', 'Only a site nobody was ever posted to can be removed. Otherwise set it to Inactive.', 'Remove'))) return;
+            setError(null);
+            try {
+              await api.del(`/sites/${id}`);
+              router.back();
+            } catch (e) {
+              setError((e as ApiError).message);
+            }
+          }}
+        />
+      ) : null}
     </Screen>
   );
 }

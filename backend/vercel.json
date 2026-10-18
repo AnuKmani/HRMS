@@ -29,6 +29,7 @@
     "LOG_CHANNEL": "stderr",
     "SESSION_DRIVER": "array",
     "CACHE_STORE": "database",
-    "QUEUE_CONNECTION": "sync"
+    "QUEUE_CONNECTION": "sync",
+    "PRIVATE_FILES_DRIVER": "database"
   }
 }

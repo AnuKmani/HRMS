@@ -75,6 +75,9 @@ export default function TrainingScreen() {
         />
       ) : null}
       <Tabs value={tab} onChange={setTab} options={tabs} />
+      {can('training.expiry.view') || can('training.assign') ? (
+        <Button label="Training compliance" kind="outline" onPress={() => router.push('/training-compliance')} />
+      ) : null}
       {loadError ? <Banner message={loadError} /> : null}
       {notice ? <Banner message={notice} tone="success" /> : null}
       {loading ? (

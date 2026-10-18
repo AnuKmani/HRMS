@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
@@ -10,6 +10,7 @@ import { leaveTypes, type LeaveRequest, type LeaveType } from '../../lib/leave';
 /** Choose the type and dates, then send it to your approvers. */
 export default function NewLeaveScreen() {
   const router = useRouter();
+  const { id: editId } = useLocalSearchParams<{ id?: string }>();
   const [types, setTypes] = useState<LeaveType[] | null>(null);
   const [typeId, setTypeId] = useState<number | null>(null);
   const [start, setStart] = useState('');
@@ -26,7 +27,15 @@ export default function NewLeaveScreen() {
         setTypes([]);
         setError((e as ApiError).message);
       });
-  }, []);
+    if (editId) {
+      api.get<LeaveRequest>(`/leave/${editId}`).then((l) => {
+        setTypeId(l.leave_type_id);
+        setStart(l.start_date);
+        setEnd(l.end_date);
+        setReason(l.reason ?? '');
+      }, (e) => setError((e as ApiError).message));
+    }
+  }, [editId]);
 
   const chosen = types?.find((t) => t.id === typeId);
 
@@ -42,19 +51,17 @@ export default function NewLeaveScreen() {
     setBusy(true);
     let created: LeaveRequest | null = null;
     try {
-      created = await api.post<LeaveRequest>('/leave', {
-        leave_type_id: typeId,
-        start_date: start,
-        end_date: end,
-        reason: reason.trim() || null,
-      });
+      const payload = { leave_type_id: typeId, start_date: start, end_date: end, reason: reason.trim() || null };
+      created = editId ? await api.put<LeaveRequest>(`/leave/${editId}`, payload) : await api.post<LeaveRequest>('/leave', payload);
       await api.post(`/leave/${created.id}/submit`);
-      router.replace(`/leave/${created.id}`);
+      if (editId) router.back();
+      else router.replace(`/leave/${created.id}`);
     } catch (e) {
       const err = e as ApiError;
       if (created) {
         // Saved as a draft; the detail page shows why it was not sent.
-        router.replace(`/leave/${created.id}`);
+        if (editId) router.back();
+      else router.replace(`/leave/${created.id}`);
         return;
       }
       setError(err.message);
@@ -68,6 +75,7 @@ export default function NewLeaveScreen() {
 
   return (
     <Screen>
+      {editId ? <Stack.Screen options={{ title: 'Edit leave request' }} /> : null}
       {error ? <Banner message={error} /> : null}
       <Text style={{ fontWeight: '600', marginBottom: 8, fontSize: 15, color: colors.text }}>Leave type *</Text>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 6 }}>

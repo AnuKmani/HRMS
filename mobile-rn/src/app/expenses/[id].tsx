@@ -1,5 +1,5 @@
 import * as DocumentPicker from 'expo-document-picker';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
 
 import { ChainCard, DecisionCard, STATUS_LABEL, statusTone, useIsApprover } from '../../components/Approvals';
@@ -15,6 +15,7 @@ import { amount, type Expense } from './index';
 export default function ExpenseDetail() {
   const { id, problem } = useLocalSearchParams<{ id: string; problem?: string }>();
   const { user } = useAuth();
+  const router = useRouter();
   const { data: e, error: loadError, loading, reload } = useLoad(() => api.get<Expense>(`/expenses/${id}`), [id]);
   const { busy, error, notice, run } = useAction();
   const approver = useIsApprover(e?.approval_chain, e?.employee_id ?? 0, e?.status ?? '', 'expenses.approve');
@@ -75,6 +76,7 @@ export default function ExpenseDetail() {
         ))}
       </Card>
 
+      {mine && e.is_draft ? <Button label="Edit draft" kind="outline" onPress={() => router.push(`/expenses/new?id=${e.id}`)} /> : null}
       {mine && e.is_draft ? <Button label="Submit for approval" onPress={() => act('submit', () => api.post(`/expenses/${e.id}/submit`), 'Submitted.')} busy={busy === 'submit'} /> : null}
       {mine && e.is_open ? (
         <Button

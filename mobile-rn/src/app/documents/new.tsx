@@ -1,4 +1,5 @@
 import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 
@@ -37,6 +38,13 @@ export default function NewDocument() {
     if (!r.canceled) setFile({ uri: r.assets[0].uri, name: r.assets[0].name, type: r.assets[0].mimeType ?? 'application/octet-stream' });
   }
 
+  async function snap() {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) return;
+    const r = await ImagePicker.launchCameraAsync({ quality: 0.7 });
+    if (!r.canceled && r.assets?.length) setFile({ uri: r.assets[0].uri, name: 'document-photo.jpg', type: 'image/jpeg' });
+  }
+
   async function save() {
     setBusy(true);
     setError(null);
@@ -69,6 +77,7 @@ export default function NewDocument() {
       <DateField label="Expiry date" required={t?.requires_expiry_date} value={f.expiry_date} onChange={(v) => setF({ ...f, expiry_date: v })} />
       {errors.expiry_date ? <Muted>{errors.expiry_date}</Muted> : null}
       <Field label="Notes" value={f.notes} onChangeText={(v) => setF({ ...f, notes: v })} multiline />
+      <Button label="Take a photo of it" kind="outline" onPress={snap} />
       <Button label={file ? `File: ${file.name}` : 'Choose file (photo or PDF)'} kind="outline" onPress={pick} />
       {errors.file ? <Banner message={errors.file} /> : null}
       <Screen.Spacer />

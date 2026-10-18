@@ -1,4 +1,4 @@
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Text, View } from 'react-native';
 
@@ -14,6 +14,7 @@ import { hm, type Overtime } from './index';
 export default function OvertimeDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
+  const router = useRouter();
   const { data: o, error: loadError, loading, reload } = useLoad(() => api.get<Overtime>(`/overtime/${id}`), [id]);
   const { busy, error, notice, run } = useAction();
   const [grant, setGrant] = useState('');
@@ -48,6 +49,7 @@ export default function OvertimeDetail() {
           ]}
         />
       </Card>
+      {mine && o.status === 'draft' ? <Button label="Edit draft" kind="outline" onPress={() => router.push(`/overtime/new?id=${o.id}`)} /> : null}
       {mine && o.status === 'draft' ? <Button label="Submit for approval" onPress={() => act('submit', () => api.post(`/overtime/${o.id}/submit`), 'Submitted.')} busy={busy === 'submit'} /> : null}
       {mine && (o.status === 'draft' || o.status === 'pending') ? (
         <Button

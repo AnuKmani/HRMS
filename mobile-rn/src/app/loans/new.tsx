@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 
 import { DateField } from '../../components/DateField';
@@ -9,8 +9,11 @@ import { useAuth } from '../../lib/auth';
 import { money, ymd } from '../../lib/format';
 import { employeeOptions } from '../../lib/people';
 
+type Draft = { employee_id: number; loan_type: string; principal_amount: string | number; number_of_installments: number; start_date: string; remarks: string | null };
+
 export default function NewLoan() {
   const router = useRouter();
+  const { id: editId } = useLocalSearchParams<{ id?: string }>();
   const { can, user } = useAuth();
   const forOthers = can('loans.approve') || can('loans.manage');
   const next = new Date();
@@ -30,6 +33,18 @@ export default function NewLoan() {
     if (forOthers) employeeOptions().then(setPeople, () => {});
   }, [forOthers]);
 
+  useEffect(() => {
+    if (!editId) return;
+    api.get<Draft>(`/loans/${editId}`).then((l) => {
+      setEmployeeId(l.employee_id);
+      setType(l.loan_type);
+      setPrincipal(String(Number(l.principal_amount)));
+      setCount(String(l.number_of_installments));
+      setStart(l.start_date);
+      setRemarks(l.remarks ?? '');
+    }, (e) => setError((e as ApiError).message));
+  }, [editId]);
+
   const each = Number(principal) && Number(count) ? Number(principal) / Number(count) : null;
 
   async function save(submit: boolean) {
@@ -37,16 +52,18 @@ export default function NewLoan() {
     setError(null);
     setErrors({});
     try {
-      const l = await api.post<{ id: number }>('/loans', {
+      const payload = {
         employee_id: employeeId,
         loan_type: type,
         principal_amount: Number(principal),
         number_of_installments: Number(count),
         start_date: start,
         remarks: remarks || null,
-      });
+      };
+      const l = editId ? await api.put<{ id: number }>(`/loans/${editId}`, payload) : await api.post<{ id: number }>('/loans', payload);
       if (submit) await api.post(`/loans/${l.id}/submit`);
-      router.replace(`/loans/${l.id}`);
+      if (editId) router.back();
+      else router.replace(`/loans/${l.id}`);
     } catch (e) {
       const err = e as ApiError;
       setError(err.message);
@@ -58,6 +75,7 @@ export default function NewLoan() {
 
   return (
     <Screen>
+      {editId ? <Stack.Screen options={{ title: 'Edit loan request' }} /> : null}
       {error ? <Banner message={error} /> : null}
       {forOthers ? <PickerField label="Employee" required value={employeeId} options={people} onChange={(v) => setEmployeeId(v as number)} error={errors.employee_id} /> : null}
       <PickerField

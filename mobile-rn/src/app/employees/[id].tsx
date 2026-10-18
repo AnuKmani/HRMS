@@ -112,6 +112,17 @@ export default function EmployeeProfile() {
               <Text style={{ color: colors.primary, fontWeight: '700' }}>Reinstate</Text>
             </Pressable>
           ) : null}
+          {can('employees.delete') ? (
+            <Pressable
+              onPress={async () => {
+                if (await confirm('Delete this employee?', 'Only for a record added by mistake. Someone with any history cannot be deleted — use "Mark as left" instead.', 'Delete')) {
+                  if (await run('delete', () => api.del(`/employees/${e.id}`))) router.back();
+                }
+              }}
+            >
+              <Text style={{ color: colors.danger, fontWeight: '700' }}>Delete (added by mistake)</Text>
+            </Pressable>
+          ) : null}
         </View>
       </Card>
 

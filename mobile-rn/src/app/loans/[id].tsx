@@ -1,4 +1,4 @@
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Text, View } from 'react-native';
 
 import { ChainCard, DecisionCard, useIsApprover } from '../../components/Approvals';
@@ -13,6 +13,7 @@ import { LOAN_STATUS, loanTone, type Loan } from '../../lib/loans';
 export default function LoanDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { can, user } = useAuth();
+  const router = useRouter();
   const { data: l, error: loadError, loading, reload } = useLoad(() => api.get<Loan>(`/loans/${id}`), [id]);
   const { busy, error, notice, run } = useAction();
   const chainApprover = useIsApprover(l?.approval_chain, l?.employee_id ?? 0, l?.status ?? '', 'loans.approve');
@@ -56,6 +57,7 @@ export default function LoanDetail() {
           </View>
         ) : null}
       </Card>
+      {mine && l.status === 'draft' ? <Button label="Edit draft" kind="outline" onPress={() => router.push(`/loans/new?id=${l.id}`)} /> : null}
       {mine && l.status === 'draft' ? <Button label="Submit for approval" busy={busy === 'submit'} onPress={() => act('submit', () => api.post(`/loans/${l.id}/submit`), 'Submitted.')} /> : null}
       {mine && (l.status === 'draft' || l.status === 'pending') ? (
         <Button

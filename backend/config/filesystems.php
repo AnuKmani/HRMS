@@ -35,7 +35,13 @@ return [
         // host whose disk is wiped on each deploy (Laravel Cloud, Vercel,
         // containers) set PRIVATE_FILES_DRIVER=s3 and the AWS_* values of an
         // S3-compatible bucket, and the same code keeps them there instead.
-        'local' => env('PRIVATE_FILES_DRIVER', 'local') === 's3' ? [
+        // `database` keeps files in the stored_files table, for hosts with
+        // no lasting disk (Vercel). `s3` for a bucket. Otherwise local disk.
+        'local' => env('PRIVATE_FILES_DRIVER', 'local') === 'database' ? [
+            'driver' => 'database',
+            'throw' => false,
+            'report' => false,
+        ] : (env('PRIVATE_FILES_DRIVER', 'local') === 's3' ? [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),
             'secret' => env('AWS_SECRET_ACCESS_KEY'),
@@ -54,7 +60,7 @@ return [
             'serve' => true,
             'throw' => false,
             'report' => false,
-        ],
+        ]),
 
         'public' => [
             'driver' => 'local',

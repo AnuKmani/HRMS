@@ -5,13 +5,17 @@ namespace App\Providers;
 use App\Models\Setting;
 use App\Services\Audit\AuditLogger;
 use App\Services\SettingsService;
+use App\Support\Storage\DatabaseFilesystemAdapter;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\Request;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\ServiceProvider;
+use League\Flysystem\Filesystem;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -29,6 +33,13 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Private files kept in the database, for hosts with no lasting disk.
+        Storage::extend('database', function ($app, array $config) {
+            $adapter = new DatabaseFilesystemAdapter;
+
+            return new FilesystemAdapter(new Filesystem($adapter, $config), $adapter, $config);
+        });
+
         // Any settings write invalidates the cached snapshot so the next read
         // sees the new value (including across queue workers / other tabs).
         Setting::saved(fn () => $this->app->make(SettingsService::class)->refresh());
