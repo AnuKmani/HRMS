@@ -111,14 +111,31 @@ final class SelfieSanitizer
      */
     public function sanitize(UploadedFile $file): string
     {
-        // Fail closed, loudly. If the decoder is unavailable the one thing
-        // that must not happen is falling back to what the client sent —
-        // that would turn a missing extension into a metadata bypass.
-        if (! function_exists('imagecreatefromstring') || ! function_exists('imagejpeg')) {
-            abort(500, 'Image sanitisation is unavailable on this server.');
-        }
-
         $size = $this->probe($file);
+
+        // Without GD (some serverless PHP builds ship without it) a JPEG is
+        // still cleaned, by rebuilding it from its image segments alone —
+        // see stripJpeg(). Anything else is refused: never fall back to what
+        // the client sent, which would turn a missing extension into a
+        // metadata bypass.
+        if (! function_exists('imagecreatefromstring') || ! function_exists('imagejpeg')) {
+            if ($size === null || $size['type'] !== IMAGETYPE_JPEG) {
+                abort(422, 'Please send the photo as a JPEG (take it with the camera).');
+            }
+
+            if (! $this->fitsBudget($size)) {
+                abort(422, 'That image is too large to process. Take a smaller one.');
+            }
+
+            $raw = @file_get_contents($file->getRealPath());
+            $clean = $raw === false ? null : $this->stripJpeg($raw);
+
+            if ($clean === null) {
+                abort(422, 'That selfie is not a readable image. Please take a new one.');
+            }
+
+            return $clean;
+        }
 
         if ($size === null) {
             abort(422, 'That selfie is not a readable image. Please take a new one.');
@@ -151,6 +168,115 @@ final class SelfieSanitizer
         }
 
         return $this->encode($image);
+    }
+
+    /**
+     * A JPEG rebuilt from the segments a decoder needs, and nothing else.
+     *
+     * Walks the marker structure and keeps only what describes the pixels —
+     * quantisation and Huffman tables, the frame header, restart interval,
+     * JFIF (APP0) and the Adobe colour-transform marker (APP14) — then the
+     * entropy-coded scan data up to the end-of-image marker. Every other
+     * APP segment (EXIF with its GPS fix, XMP, ICC, maker notes, embedded
+     * thumbnails) and every comment is dropped, and so is anything appended
+     * after the image ends. Returns null for anything that is not a
+     * well-formed baseline/progressive JPEG.
+     */
+    private function stripJpeg(string $raw): ?string
+    {
+        $length = strlen($raw);
+
+        if ($length < 4 || substr($raw, 0, 2) !== "\xFF\xD8") {
+            return null;
+        }
+
+        $keep = [0xDB, 0xC4, 0xDD, 0xCC, 0xE0, 0xEE];
+        $out = "\xFF\xD8";
+        $i = 2;
+        $sawFrame = false;
+
+        while ($i < $length) {
+            if ($raw[$i] !== "\xFF") {
+                return null;
+            }
+
+            // Fill bytes before a marker are allowed.
+            while ($i < $length && $raw[$i] === "\xFF") {
+                $i++;
+            }
+
+            if ($i >= $length) {
+                return null;
+            }
+
+            $marker = ord($raw[$i]);
+            $i++;
+
+            if ($marker === 0xD9) {
+                return $sawFrame ? $out."\xFF\xD9" : null;
+            }
+
+            // Standalone markers carry no length.
+            if ($marker === 0x01 || ($marker >= 0xD0 && $marker <= 0xD7)) {
+                continue;
+            }
+
+            if ($i + 2 > $length) {
+                return null;
+            }
+
+            $segmentLength = (ord($raw[$i]) << 8) | ord($raw[$i + 1]);
+
+            if ($segmentLength < 2 || $i + $segmentLength > $length) {
+                return null;
+            }
+
+            $segment = substr($raw, $i, $segmentLength);
+            $i += $segmentLength;
+
+            $isFrame = $marker >= 0xC0 && $marker <= 0xCF && ! in_array($marker, [0xC4, 0xC8, 0xCC], true);
+
+            if ($isFrame) {
+                $sawFrame = true;
+                $out .= "\xFF".chr($marker).$segment;
+
+                continue;
+            }
+
+            if ($marker === 0xDA) {
+                if (! $sawFrame) {
+                    return null;
+                }
+
+                // Start of scan: copy the header, then the entropy-coded data
+                // up to the next marker that is not a stuffed 0x00 or a
+                // restart (RSTn) — progressive JPEGs carry several scans.
+                $out .= "\xFF\xDA".$segment;
+                $start = $i;
+
+                while ($i + 1 < $length) {
+                    if ($raw[$i] === "\xFF") {
+                        $next = ord($raw[$i + 1]);
+
+                        if ($next !== 0x00 && ! ($next >= 0xD0 && $next <= 0xD7) && $next !== 0xFF) {
+                            break;
+                        }
+                    }
+                    $i++;
+                }
+
+                $out .= substr($raw, $start, $i - $start);
+
+                continue;
+            }
+
+            if (in_array($marker, $keep, true)) {
+                $out .= "\xFF".chr($marker).$segment;
+            }
+            // Everything else — APP1..APP13, APP15, COM, unknown — is dropped.
+        }
+
+        return null;
     }
 
     /**
