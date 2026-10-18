@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\DecodeJsonUploads;
 use App\Http\Middleware\EnsurePasswordChanged;
 use App\Http\Responses\ApiResponse;
 use Illuminate\Auth\AuthenticationException;
@@ -33,6 +34,10 @@ return Application::configure(basePath: dirname(__DIR__))
         // Hosted behind a load balancer (Laravel Cloud, Vercel, Nginx): trust
         // its forwarded headers so URLs and HTTPS are seen correctly.
         $middleware->trustProxies(at: env('TRUSTED_PROXIES', '*'));
+
+        // The mobile app sends photos inside JSON (multipart uploads do not
+        // get through the hosted front door); turn them back into uploads.
+        $middleware->api(prepend: [DecodeJsonUploads::class]);
 
         // Force JSON responses for every /api/* route regardless of the
         // Accept header, so clients always get {success, message, errors}

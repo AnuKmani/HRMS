@@ -93,6 +93,33 @@ class AttendanceAnywhereTest extends TestCase
         $this->assertSame(24.4539, (float) $row->fresh()->check_out_latitude);
     }
 
+    public function test_the_app_can_send_the_selfie_inside_json(): void
+    {
+        // The hosted server does not let multipart uploads through, so the
+        // app sends photos base64-encoded in a JSON body instead.
+        Sanctum::actingAs($this->officeEmployee());
+        $photo = UploadedFile::fake()->image('me.jpg', 600, 600);
+
+        $this->postJson('/api/v1/attendance/check-in', $this->point([
+            '_files' => ['selfie' => ['name' => 'selfie.jpg', 'type' => 'image/jpeg', 'data' => base64_encode(file_get_contents($photo->getPathname()))]],
+        ]))->assertCreated();
+
+        $row = Attendance::query()->sole();
+        $this->assertNotNull($row->check_in_selfie_path);
+        Storage::disk(config('hrms.storage.private_disk', 'local'))->assertExists($row->check_in_selfie_path);
+    }
+
+    public function test_a_json_selfie_that_is_not_an_image_is_still_refused(): void
+    {
+        Sanctum::actingAs($this->officeEmployee());
+
+        $this->postJson('/api/v1/attendance/check-in', $this->point([
+            '_files' => ['selfie' => ['name' => 'selfie.jpg', 'type' => 'image/jpeg', 'data' => base64_encode('<?php echo "hi";')]],
+        ]))->assertStatus(422)->assertJsonValidationErrors('selfie');
+
+        $this->assertSame(0, Attendance::query()->count());
+    }
+
     public function test_a_named_site_is_recorded_but_not_enforced(): void
     {
         $user = $this->officeEmployee();

@@ -1,3 +1,5 @@
+import { File } from 'expo-file-system';
+
 import { apiUrl } from './config';
 
 /**
@@ -56,21 +58,57 @@ function flattenErrors(raw: unknown): Record<string, string> {
   return out;
 }
 
+type FilePart = { uri: string; name?: string; type?: string };
+const isFilePart = (v: unknown): v is FilePart => !!v && typeof v === 'object' && typeof (v as FilePart).uri === 'string';
+
+/**
+ * A multipart form, rewritten as JSON. Multipart uploads do not get through
+ * the hosted server's front door, so files travel base64-encoded under
+ * `_files` ("photos[]" becomes a list under "photos") and the server turns
+ * them back into ordinary uploads before its usual checks.
+ */
+async function formToJson(form: FormData): Promise<Record<string, unknown>> {
+  const parts: [string, unknown][] = (form as unknown as { _parts?: [string, unknown][] })._parts ?? [];
+  const out: Record<string, unknown> = {};
+  const files: Record<string, unknown> = {};
+  for (const [rawKey, value] of parts) {
+    const many = rawKey.endsWith('[]');
+    const key = many ? rawKey.slice(0, -2) : rawKey;
+    if (isFilePart(value)) {
+      const encoded = { name: value.name ?? 'upload', type: value.type ?? 'application/octet-stream', data: await new File(value.uri).base64() };
+      if (many) files[key] = [...((files[key] as unknown[]) ?? []), encoded];
+      else files[key] = encoded;
+    } else if (many) {
+      out[key] = [...((out[key] as unknown[]) ?? []), value];
+    } else {
+      out[key] = value;
+    }
+  }
+  if (Object.keys(files).length) out._files = files;
+  return out;
+}
+
 async function send<T>(method: string, path: string, body?: unknown, query?: Query): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
 
   let payload: BodyInit | undefined;
-  if (body instanceof FormData) {
-    payload = body;
-  } else if (body !== undefined) {
+  const upload = body instanceof FormData;
+  if (upload) {
+    try {
+      body = await formToJson(body as FormData);
+    } catch {
+      throw new ApiError('Could not read the file from the phone. Please take or choose it again.', 400);
+    }
+  }
+  if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
     payload = JSON.stringify(body);
   }
 
   const controller = new AbortController();
   // Photo uploads on a weak signal take longer than a plain request.
-  const timer = setTimeout(() => controller.abort(), body instanceof FormData ? 90000 : 30000);
+  const timer = setTimeout(() => controller.abort(), upload ? 90000 : 30000);
 
   let response: Response;
   try {
