@@ -54,6 +54,7 @@ use App\Http\Controllers\Api\V1\SiteVisitTaskController;
 use App\Http\Controllers\Api\V1\TimesheetController;
 use App\Http\Controllers\Api\V1\TrainingProgramController;
 use App\Http\Controllers\Api\V1\TrainingTypeController;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
@@ -109,6 +110,8 @@ Route::prefix('v1')->group(function () {
             'mbstring' => extension_loaded('mbstring'),
             'fileinfo' => extension_loaded('fileinfo'),
             'temp_writable' => is_writable(sys_get_temp_dir()),
+            'zip_for_excel' => class_exists(ZipArchive::class),
+            'pdf' => rescue(fn () => str_starts_with(Pdf::loadHTML('<p>ok</p>')->output(), '%PDF'), false, false),
             'database' => rescue(fn () => (bool) DB::select('select 1'), false, false),
             'file_storage' => rescue(function () {
                 $disk = Storage::disk(config('hrms.storage.private_disk', 'local'));
