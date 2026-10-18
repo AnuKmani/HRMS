@@ -74,28 +74,36 @@ class PasswordResetController extends Controller
      */
     public function forgotPassword(ForgotPasswordRequest $request): JsonResponse
     {
-        // Broker status is intentionally discarded: RESET_LINK_SENT and
-        // INVALID_USER produce byte-identical responses. The log below is
-        // where the difference is recorded, and a log line is read by
-        // operators rather than probed by scripts.
-        $status = Password::broker()->sendResetLink($request->safe()->only('email'));
-
-        Log::info('auth.password_reset_requested', [
-            // Only which *outcome* — never the address itself. An
-            // auth log that lists every address anybody has ever typed
-            // into a form is a mailing list, and a mailing list on disk
-            // is a target.
-            'found' => $status !== Password::INVALID_USER,
-            'throttled' => $status === Password::RESET_THROTTLED,
-            'ip' => $request->ip(),
-        ]);
-
-        // Telling HR is a courtesy: whatever goes wrong there (no roles
-        // seeded, a notification failing) must never break this answer.
+        // Telling HR comes first and does not depend on the email: HR
+        // resetting the password is the real recovery path, so a mail
+        // transport that is down or unconfigured must not stop it. Whatever
+        // goes wrong here (no roles seeded, a notification failing) must
+        // never break this answer.
         try {
             $this->askHrToHelp((string) $request->validated('email'));
         } catch (\Throwable $exception) {
             Log::warning('auth.password_help_failed', ['error' => $exception->getMessage()]);
+        }
+
+        // Broker status is intentionally discarded: RESET_LINK_SENT and
+        // INVALID_USER produce byte-identical responses. The log below is
+        // where the difference is recorded, and a log line is read by
+        // operators rather than probed by scripts. A mail failure is logged
+        // and answered the same way.
+        try {
+            $status = Password::broker()->sendResetLink($request->safe()->only('email'));
+
+            Log::info('auth.password_reset_requested', [
+                // Only which *outcome* — never the address itself. An
+                // auth log that lists every address anybody has ever typed
+                // into a form is a mailing list, and a mailing list on disk
+                // is a target.
+                'found' => $status !== Password::INVALID_USER,
+                'throttled' => $status === Password::RESET_THROTTLED,
+                'ip' => $request->ip(),
+            ]);
+        } catch (\Throwable $exception) {
+            Log::warning('auth.password_reset_mail_failed', ['error' => $exception->getMessage()]);
         }
 
         // Identical whether or not the address exists: the answer must not

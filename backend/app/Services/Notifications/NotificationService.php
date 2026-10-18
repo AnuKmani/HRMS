@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\SettingsService;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * The single write path for "the system told somebody something".
@@ -113,10 +114,21 @@ class NotificationService
 
             $written[] = $notification;
 
-            SendPushNotification::dispatch($notification->id);
+            // The inbox row above is the notification; push and email are
+            // best-effort extras. Where jobs run inline (no queue worker) a
+            // missing push or mail setup would throw here and stop the other
+            // recipients getting their row, so it is contained.
+            try {
+                SendPushNotification::dispatch($notification->id);
 
-            if ($this->settings->bool('notifications.email_enabled', false)) {
-                SendNotificationEmail::dispatch($notification->id);
+                if ($this->settings->bool('notifications.email_enabled', false)) {
+                    SendNotificationEmail::dispatch($notification->id);
+                }
+            } catch (\Throwable $exception) {
+                Log::warning('notifications.dispatch_failed', [
+                    'notification_id' => $notification->id,
+                    'error' => $exception->getMessage(),
+                ]);
             }
         }
 
