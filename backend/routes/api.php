@@ -54,7 +54,10 @@ use App\Http\Controllers\Api\V1\SiteVisitTaskController;
 use App\Http\Controllers\Api\V1\TimesheetController;
 use App\Http\Controllers\Api\V1\TrainingProgramController;
 use App\Http\Controllers\Api\V1\TrainingTypeController;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 /*
 |--------------------------------------------------------------------------
@@ -95,6 +98,29 @@ Route::prefix('v1')->group(function () {
 
     Route::post('auth/reset-password', [PasswordResetController::class, 'resetPassword'])
         ->middleware('throttle:password_reset');
+
+    // Which server features this host provides, as yes/no only — no data,
+    // versions or paths. Hosts differ (a serverless PHP build may lack an
+    // extension), and this is how to see that without shell access.
+    Route::get('health/capabilities', function () {
+        return response()->json(['success' => true, 'data' => [
+            'image_processing' => function_exists('imagecreatefromstring') && function_exists('imagejpeg'),
+            'pdf_dom' => extension_loaded('dom'),
+            'mbstring' => extension_loaded('mbstring'),
+            'fileinfo' => extension_loaded('fileinfo'),
+            'temp_writable' => is_writable(sys_get_temp_dir()),
+            'database' => rescue(fn () => (bool) DB::select('select 1'), false, false),
+            'file_storage' => rescue(function () {
+                $disk = Storage::disk(config('hrms.storage.private_disk', 'local'));
+                $path = 'health/'.Str::uuid().'.txt';
+                $disk->put($path, 'ok');
+                $ok = $disk->get($path) === 'ok';
+                $disk->delete($path);
+
+                return $ok;
+            }, false, false),
+        ]]);
+    })->middleware('throttle:10,1');
 
     /* ------------------------------------------- bearer-token only */
 
