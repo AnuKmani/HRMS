@@ -104,6 +104,19 @@ class EmployeeController extends Controller
         return ApiResponse::success('Employee retrieved.', new EmployeeDetailResource($employee));
     }
 
+    /**
+     * GET /employees/next-code — what the add form shows as "Employee code".
+     *
+     * A preview, not a reservation: if two people add someone at once, the
+     * one saved second gets the following number. Saving always decides.
+     */
+    public function nextCode(): JsonResponse
+    {
+        return ApiResponse::success('Next employee code.', [
+            'employee_code' => DB::transaction(fn () => $this->employees->nextEmployeeCode()),
+        ]);
+    }
+
     public function store(StoreEmployeeRequest $request): JsonResponse
     {
         $employee = $this->employees->create($request->validated());

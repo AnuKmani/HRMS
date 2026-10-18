@@ -197,6 +197,10 @@ Route::prefix('v1')->group(function () {
         // Employees — see the note above for why `show` has no middleware.
         Route::get('employees', [EmployeeController::class, 'index'])
             ->middleware('permission:employees.view');
+        // The code the next new employee will get, for the add form to show.
+        // A preview only: the code is fixed when the record is saved.
+        Route::get('employees/next-code', [EmployeeController::class, 'nextCode'])
+            ->middleware('permission:employees.create');
         Route::get('employees/{employee}', [EmployeeController::class, 'show']);
         Route::post('employees', [EmployeeController::class, 'store'])
             ->middleware('permission:employees.create')

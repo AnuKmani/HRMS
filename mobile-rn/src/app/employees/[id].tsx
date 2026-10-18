@@ -34,7 +34,7 @@ type Employee = {
 type Account = { user_id: number; email: string; status: string; roles: string[]; must_change_password: boolean; temporary_password?: string } | null;
 
 export default function EmployeeProfile() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, problem } = useLocalSearchParams<{ id: string; problem?: string }>();
   const router = useRouter();
   const { can } = useAuth();
   const { data, error: loadError, loading, reload } = useLoad(async () => {
@@ -73,6 +73,7 @@ export default function EmployeeProfile() {
     <Screen onRefresh={reload}>
       <Stack.Screen options={{ title: e.full_name }} />
       {error && !modal ? <Banner message={error} /> : null}
+      {problem && !notice ? <Banner message={problem} tone="warning" /> : null}
       {notice ? <Banner message={notice} tone="success" /> : null}
       <Card>
         <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>

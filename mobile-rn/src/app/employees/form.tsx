@@ -1,9 +1,10 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
+import { Switch, Text, View } from 'react-native';
 
 import { DateField } from '../../components/DateField';
 import { PickerField, type Option } from '../../components/kit';
-import { Banner, Button, Field, Loading, Muted, Screen } from '../../components/ui';
+import { Banner, Button, Card, Field, Loading, Muted, Screen, colors } from '../../components/ui';
 import { api, ApiError } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { ymd } from '../../lib/format';
@@ -25,6 +26,12 @@ export default function EmployeeForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [nextCode, setNextCode] = useState<string | null>(null);
+  // Optional: issue the app login in the same step (needs users.manage).
+  const canIssueLogin = !editing && can('users.manage');
+  const [withLogin, setWithLogin] = useState(canIssueLogin);
+  const [roles, setRoles] = useState<Option[]>([]);
+  const [login, setLogin] = useState({ role: 'Employee', password: '' });
 
   useEffect(() => {
     (async () => {
@@ -34,6 +41,12 @@ export default function EmployeeForm() {
         employeeOptions().catch(() => []),
       ]);
       setOpts({ departments, designations, people });
+      if (!editing) {
+        api.get<{ employee_code: string }>('/employees/next-code').then((r) => setNextCode(r.employee_code), () => {});
+        if (canIssueLogin) {
+          api.get<{ name: string }[]>('/roles').then((list) => setRoles(list.map((r) => ({ value: r.name, label: r.name }))), () => {});
+        }
+      }
       if (editing) {
         try {
           const e = await api.get<Employee>(`/employees/${id}`);
@@ -49,7 +62,7 @@ export default function EmployeeForm() {
       }
       setLoading(false);
     })();
-  }, [editing, id]);
+  }, [editing, id, canIssueLogin]);
 
   const set = (k: string) => (v: string) => setF((s) => ({ ...s, [k]: v }));
   const pick = (k: string) => (v: number | string | null) => setF((s) => ({ ...s, [k]: v === null ? '' : String(v) }));
@@ -64,7 +77,16 @@ export default function EmployeeForm() {
     if (f.salary) body.salary = Number(f.salary);
     try {
       const saved = editing ? await api.put<Employee>(`/employees/${id}`, body) : await api.post<Employee>('/employees', body);
-      router.replace(`/employees/${saved.id}`);
+      let problem = '';
+      if (!editing && withLogin) {
+        try {
+          await api.post(`/employees/${saved.id}/account`, { role: login.role, email: f.email || undefined, password: login.password || undefined });
+        } catch (e) {
+          // The employee is saved; say why the login was not, on their page.
+          problem = `?problem=${encodeURIComponent(`Employee saved, but the login was not created: ${(e as ApiError).firstMessage}`)}`;
+        }
+      }
+      router.replace(`/employees/${saved.id}${problem}`);
     } catch (e) {
       const err = e as ApiError;
       setError(err.message);
@@ -80,7 +102,12 @@ export default function EmployeeForm() {
     <Screen>
       <Stack.Screen options={{ title: editing ? 'Edit employee' : 'New employee' }} />
       {error ? <Banner message={error} /> : null}
-      {editing ? <Muted>Code: {f.employee_code}</Muted> : <Muted>The employee code is given automatically.</Muted>}
+      {editing ? (
+        <Muted>Employee code: {f.employee_code}</Muted>
+      ) : (
+        <Field label="Employee code" value={nextCode ?? 'Given automatically'} editable={false} />
+      )}
+      {!editing ? <Muted>Given automatically when you save.</Muted> : null}
       <Screen.Spacer />
       <Field label="First name" required value={f.first_name ?? ''} onChangeText={set('first_name')} error={errors.first_name} />
       <Field label="Middle name" value={f.middle_name ?? ''} onChangeText={set('middle_name')} />
@@ -100,7 +127,26 @@ export default function EmployeeForm() {
       <Field label="Emergency contact name" value={f.emergency_contact_name ?? ''} onChangeText={set('emergency_contact_name')} />
       <Field label="Emergency contact phone" value={f.emergency_contact_phone ?? ''} onChangeText={set('emergency_contact_phone')} keyboardType="phone-pad" />
       <Field label="Emergency contact relation" value={f.emergency_contact_relation ?? ''} onChangeText={set('emergency_contact_relation')} />
-      <Button testID="save-employee" label={editing ? 'Save changes' : 'Create employee'} onPress={save} busy={busy} />
+      {canIssueLogin ? (
+        <Card>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Text style={{ flex: 1, fontSize: 16, fontWeight: '700', color: colors.text }}>Create app login</Text>
+            <Switch testID="with-login" value={withLogin} onValueChange={setWithLogin} />
+          </View>
+          {withLogin ? (
+            <>
+              <Muted>Username: {f.email?.trim() || 'their email above'}</Muted>
+              <Screen.Spacer size={8} />
+              <PickerField label="Role" required value={login.role} options={roles} onChange={(v) => setLogin((l) => ({ ...l, role: String(v) }))} />
+              <Field label="First password" value={login.password} onChangeText={(v) => setLogin((l) => ({ ...l, password: v }))} placeholder="Leave blank for a generated one" autoCapitalize="none" />
+              <Muted>The first password is shown on their page after saving. They must choose their own when they first sign in.</Muted>
+            </>
+          ) : (
+            <Muted>You can create the login later from their page.</Muted>
+          )}
+        </Card>
+      ) : null}
+      <Button testID="save-employee" label={editing ? 'Save changes' : withLogin && canIssueLogin ? 'Create employee and login' : 'Create employee'} onPress={save} busy={busy} />
     </Screen>
   );
 }

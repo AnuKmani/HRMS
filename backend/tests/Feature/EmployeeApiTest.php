@@ -79,6 +79,25 @@ class EmployeeApiTest extends TestCase
 
     /* ------------------------------------------------------------ gates */
 
+    public function test_the_add_form_can_preview_the_next_employee_code(): void
+    {
+        $this->actingAsRole('HR Admin');
+        $this->plainEmployee(['employee_code' => 'EMP00007']);
+        $this->plainEmployee(['employee_code' => 'UAT-001']);
+
+        $this->getJson('/api/v1/employees/next-code')
+            ->assertOk()
+            ->assertJsonPath('data.employee_code', 'EMP00008');
+
+        // The preview is what saving without a code actually gives.
+        $this->postJson('/api/v1/employees', $this->validEmployee(['employee_code' => null]))
+            ->assertCreated()
+            ->assertJsonPath('data.employee_code', 'EMP00008');
+
+        $this->actingAsRole('Employee');
+        $this->getJson('/api/v1/employees/next-code')->assertForbidden();
+    }
+
     public function test_a_role_without_employees_view_cannot_list(): void
     {
         $this->actingAsRole('Employee');
